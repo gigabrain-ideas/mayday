@@ -1,0 +1,102 @@
+{{- if and (not .Values.database.url) (gt (int .Values.replicaCount) 1) }}
+{{- fail "The journal store supports one replica. Set database.url or replicaCount: 1." }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mayday.fullname" . }}
+  labels: {{- include "mayday.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    type: {{ if .Values.database.url }}RollingUpdate{{ else }}Recreate{{ end }}
+  selector:
+    matchLabels: {{- include "mayday.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "mayday.selector" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: mayday
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: MAYDAY_PUBLIC_URL, value: {{ .Values.publicUrl | quote }} }
+            - name: MAYDAY_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "mayday.secretName" . }}, key: secretKey } }
+            {{- if .Values.database.url }}
+            - { name: MAYDAY_DATABASE_URL, value: {{ .Values.database.url | quote }} }
+            - { name: MAYDAY_DATABASE_USER, value: {{ .Values.database.user | quote }} }
+            - { name: MAYDAY_DATABASE_POOL, value: {{ .Values.database.pool | quote }} }
+            - name: MAYDAY_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (include "mayday.secretName" .) .Values.database.existingSecret }}
+                  key: {{ if .Values.database.existingSecret }}password{{ else }}databasePassword{{ end }}
+            {{- else }}
+            - { name: MAYDAY_DATA_DIR, value: /data }
+            {{- end }}
+            {{- if .Values.oidc.issuer }}
+            - { name: MAYDAY_OIDC_ISSUER, value: {{ .Values.oidc.issuer | quote }} }
+            - { name: MAYDAY_OIDC_CLIENT_ID, value: {{ .Values.oidc.clientId | quote }} }
+            - { name: MAYDAY_OIDC_SCOPES, value: {{ .Values.oidc.scopes | quote }} }
+            - { name: MAYDAY_OIDC_AUDIENCES, value: {{ .Values.oidc.audiences | quote }} }
+            - name: MAYDAY_OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "mayday.secretName" . }}, key: oidcClientSecret, optional: true } }
+            {{- end }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "mayday.secretName" . }}, key: anthropicApiKey, optional: true } }
+            - { name: MAYDAY_ADMIN_EMAILS, value: {{ .Values.adminEmails | quote }} }
+            - { name: MAYDAY_DEV_LOGIN, value: {{ .Values.devLogin | quote }} }
+            - { name: MAYDAY_DEMO, value: {{ .Values.demo | quote }} }
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            {{- if not .Values.database.url }}
+            - { name: data, mountPath: /data }
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if not .Values.database.url }}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim: { claimName: {{ include "mayday.fullname" . }} }
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

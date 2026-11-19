@@ -1,0 +1,36 @@
+# Local trial with PostgreSQL. For production, set MAYDAY_SECRET_KEY and SSO, and turn off demo and dev login.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: mayday
+      POSTGRES_USER: mayday
+      POSTGRES_PASSWORD: mayday
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mayday -d mayday"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mayday:
+    build: .
+    image: mayday:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      MAYDAY_PUBLIC_URL: http://localhost:8080
+      MAYDAY_DATABASE_URL: postgresql://postgres:5432/mayday
+      MAYDAY_DATABASE_USER: mayday
+      MAYDAY_DATABASE_PASSWORD: mayday
+      MAYDAY_SECRET_KEY: ${MAYDAY_SECRET_KEY:-change-me-to-a-long-random-value}
+      MAYDAY_DEMO: ${MAYDAY_DEMO:-true}
+      MAYDAY_DEV_LOGIN: ${MAYDAY_DEV_LOGIN:-true}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+volumes:
+  pgdata:

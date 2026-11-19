@@ -1,2 +1,8 @@
 docs/drafts/ 
 .idea/
+build/
+.gradle/
+.kotlin/
+web/node_modules/
+web/dist/
+data/

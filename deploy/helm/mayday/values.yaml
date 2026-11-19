@@ -1,0 +1,69 @@
+image:
+  repository: ghcr.io/your-org/mayday
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# With PostgreSQL, run 2+ replicas behind the service. Without it, keep 1 replica and enable persistence.
+replicaCount: 2
+
+publicUrl: https://mayday.example.com
+
+database:
+  # JDBC or postgresql:// URL. Leave empty to use the built-in journal store (single replica only).
+  url: ""
+  user: ""
+  existingSecret: ""          # secret with keys: password
+  password: ""
+  pool: 20
+
+# Secret key for sessions, delegated tokens and encryption of stored secrets. Set it or use existingSecret (key: secretKey).
+secretKey: ""
+existingSecret: ""
+
+oidc:
+  issuer: ""                  # for example https://login.microsoftonline.com/<tenant>/v2.0
+  clientId: ""
+  clientSecret: ""            # or put it in existingSecret with key: oidcClientSecret
+  scopes: "openid email profile"
+  audiences: ""               # extra audiences accepted for on-behalf-of access tokens, comma separated
+
+adminEmails: ""               # comma separated; these users become administrators at first login
+anthropicApiKey: ""           # optional; can also be set in the web interface
+devLogin: false
+demo: false
+
+extraEnv: []
+
+persistence:
+  enabled: false              # only for the journal store (no database)
+  size: 5Gi
+  storageClass: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: mayday.example.com
+  tls: []
+
+resources:
+  requests: { cpu: 500m, memory: 768Mi }
+  limits: { memory: 2Gi }
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
