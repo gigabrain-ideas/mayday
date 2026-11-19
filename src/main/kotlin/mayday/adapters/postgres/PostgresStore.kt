@@ -36,54 +36,41 @@ import mayday.policy.SettingValue
 import mayday.shared.Conflict
 import mayday.shared.JSON
 import mayday.shared.Page
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.TimeUnit
 
-/** Small JDBC pool. Virtual threads block cheaply while they wait for a connection. */
-class Pool(private val url: String, private val user: String?, private val password: String?, size: Int) : AutoCloseable {
-    private val idle = ArrayBlockingQueue<Connection>(size)
-    private val all = java.util.Collections.synchronizedList(mutableListOf<Connection>())
-    private val semaphore = java.util.concurrent.Semaphore(size)
+/** JDBC access on the IO dispatcher. HikariCP pools the connections and resets them on return. */
+class Pool(val dataSource: HikariDataSource) : AutoCloseable {
+    suspend fun <T> withConnection(f: (Connection) -> T): T = withContext(Dispatchers.IO) { dataSource.connection.use(f) }
 
-    fun open(): Connection = if (user != null) DriverManager.getConnection(url, user, password) else DriverManager.getConnection(url)
+    /** A connection outside the pool, for long-lived use such as LISTEN. */
+    fun open(): Connection = DriverManager.getConnection(dataSource.jdbcUrl, dataSource.username, dataSource.password)
 
-    fun <T> withConnection(f: (Connection) -> T): T {
-        if (!semaphore.tryAcquire(30, TimeUnit.SECONDS)) throw IllegalStateException("No database connection available")
-        try {
-            var c = idle.poll()
-            if (c == null || c.isClosed || !c.isValid(2)) {
-                c?.let { runCatching { it.close() }; all.remove(it) }
-                c = open().also { all += it }
-            }
-            val conn = c!!
-            try {
-                val result = f(conn)
-                if (!conn.autoCommit) { conn.rollback(); conn.autoCommit = true }
-                return result
-            } catch (e: Exception) {
-                runCatching { if (!conn.isClosed && !conn.autoCommit) { conn.rollback(); conn.autoCommit = true } }
-                throw e
-            } finally {
-                if (conn.isClosed) all.remove(conn) else idle.offer(conn)
-            }
-        } finally {
-            semaphore.release()
-        }
+    override fun close() = dataSource.close()
+
+    companion object {
+        fun of(url: String, user: String?, password: String?, size: Int) = Pool(HikariDataSource(HikariConfig().apply {
+            jdbcUrl = url
+            username = user
+            this.password = password
+            maximumPoolSize = size
+            poolName = "mayday"
+        }))
     }
-
-    override fun close() { all.forEach { runCatching { it.close() } } }
 }
 
 class PostgresStore(val pool: Pool) {
     init { migrate() }
 
-    private fun migrate() = pool.withConnection { c ->
+    private fun migrate() = pool.dataSource.connection.use { c ->
         c.createStatement().use { s ->
             for (t in listOf("projects", "teams", "settings", "change_requests", "agents", "mcp_servers", "config")) {
                 s.execute("create table if not exists $t (id text primary key, doc jsonb not null)")
@@ -136,13 +123,13 @@ class PostgresStore(val pool: Pool) {
 
     private class JsonDoc(val json: String)
 
-    private fun <T> query(sql: String, vararg args: Any?, map: (ResultSet) -> T): List<T> = pool.withConnection { c ->
+    private suspend fun <T> query(sql: String, vararg args: Any?, map: (ResultSet) -> T): List<T> = pool.withConnection { c ->
         c.prepareStatement(sql).use { ps -> ps.bind(*args).executeQuery().use { rs -> buildList { while (rs.next()) add(map(rs)) } } }
     }
 
-    private fun exec(sql: String, vararg args: Any?): Int = pool.withConnection { c -> c.prepareStatement(sql).use { it.bind(*args).executeUpdate() } }
+    private suspend fun exec(sql: String, vararg args: Any?): Int = pool.withConnection { c -> c.prepareStatement(sql).use { it.bind(*args).executeUpdate() } }
 
-    private fun <T> stream(sql: String, args: List<Any?>, ser: KSerializer<T>, consumer: (T) -> Unit) = pool.withConnection { c ->
+    private suspend fun <T> stream(sql: String, args: List<Any?>, ser: KSerializer<T>, consumer: (T) -> Unit) = pool.withConnection { c ->
         c.autoCommit = false
         c.prepareStatement(sql).use { ps ->
             ps.fetchSize = 1000
@@ -152,10 +139,10 @@ class PostgresStore(val pool: Pool) {
     }
 
     private inner class DocTable<T>(private val table: String, private val ser: KSerializer<T>) {
-        fun get(id: String) = query("select doc from $table where id = ?", id) { dec(ser, it) }.firstOrNull()
-        fun all() = query("select doc from $table") { dec(ser, it) }
-        fun put(id: String, v: T) = exec("insert into $table (id, doc) values (?, ?) on conflict (id) do update set doc = excluded.doc", id, JsonDoc(enc(ser, v)))
-        fun delete(id: String) = exec("delete from $table where id = ?", id)
+        suspend fun get(id: String) = query("select doc from $table where id = ?", id) { dec(ser, it) }.firstOrNull()
+        suspend fun all() = query("select doc from $table") { dec(ser, it) }
+        suspend fun put(id: String, v: T) = exec("insert into $table (id, doc) values (?, ?) on conflict (id) do update set doc = excluded.doc", id, JsonDoc(enc(ser, v)))
+        suspend fun delete(id: String) = exec("delete from $table where id = ?", id)
     }
 
     private val projectsT = DocTable("projects", Project.serializer())
@@ -167,28 +154,28 @@ class PostgresStore(val pool: Pool) {
     private val configT = DocTable("config", JsonElement.serializer())
 
     val projects = object : ProjectRepository {
-        override fun get(id: String) = projectsT.get(id)
-        override fun bySlug(slug: String) = query("select doc from projects where doc->>'slug' = ?", slug) { dec(Project.serializer(), it) }.firstOrNull()
-        override fun list() = projectsT.all()
-        override fun save(project: Project) { projectsT.put(project.id, project) }
-        override fun delete(id: String) { projectsT.delete(id) }
+        override suspend fun get(id: String) = projectsT.get(id)
+        override suspend fun bySlug(slug: String) = query("select doc from projects where doc->>'slug' = ?", slug) { dec(Project.serializer(), it) }.firstOrNull()
+        override suspend fun list() = projectsT.all()
+        override suspend fun save(project: Project) { projectsT.put(project.id, project) }
+        override suspend fun delete(id: String) { projectsT.delete(id) }
     }
 
     val teams = object : TeamRepository {
-        override fun get(id: String) = teamsT.get(id)
-        override fun bySlug(slug: String) = query("select doc from teams where doc->>'slug' = ?", slug) { dec(Team.serializer(), it) }.firstOrNull()
-        override fun list() = teamsT.all()
-        override fun save(team: Team) { teamsT.put(team.id, team) }
-        override fun delete(id: String) { teamsT.delete(id) }
+        override suspend fun get(id: String) = teamsT.get(id)
+        override suspend fun bySlug(slug: String) = query("select doc from teams where doc->>'slug' = ?", slug) { dec(Team.serializer(), it) }.firstOrNull()
+        override suspend fun list() = teamsT.all()
+        override suspend fun save(team: Team) { teamsT.put(team.id, team) }
+        override suspend fun delete(id: String) { teamsT.delete(id) }
     }
 
     val users = object : UserRepository {
         private val ser = User.serializer()
-        override fun get(id: String) = query("select doc from users where id = ?", id) { dec(ser, it) }.firstOrNull()
-        override fun byEmail(email: String) = query("select doc from users where email = ?", email.lowercase()) { dec(ser, it) }.firstOrNull()
-        override fun byExternalId(externalId: String) = query("select doc from users where external_id = ?", externalId) { dec(ser, it) }.firstOrNull()
-        override fun count() = query("select count(*) from users") { it.getLong(1) }.first()
-        override fun list(query: String?, cursor: String?, limit: Int): Page<User> {
+        override suspend fun get(id: String) = query("select doc from users where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun byEmail(email: String) = query("select doc from users where email = ?", email.lowercase()) { dec(ser, it) }.firstOrNull()
+        override suspend fun byExternalId(externalId: String) = query("select doc from users where external_id = ?", externalId) { dec(ser, it) }.firstOrNull()
+        override suspend fun count() = query("select count(*) from users") { it.getLong(1) }.first()
+        override suspend fun list(query: String?, cursor: String?, limit: Int): Page<User> {
             val q = query?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { "%${it.replace("%", "")}%" }
             val rows = query(
                 "select email, doc from users where (?::text is null or email > ?) and (?::text is null or email like ? or lower(doc->>'name') like ?) order by email limit ?",
@@ -196,7 +183,7 @@ class PostgresStore(val pool: Pool) {
             ) { dec(ser, it) }
             return if (rows.size > limit) Page(rows.take(limit), rows[limit - 1].email) else Page(rows)
         }
-        override fun save(user: User) {
+        override suspend fun save(user: User) {
             try {
                 exec("insert into users (id, email, external_id, doc) values (?, ?, ?, ?) on conflict (id) do update set email = excluded.email, external_id = excluded.external_id, doc = excluded.doc",
                     user.id, user.email, user.externalId, JsonDoc(enc(ser, user)))
@@ -208,27 +195,27 @@ class PostgresStore(val pool: Pool) {
 
     val tokens = object : TokenRepository {
         private val ser = ApiToken.serializer()
-        override fun byHash(hash: String) = query("select doc from tokens where hash = ?", hash) { dec(ser, it) }.firstOrNull()
-        override fun byOwner(kind: OwnerKind, ownerId: String) = query("select doc from tokens where owner_kind = ? and owner_id = ?", kind.name, ownerId) { dec(ser, it) }
-        override fun get(id: String) = query("select doc from tokens where id = ?", id) { dec(ser, it) }.firstOrNull()
-        override fun save(token: ApiToken) {
+        override suspend fun byHash(hash: String) = query("select doc from tokens where hash = ?", hash) { dec(ser, it) }.firstOrNull()
+        override suspend fun byOwner(kind: OwnerKind, ownerId: String) = query("select doc from tokens where owner_kind = ? and owner_id = ?", kind.name, ownerId) { dec(ser, it) }
+        override suspend fun get(id: String) = query("select doc from tokens where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun save(token: ApiToken) {
             exec("insert into tokens (id, hash, owner_kind, owner_id, doc) values (?, ?, ?, ?, ?) on conflict (id) do update set doc = excluded.doc",
                 token.id, token.hash, token.ownerKind.name, token.ownerId, JsonDoc(enc(ser, token)))
         }
-        override fun delete(id: String) { exec("delete from tokens where id = ?", id) }
+        override suspend fun delete(id: String) { exec("delete from tokens where id = ?", id) }
     }
 
     val settings = object : SettingRepository {
-        override fun all() = settingsT.all()
-        override fun save(value: SettingValue) { settingsT.put(value.id, value) }
-        override fun delete(id: String) { settingsT.delete(id) }
+        override suspend fun all() = settingsT.all()
+        override suspend fun save(value: SettingValue) { settingsT.put(value.id, value) }
+        override suspend fun delete(id: String) { settingsT.delete(id) }
     }
 
     val changeRequests = object : ChangeRequestRepository {
-        override fun get(id: String) = requestsT.get(id)
-        override fun list(status: ChangeRequestStatus?) =
+        override suspend fun get(id: String) = requestsT.get(id)
+        override suspend fun list(status: ChangeRequestStatus?) =
             if (status == null) requestsT.all() else query("select doc from change_requests where doc->>'status' = ?", status.name) { dec(ChangeRequest.serializer(), it) }
-        override fun save(request: ChangeRequest) { requestsT.put(request.id, request) }
+        override suspend fun save(request: ChangeRequest) { requestsT.put(request.id, request) }
     }
 
     private fun incidentWhere(f: IncidentFilter, args: MutableList<Any?>): String {
@@ -244,11 +231,11 @@ class PostgresStore(val pool: Pool) {
 
     val incidents = object : IncidentRepository {
         private val ser = Incident.serializer()
-        override fun nextNumber() = query("select nextval('incident_number')") { it.getLong(1) }.first()
-        override fun get(id: String) = query("select doc from incidents where id = ?", id) { dec(ser, it) }.firstOrNull()
-        override fun byNumber(number: Long) = query("select doc from incidents where number = ?", number) { dec(ser, it) }.firstOrNull()
+        override suspend fun nextNumber() = query("select nextval('incident_number')") { it.getLong(1) }.first()
+        override suspend fun get(id: String) = query("select doc from incidents where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun byNumber(number: Long) = query("select doc from incidents where number = ?", number) { dec(ser, it) }.firstOrNull()
 
-        override fun save(incident: Incident, expectedVersion: Long?) {
+        override suspend fun save(incident: Incident, expectedVersion: Long?) {
             val doc = JsonDoc(enc(ser, incident))
             val search = "${incident.key} ${incident.title}".lowercase()
             if (expectedVersion == null) {
@@ -265,7 +252,7 @@ class PostgresStore(val pool: Pool) {
             }
         }
 
-        override fun list(filter: IncidentFilter, cursor: String?, limit: Int): Page<Incident> {
+        override suspend fun list(filter: IncidentFilter, cursor: String?, limit: Int): Page<Incident> {
             val args = mutableListOf<Any?>()
             var where = incidentWhere(filter, args)
             cursor?.toLongOrNull()?.let { where += " and number < ?"; args += it }
@@ -274,7 +261,7 @@ class PostgresStore(val pool: Pool) {
             return if (rows.size > limit) Page(rows.take(limit), rows[limit - 1].number.toString()) else Page(rows)
         }
 
-        override fun scan(filter: IncidentFilter, consumer: (Incident) -> Unit) {
+        override suspend fun scan(filter: IncidentFilter, consumer: (Incident) -> Unit) {
             val args = mutableListOf<Any?>()
             stream("select doc from incidents where ${incidentWhere(filter, args)} order by number desc", args, ser, consumer)
         }
@@ -282,8 +269,8 @@ class PostgresStore(val pool: Pool) {
 
     val timeline = object : TimelineRepository {
         private val ser = TimelineEntry.serializer()
-        override fun append(entry: TimelineEntry) { exec("insert into timeline (id, incident_id, at, doc) values (?, ?, ?, ?)", entry.id, entry.incidentId, entry.at, JsonDoc(enc(ser, entry))) }
-        override fun list(incidentId: String) = query("select doc from timeline where incident_id = ? order by at, id", incidentId) { dec(ser, it) }
+        override suspend fun append(entry: TimelineEntry) { exec("insert into timeline (id, incident_id, at, doc) values (?, ?, ?, ?)", entry.id, entry.incidentId, entry.at, JsonDoc(enc(ser, entry))) }
+        override suspend fun list(incidentId: String) = query("select doc from timeline where incident_id = ? order by at, id", incidentId) { dec(ser, it) }
     }
 
     private fun alertWhere(f: AlertFilter, args: MutableList<Any?>): String {
@@ -299,11 +286,11 @@ class PostgresStore(val pool: Pool) {
 
     val alerts = object : AlertRepository {
         private val ser = Alert.serializer()
-        override fun get(id: String) = query("select doc from alerts where id = ?", id) { dec(ser, it) }.firstOrNull()
-        override fun latestByFingerprint(fingerprint: String) =
+        override suspend fun get(id: String) = query("select doc from alerts where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun latestByFingerprint(fingerprint: String) =
             query("select doc from alerts where fingerprint = ? order by first_seen_at desc limit 1", fingerprint) { dec(ser, it) }.firstOrNull()
 
-        override fun save(alert: Alert, expectedVersion: Long?) {
+        override suspend fun save(alert: Alert, expectedVersion: Long?) {
             val doc = JsonDoc(enc(ser, alert))
             if (expectedVersion == null) {
                 try {
@@ -319,7 +306,7 @@ class PostgresStore(val pool: Pool) {
             }
         }
 
-        override fun list(filter: AlertFilter, cursor: String?, limit: Int): Page<Alert> {
+        override suspend fun list(filter: AlertFilter, cursor: String?, limit: Int): Page<Alert> {
             val args = mutableListOf<Any?>()
             var where = alertWhere(filter, args)
             if (cursor != null) {
@@ -331,24 +318,24 @@ class PostgresStore(val pool: Pool) {
             return if (rows.size > limit) Page(rows.take(limit), "${rows[limit - 1].firstSeenAt}|${rows[limit - 1].id}") else Page(rows)
         }
 
-        override fun scan(filter: AlertFilter, consumer: (Alert) -> Unit) {
+        override suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit) {
             val args = mutableListOf<Any?>()
             stream("select doc from alerts where ${alertWhere(filter, args)}", args, ser, consumer)
         }
     }
 
     val agents = object : AgentRepository {
-        override fun get(id: String) = agentsT.get(id)
-        override fun list() = agentsT.all()
-        override fun save(agent: AgentConfig) { agentsT.put(agent.id, agent) }
-        override fun delete(id: String) { agentsT.delete(id) }
+        override suspend fun get(id: String) = agentsT.get(id)
+        override suspend fun list() = agentsT.all()
+        override suspend fun save(agent: AgentConfig) { agentsT.put(agent.id, agent) }
+        override suspend fun delete(id: String) { agentsT.delete(id) }
     }
 
     val runs = object : RunRepository {
         private val ser = AgentRun.serializer()
-        override fun get(id: String) = query("select doc from agent_runs where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun get(id: String) = query("select doc from agent_runs where id = ?", id) { dec(ser, it) }.firstOrNull()
 
-        override fun save(run: AgentRun, expectedVersion: Long?) {
+        override suspend fun save(run: AgentRun, expectedVersion: Long?) {
             val doc = JsonDoc(enc(ser, run))
             if (expectedVersion == null) {
                 try {
@@ -363,11 +350,11 @@ class PostgresStore(val pool: Pool) {
             }
         }
 
-        override fun bySubject(subjectId: String) = query("select doc from agent_runs where subject_id = ?", subjectId) { dec(ser, it) }
-        override fun recent(limit: Int) = query("select doc from agent_runs order by created_at desc limit ?", limit) { dec(ser, it) }
-        override fun active() = query("select doc from agent_runs where status in ('QUEUED','DISPATCHED','RUNNING')") { dec(ser, it) }
+        override suspend fun bySubject(subjectId: String) = query("select doc from agent_runs where subject_id = ?", subjectId) { dec(ser, it) }
+        override suspend fun recent(limit: Int) = query("select doc from agent_runs order by created_at desc limit ?", limit) { dec(ser, it) }
+        override suspend fun active() = query("select doc from agent_runs where status in ('QUEUED','DISPATCHED','RUNNING')") { dec(ser, it) }
 
-        override fun claim(agentId: String, limit: Int, at: Instant): List<AgentRun> = pool.withConnection { c ->
+        override suspend fun claim(agentId: String, limit: Int, at: Instant): List<AgentRun> = pool.withConnection { c ->
             c.autoCommit = false
             val claimed = c.prepareStatement(
                 "select doc from agent_runs where agent_id = ? and status = 'QUEUED' order by created_at limit ? for update skip locked",
@@ -383,14 +370,14 @@ class PostgresStore(val pool: Pool) {
     }
 
     val mcpServers = object : McpServerRepository {
-        override fun get(id: String) = mcpT.get(id)
-        override fun list() = mcpT.all()
-        override fun save(server: McpServerConfig) { mcpT.put(server.id, server) }
-        override fun delete(id: String) { mcpT.delete(id) }
+        override suspend fun get(id: String) = mcpT.get(id)
+        override suspend fun list() = mcpT.all()
+        override suspend fun save(server: McpServerConfig) { mcpT.put(server.id, server) }
+        override suspend fun delete(id: String) { mcpT.delete(id) }
     }
 
     val config = object : ConfigRepository {
-        override fun llm() = configT.get("llm")?.let { JSON.decodeFromJsonElement(LlmConfig.serializer(), it) }
-        override fun saveLlm(config: LlmConfig) { configT.put("llm", JSON.encodeToJsonElement(LlmConfig.serializer(), config)) }
+        override suspend fun llm() = configT.get("llm")?.let { JSON.decodeFromJsonElement(LlmConfig.serializer(), it) }
+        override suspend fun saveLlm(config: LlmConfig) { configT.put("llm", JSON.encodeToJsonElement(LlmConfig.serializer(), config)) }
     }
 }

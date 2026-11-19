@@ -7,11 +7,7 @@ export default defineConfig({
   resolve: { alias: { "@": new URL("./src", import.meta.url).pathname } },
   server: {
     port: 5173,
-    proxy: {
-      "/api": { target: "http://localhost:8080", changeOrigin: false },
-      "/auth": "http://localhost:8080",
-      "/mcp": "http://localhost:8080",
-    },
+    proxy: Object.fromEntries(["/mayday.v1.", "/auth", "/oauth", "/mcp", "/api"].map((p) => [p, "http://localhost:8080"])),
   },
-  build: { outDir: "dist", sourcemap: false, chunkSizeWarningLimit: 800 },
+  build: { outDir: "dist", sourcemap: false, chunkSizeWarningLimit: 800, assetsInlineLimit: 0 },
 });

@@ -1,6 +1,7 @@
 package mayday.contract
 
 import mayday.Ports
+import mayday.suspendTest
 import mayday.adapters.memory.MemoryStore
 import mayday.adapters.postgres.Pool
 import mayday.adapters.postgres.PostgresStore
@@ -19,7 +20,7 @@ class JournaledMemoryStoreContractTest : StoreContract() {
     override fun newPorts() = Ports.memory(MemoryStore(Files.createTempDirectory("mayday")))
 
     @Test
-    fun `data survives a restart`() {
+    fun `data survives a restart`() = suspendTest {
         val dir = Files.createTempDirectory("mayday")
         val first = MemoryStore(dir)
         val n1 = first.incidents.nextNumber()
@@ -39,11 +40,11 @@ class PostgresStoreContractTest : StoreContract() {
         assumeTrue(!url.isNullOrBlank(), "MAYDAY_TEST_DATABASE_URL is not set")
         val jdbc = if (url!!.startsWith("jdbc:")) url else "jdbc:$url"
         val schema = "t_" + Ids.new().take(12)
-        val admin = Pool(jdbc, System.getenv("MAYDAY_TEST_DATABASE_USER"), System.getenv("MAYDAY_TEST_DATABASE_PASSWORD"), 1)
-        admin.withConnection { c -> c.createStatement().use { it.execute("create schema $schema") } }
+        val admin = Pool.of(jdbc, System.getenv("MAYDAY_TEST_DATABASE_USER"), System.getenv("MAYDAY_TEST_DATABASE_PASSWORD"), 1)
+        admin.dataSource.connection.use { c -> c.createStatement().use { it.execute("create schema $schema") } }
         admin.close()
         val sep = if (jdbc.contains('?')) "&" else "?"
-        val pool = Pool("$jdbc${sep}currentSchema=$schema", System.getenv("MAYDAY_TEST_DATABASE_USER"), System.getenv("MAYDAY_TEST_DATABASE_PASSWORD"), 8)
+        val pool = Pool.of("$jdbc${sep}currentSchema=$schema", System.getenv("MAYDAY_TEST_DATABASE_USER"), System.getenv("MAYDAY_TEST_DATABASE_PASSWORD"), 8)
         return Ports.postgres(PostgresStore(pool), InProcessEventBus())
     }
 }

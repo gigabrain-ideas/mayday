@@ -30,8 +30,10 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - { name: http, containerPort: 8080 }
+            - { name: grpc, containerPort: 9090 }
           env:
             - { name: PORT, value: "8080" }
+            - { name: MAYDAY_GRPC_PORT, value: "9090" }
             - { name: MAYDAY_PUBLIC_URL, value: {{ .Values.publicUrl | quote }} }
             - name: MAYDAY_SECRET_KEY
               valueFrom: { secretKeyRef: { name: {{ include "mayday.secretName" . }}, key: secretKey } }
@@ -67,7 +69,7 @@ spec:
             httpGet: { path: /readyz, port: http }
             periodSeconds: 5
           livenessProbe:
-            httpGet: { path: /healthz, port: http }
+            httpGet: { path: /livez, port: http }
             initialDelaySeconds: 20
             periodSeconds: 10
           resources: {{- toYaml .Values.resources | nindent 12 }}

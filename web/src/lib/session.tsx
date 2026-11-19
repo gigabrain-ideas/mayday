@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, type Me, type Project, type Team, type User } from "./api";
+import { auth, items, rpc, type Me, type Page, type Project, type Team, type User } from "./api";
 import { closeLive, useLive } from "./hooks";
 
 interface Session {
@@ -23,9 +23,9 @@ export function SessionProvider({ me, onLogout, onReloadMe, children }: { me: Me
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const reloadDirectory = useCallback(() => {
-    api.get<Team[]>("/teams").then(setTeams).catch(() => {});
-    api.get<Project[]>("/projects").then(setProjects).catch(() => {});
-    api.get<{ items: User[] }>("/users?limit=500").then((p) => setUsers(p.items)).catch(() => {});
+    items(rpc.directory.listTeams<Page<Team>>()).then(setTeams).catch(() => {});
+    items(rpc.directory.listProjects<Page<Project>>()).then(setProjects).catch(() => {});
+    items(rpc.users.listUsers<Page<User>>({ limit: 500 })).then(setUsers).catch(() => {});
   }, []);
   useEffect(reloadDirectory, [reloadDirectory]);
   useLive((t) => t === "agent.changed", onReloadMe);
@@ -42,7 +42,7 @@ export function SessionProvider({ me, onLogout, onReloadMe, children }: { me: Me
       reloadDirectory,
       reloadMe: onReloadMe,
       logout: async () => {
-        const r = await api.post<{ logoutUrl: string }>("/auth/logout").catch(() => ({ logoutUrl: "/" }));
+        const r = await auth.logout().catch(() => ({ logoutUrl: "/" }));
         closeLive();
         onLogout();
         if (r.logoutUrl && r.logoutUrl !== "/") window.location.href = r.logoutUrl;

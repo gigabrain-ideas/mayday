@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+
+message Project {
+  string id = 1;
+  string slug = 2;
+  string name = 3;
+  string description = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message Projects {
+  repeated Project items = 1;
+}
+
+message Team {
+  string id = 1;
+  string slug = 2;
+  string name = 3;
+  optional string project_id = 4;
+  string description = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message Teams {
+  repeated Team items = 1;
+}
+
+message SaveProjectRequest {
+  // Empty on create.
+  string id = 1;
+  string name = 2;
+  optional string slug = 3;
+  string description = 4;
+}
+
+message SaveTeamRequest {
+  // Empty on create.
+  string id = 1;
+  string name = 2;
+  optional string slug = 3;
+  // On update: unset keeps the project, empty removes it.
+  optional string project_id = 4;
+  string description = 5;
+}
+
+service DirectoryService {
+  rpc ListProjects(google.protobuf.Empty) returns (Projects);
+  rpc CreateProject(SaveProjectRequest) returns (Project);
+  rpc UpdateProject(SaveProjectRequest) returns (Project);
+  rpc DeleteProject(IdRequest) returns (google.protobuf.Empty);
+  rpc ListTeams(google.protobuf.Empty) returns (Teams);
+  rpc CreateTeam(SaveTeamRequest) returns (Team);
+  rpc UpdateTeam(SaveTeamRequest) returns (Team);
+  rpc DeleteTeam(IdRequest) returns (google.protobuf.Empty);
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { KeyRound, LifeBuoy } from "lucide-react";
-import { api, type AuthConfig } from "@/lib/api";
+import { auth, rpc, type AuthConfig } from "@/lib/api";
 import { Button, Card, Field, Input } from "@/components/ui";
 import { useToast } from "@/lib/toast";
 
@@ -8,12 +8,12 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [cfg, setCfg] = useState<AuthConfig>();
   const [email, setEmail] = useState("admin@example.com");
   const toast = useToast();
-  useEffect(() => { api.get<AuthConfig>("/auth/config").then(setCfg).catch(() => setCfg({ sso: false, devLogin: false, ssoName: "" })); }, []);
+  useEffect(() => { rpc.auth.getAuthConfig<AuthConfig>().then(setCfg).catch(() => setCfg({ sso: false, devLogin: false, ssoName: "" })); }, []);
 
   const dev = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.post("/auth/dev-login", { email });
+      await auth.devLogin(email);
       onLogin();
     } catch (err) {
       toast.error(err);

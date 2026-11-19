@@ -75,3 +75,13 @@ variable "ingress_tls_secret" {
   type    = string
   default = ""
 }
+variable "grpc_enabled" {
+  description = "Expose native gRPC (port 9090) in the service. Browsers use gRPC-Web on the HTTP port."
+  type        = bool
+  default     = true
+}
+variable "grpc_ingress_host" {
+  description = "Host for native gRPC through the ingress. Empty = no gRPC ingress. Needs TLS (ingress_tls_secret must cover this host)."
+  type        = string
+  default     = ""
+}

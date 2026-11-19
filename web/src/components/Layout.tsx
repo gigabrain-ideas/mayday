@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router";
 import { BarChart3, Bell, LifeBuoy, LogOut, Menu, Moon, Settings, Siren, Sun, X } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { useLive } from "@/lib/hooks";
-import { api, type Page, type Alert } from "@/lib/api";
+import { rpc, type Page, type Alert } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 function useTheme() {
@@ -27,7 +27,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const [firing, setFiring] = useState(0);
-  const loadFiring = () => api.get<Page<Alert>>("/alerts?status=FIRING&limit=100").then((p) => setFiring(p.items.length)).catch(() => {});
+  const loadFiring = () => rpc.alerts.listAlerts<Page<Alert>>({ status: ["FIRING"], limit: 100 }).then((p) => setFiring(p.items.length)).catch(() => {});
   useEffect(() => { loadFiring(); }, []);
   useLive((t) => t.startsWith("alert."), loadFiring);
 

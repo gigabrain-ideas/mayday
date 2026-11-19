@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+
+// A domain event. "ping" events keep idle connections open.
+message Event {
+  string type = 1;
+  string subject_id = 2;
+  google.protobuf.Timestamp at = 3;
+  repeated string team_ids = 4;
+  map<string, string> data = 5;
+}
+
+message SubscribeRequest {}
+
+service EventService {
+  // Live domain events: incident.*, alert.*, agent_run.updated, setting.changed, ...
+  // A slow client loses events, not server memory.
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+}

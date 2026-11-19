@@ -23,7 +23,7 @@ Agents do work on incidents and alerts: analysis, remediation, patches, timeline
 - Automatic run: only from triggers, and only if the team policy allows it (`agents.auto_analysis` for read actions, `agents.auto_remediation` for write actions). It uses the agent's own identity and role.
 - The built-in agent is available only when the LLM provider is ready. Without it, buttons explain how to configure one.
 - Push delivery: signed webhook (see [api.md](../api.md#agent-webhook)). A delivery failure marks the run FAILED.
-- Pull delivery: the agent calls `claim`. Claims are atomic. Only the owner agent can report progress or complete a run.
+- Pull delivery: the agent claims runs with `AgentRunService.ClaimRuns` (gRPC) or the MCP tool `claim_agent_runs`, and reports with `ReportProgress`/`CompleteRun` or `report_agent_run`. Claims are atomic. Only the owner agent can report progress or complete a run.
 - Each run result goes to the subject: a timeline entry (incident) or an update (alert).
 - Runs that do not finish in 30 minutes become FAILED.
 - The built-in agent calls the same tools as external agents (`MaydayTools`), plus the tool gateway servers. It skips only the `mcp.write_enabled` switch, not RBAC.
@@ -36,7 +36,7 @@ Agents do work on incidents and alerts: analysis, remediation, patches, timeline
 
 - A SEV2 alert fires at 03:00. The built-in agent analyzes it with the Grafana and GitHub MCP servers and posts its findings on the incident timeline before the on-call engineer opens the laptop.
 - An engineer presses "Create patch". The external coding agent receives a webhook with a delegated token, opens a pull request in the engineer's name and reports the link.
-- A pull agent behind a firewall claims queued runs every few seconds over HTTPS.
+- A pull agent behind a firewall claims queued runs every few seconds over gRPC or MCP (outbound connections only).
 - After resolution, an engineer presses "Draft postmortem". The agent fills all sections with `set_postmortem`.
 
 ## Negative use cases
@@ -50,4 +50,4 @@ Agents do work on incidents and alerts: analysis, remediation, patches, timeline
 
 ## Rebuild checklist
 
-Pass `AgentTest`, `IdentityTest` (delegation), `WebhookContractTest` and the run part of `StoreContract`.
+Pass `AgentTest`, `IdentityTest` (delegation), `WebhookContractTest`, the agent and run parts of `GrpcContractTest`, and the run part of `StoreContract`.

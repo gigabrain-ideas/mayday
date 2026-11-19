@@ -134,15 +134,15 @@ data class ChangeRequest(
 )
 
 interface SettingRepository {
-    fun all(): List<SettingValue>
-    fun save(value: SettingValue)
-    fun delete(id: String)
+    suspend fun all(): List<SettingValue>
+    suspend fun save(value: SettingValue)
+    suspend fun delete(id: String)
 }
 
 interface ChangeRequestRepository {
-    fun get(id: String): ChangeRequest?
-    fun list(status: ChangeRequestStatus?): List<ChangeRequest>
-    fun save(request: ChangeRequest)
+    suspend fun get(id: String): ChangeRequest?
+    suspend fun list(status: ChangeRequestStatus?): List<ChangeRequest>
+    suspend fun save(request: ChangeRequest)
 }
 
 @Serializable
@@ -159,12 +159,12 @@ class SettingLocked(message: String) : DomainException("locked", message)
 
 /** Read model that other bounded contexts use. */
 interface PolicyReader {
-    fun effective(teamIds: List<String>): Map<String, String>
-    fun bool(key: String, teamIds: List<String>) = effective(teamIds)[key] == "true"
-    fun int(key: String, teamIds: List<String>) = effective(teamIds)[key]?.toIntOrNull() ?: SettingCatalog.def(key).default.toInt()
-    fun severity(key: String, teamIds: List<String>): Severity? =
+    suspend fun effective(teamIds: List<String>): Map<String, String>
+    suspend fun bool(key: String, teamIds: List<String>) = effective(teamIds)[key] == "true"
+    suspend fun int(key: String, teamIds: List<String>) = effective(teamIds)[key]?.toIntOrNull() ?: SettingCatalog.def(key).default.toInt()
+    suspend fun severity(key: String, teamIds: List<String>): Severity? =
         effective(teamIds)[key]?.takeIf { it != SEVERITY_NONE }?.let { Severity.valueOf(it) }
-    fun string(key: String) = effective(emptyList())[key] ?: SettingCatalog.def(key).default
+    suspend fun string(key: String) = effective(emptyList())[key] ?: SettingCatalog.def(key).default
 }
 
 class PolicyService(
@@ -176,16 +176,16 @@ class PolicyService(
 ) : PolicyReader {
     @Volatile private var cache: Map<String, SettingValue>? = null
 
-    private fun index(): Map<String, SettingValue> = cache ?: settings.all().associateBy { it.id }.also { cache = it }
+    private suspend fun index(): Map<String, SettingValue> = cache ?: settings.all().associateBy { it.id }.also { cache = it }
 
     fun invalidate() { cache = null }
 
     fun schema() = SettingCatalog.defs
 
-    fun raw(scope: Scope, scopeId: String): List<SettingValue> =
+    suspend fun raw(scope: Scope, scopeId: String): List<SettingValue> =
         index().values.filter { it.scope == scope && it.scopeId == scopeId }
 
-    private fun chain(scope: Scope, scopeId: String): List<Pair<Scope, String>> = when (scope) {
+    private suspend fun chain(scope: Scope, scopeId: String): List<Pair<Scope, String>> = when (scope) {
         Scope.ORG -> listOf(Scope.ORG to ORG_ID)
         Scope.PROJECT -> listOf(Scope.ORG to ORG_ID, Scope.PROJECT to scopeId)
         Scope.TEAM -> {
@@ -194,7 +194,7 @@ class PolicyService(
         }
     }
 
-    fun effectiveAt(scope: Scope, scopeId: String): List<EffectiveSetting> {
+    suspend fun effectiveAt(scope: Scope, scopeId: String): List<EffectiveSetting> {
         val idx = index()
         val levels = chain(scope, scopeId)
         return SettingCatalog.defs.map { def -> resolve(def, levels, idx) }
@@ -219,7 +219,7 @@ class PolicyService(
         return EffectiveSetting(def.key, value, source, constraint?.scope, constraint?.enforcement ?: Enforcement.NONE, constraint?.value)
     }
 
-    override fun effective(teamIds: List<String>): Map<String, String> {
+    override suspend fun effective(teamIds: List<String>): Map<String, String> {
         if (teamIds.isEmpty()) return effectiveAt(Scope.ORG, ORG_ID).associate { it.key to it.value }
         val perTeam = teamIds.map { t -> effectiveAt(Scope.TEAM, t).associate { it.key to it.value } }
         return SettingCatalog.defs.associate { def ->
@@ -227,7 +227,7 @@ class PolicyService(
         }
     }
 
-    fun set(by: Principal, scope: Scope, scopeId: String, key: String, value: String, enforcement: Enforcement): SettingValue {
+    suspend fun set(by: Principal, scope: Scope, scopeId: String, key: String, value: String, enforcement: Enforcement): SettingValue {
         val def = SettingCatalog.def(key)
         val id = normalizeScopeId(scope, scopeId)
         if (scope !in def.scopes) throw Invalid("'$key' cannot be set at ${scope.name.lowercase()} level")
@@ -244,7 +244,7 @@ class PolicyService(
         return sv
     }
 
-    fun clear(by: Principal, scope: Scope, scopeId: String, key: String) {
+    suspend fun clear(by: Principal, scope: Scope, scopeId: String, key: String) {
         SettingCatalog.def(key)
         val id = normalizeScopeId(scope, scopeId)
         requireManage(by, scope, id)
@@ -255,7 +255,7 @@ class PolicyService(
         events.publish(DomainEvent("setting.changed", existing.id, clock.now(), data = mapOf("key" to key)))
     }
 
-    fun requestChange(by: Principal, scope: Scope, scopeId: String, key: String, proposed: String, reason: String): ChangeRequest {
+    suspend fun requestChange(by: Principal, scope: Scope, scopeId: String, key: String, proposed: String, reason: String): ChangeRequest {
         Access.requireWrite(by)
         val def = SettingCatalog.def(key)
         val id = normalizeScopeId(scope, scopeId)
@@ -266,9 +266,9 @@ class PolicyService(
         return cr
     }
 
-    fun changeRequests(status: ChangeRequestStatus?) = requests.list(status).sortedByDescending { it.createdAt }
+    suspend fun changeRequests(status: ChangeRequestStatus?) = requests.list(status).sortedByDescending { it.createdAt }
 
-    fun decide(by: Principal, id: String, approve: Boolean, note: String): ChangeRequest {
+    suspend fun decide(by: Principal, id: String, approve: Boolean, note: String): ChangeRequest {
         Access.requireAdmin(by)
         val cr = requests.get(id) ?: throw NotFound("Change request")
         if (cr.status != ChangeRequestStatus.PENDING) throw Invalid("This request is already decided")
@@ -285,13 +285,13 @@ class PolicyService(
         return decided
     }
 
-    private fun normalizeScopeId(scope: Scope, scopeId: String): String = when (scope) {
+    private suspend fun normalizeScopeId(scope: Scope, scopeId: String): String = when (scope) {
         Scope.ORG -> ORG_ID
         Scope.PROJECT -> directory.project(scopeId).id
         Scope.TEAM -> directory.team(scopeId).id
     }
 
-    private fun requireManage(by: Principal, scope: Scope, scopeId: String) {
+    private suspend fun requireManage(by: Principal, scope: Scope, scopeId: String) {
         val ok = when (scope) {
             Scope.ORG -> Access.isAdmin(by)
             Scope.PROJECT -> Access.isProjectAdmin(by, scopeId)

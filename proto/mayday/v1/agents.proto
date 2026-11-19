@@ -1,0 +1,256 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+import "mayday/v1/identity.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+
+enum AgentKind {
+  AGENT_KIND_UNSPECIFIED = 0;
+  AGENT_KIND_INTERNAL = 1;
+  AGENT_KIND_EXTERNAL = 2;
+}
+
+enum Delivery {
+  DELIVERY_UNSPECIFIED = 0;
+  DELIVERY_PUSH = 1;
+  DELIVERY_PULL = 2;
+}
+
+enum AgentAction {
+  AGENT_ACTION_UNSPECIFIED = 0;
+  AGENT_ACTION_ANALYZE = 1;
+  AGENT_ACTION_REMEDIATE = 2;
+  AGENT_ACTION_PATCH = 3;
+  AGENT_ACTION_TIMELINE = 4;
+  AGENT_ACTION_POSTMORTEM = 5;
+  AGENT_ACTION_RUNBOOK = 6;
+}
+
+enum TriggerEvent {
+  TRIGGER_EVENT_UNSPECIFIED = 0;
+  TRIGGER_EVENT_ALERT_CREATED = 1;
+}
+
+enum RunStatus {
+  RUN_STATUS_UNSPECIFIED = 0;
+  RUN_STATUS_QUEUED = 1;
+  RUN_STATUS_DISPATCHED = 2;
+  RUN_STATUS_RUNNING = 3;
+  RUN_STATUS_SUCCEEDED = 4;
+  RUN_STATUS_FAILED = 5;
+  RUN_STATUS_CANCELLED = 6;
+}
+
+enum RunTrigger {
+  RUN_TRIGGER_UNSPECIFIED = 0;
+  RUN_TRIGGER_AUTO = 1;
+  RUN_TRIGGER_MANUAL = 2;
+}
+
+enum SubjectKind {
+  SUBJECT_KIND_UNSPECIFIED = 0;
+  SUBJECT_KIND_INCIDENT = 1;
+  SUBJECT_KIND_ALERT = 2;
+}
+
+message AgentTrigger {
+  TriggerEvent event = 1;
+  Severity min_severity = 2;
+  repeated string team_ids = 3;
+  AgentAction action = 4;
+}
+
+message AgentConfig {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  AgentKind kind = 4;
+  Delivery delivery = 5;
+  optional string endpoint_url = 6;
+  // "set" when the agent has a signing secret, else empty. The secret itself never leaves Mayday.
+  string secret_sealed = 7;
+  repeated AgentAction actions = 8;
+  repeated AgentTrigger triggers = 9;
+  OrgRole role = 10;
+  bool enabled = 11;
+  string instructions = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+}
+
+message AgentConfigs {
+  repeated AgentConfig items = 1;
+}
+
+message AgentInput {
+  string name = 1;
+  string description = 2;
+  AgentKind kind = 3;
+  Delivery delivery = 4;
+  optional string endpoint_url = 5;
+  repeated AgentAction actions = 6;
+  repeated AgentTrigger triggers = 7;
+  OrgRole role = 8;
+  bool enabled = 9;
+  string instructions = 10;
+}
+
+message UpdateAgentRequest {
+  string id = 1;
+  AgentInput agent = 2;
+}
+
+// The token secret and the signing secret are in this response only.
+message AgentCredentials {
+  AgentConfig agent = 1;
+  IssuedToken token = 2;
+  optional string signing_secret = 3;
+}
+
+message EligibleAgentsRequest {
+  AgentAction action = 1;
+}
+
+message AgentRun {
+  string id = 1;
+  string agent_id = 2;
+  string agent_name = 3;
+  AgentAction action = 4;
+  SubjectKind subject_kind = 5;
+  string subject_id = 6;
+  string subject_label = 7;
+  RunStatus status = 8;
+  RunTrigger trigger = 9;
+  Actor requested_by = 10;
+  optional string on_behalf_of = 11;
+  string prompt = 12;
+  string output = 13;
+  string error = 14;
+  google.protobuf.Timestamp created_at = 15;
+  google.protobuf.Timestamp started_at = 16;
+  google.protobuf.Timestamp finished_at = 17;
+}
+
+message AgentRuns {
+  repeated AgentRun items = 1;
+}
+
+message ListRunsRequest {
+  // Unset lists the most recent runs of all subjects.
+  SubjectKind subject_kind = 1;
+  // Incident key, number or id; or alert id.
+  string subject_ref = 2;
+  int32 limit = 3;
+}
+
+message StartRunRequest {
+  SubjectKind subject_kind = 1;
+  string subject_ref = 2;
+  AgentAction action = 3;
+  optional string agent_id = 4;
+  string prompt = 5;
+}
+
+message ClaimRunsRequest {
+  int32 limit = 1;
+}
+
+message ClaimedRun {
+  AgentRun run = 1;
+  optional string delegated_token = 2;
+  google.protobuf.Struct subject = 3;
+}
+
+message ClaimedRuns {
+  repeated ClaimedRun items = 1;
+}
+
+message RunProgressRequest {
+  string id = 1;
+  string text = 2;
+}
+
+message CompleteRunRequest {
+  string id = 1;
+  bool success = 2;
+  string output = 3;
+  string error = 4;
+}
+
+message LlmView {
+  string provider = 1;
+  string model = 2;
+  string base_url = 3;
+  string effort = 4;
+  bool enabled = 5;
+  bool has_api_key = 6;
+  bool ready = 7;
+}
+
+// Unset fields keep their value. An empty api_key removes the stored key.
+message LlmInput {
+  optional string model = 1;
+  optional string api_key = 2;
+  optional string base_url = 3;
+  optional string effort = 4;
+  optional bool enabled = 5;
+}
+
+message McpServerView {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  string header_name = 4;
+  bool has_credential = 5;
+  repeated string tool_allowlist = 6;
+  bool enabled = 7;
+}
+
+message McpServerViews {
+  repeated McpServerView items = 1;
+}
+
+message SaveMcpServerRequest {
+  // Empty on create.
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  string header_name = 4;
+  // Unset keeps the stored credential. Empty removes it.
+  optional string credential = 5;
+  repeated string tool_allowlist = 6;
+  bool enabled = 7;
+}
+
+service AgentService {
+  rpc ListAgents(google.protobuf.Empty) returns (AgentConfigs);
+  rpc ListEligibleAgents(EligibleAgentsRequest) returns (AgentConfigs);
+  rpc GetAgent(IdRequest) returns (AgentConfig);
+  rpc CreateAgent(AgentInput) returns (AgentCredentials);
+  rpc UpdateAgent(UpdateAgentRequest) returns (AgentConfig);
+  rpc DeleteAgent(IdRequest) returns (google.protobuf.Empty);
+  rpc RotateAgentCredentials(IdRequest) returns (AgentCredentials);
+  rpc GetLlm(google.protobuf.Empty) returns (LlmView);
+  rpc UpdateLlm(LlmInput) returns (LlmView);
+  rpc ListMcpServers(google.protobuf.Empty) returns (McpServerViews);
+  rpc SaveMcpServer(SaveMcpServerRequest) returns (McpServerView);
+  rpc DeleteMcpServer(IdRequest) returns (google.protobuf.Empty);
+}
+
+// People start and cancel runs. Agent identities claim, report and complete them.
+service AgentRunService {
+  rpc ListRuns(ListRunsRequest) returns (AgentRuns);
+  rpc GetRun(IdRequest) returns (AgentRun);
+  rpc StartRun(StartRunRequest) returns (AgentRun);
+  rpc CancelRun(IdRequest) returns (AgentRun);
+  rpc ClaimRuns(ClaimRunsRequest) returns (ClaimedRuns);
+  rpc ReportProgress(RunProgressRequest) returns (AgentRun);
+  rpc CompleteRun(CompleteRunRequest) returns (AgentRun);
+}

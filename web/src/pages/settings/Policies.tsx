@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Lock, LockOpen, MessageSquarePlus, ShieldCheck } from "lucide-react";
-import { api, qs, SEVERITIES, type ChangeRequest, type EffectiveSetting, type Enforcement, type Scope, type SettingDef, type SettingsView } from "@/lib/api";
+import { items, rpc, SEVERITIES, type ChangeRequest, type EffectiveSetting, type Enforcement, type Page, type Scope, type SettingDef, type SettingsView } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -25,8 +25,9 @@ export function PoliciesPage() {
   const [scope, setScope] = useState<Scope>("ORG");
   const [scopeId, setScopeId] = useState("");
   const [request, setRequest] = useState<{ def: SettingDef; value: string } | null>(null);
-  const path = scope === "ORG" ? "/settings?scope=ORG" : scopeId ? `/settings${qs({ scope, scopeId })}` : null;
-  const { data, reload } = useQuery<SettingsView>(path);
+  const ready = scope === "ORG" || !!scopeId;
+  const target = { scope, scopeId: scope === "ORG" ? "org" : scopeId };
+  const { data, reload } = useQuery(ready ? () => rpc.policy.getSettings<SettingsView>(target) : null, [scope, scopeId]);
   useLive((t) => t === "setting.changed", reload);
 
   const canManage = (() => {
@@ -41,7 +42,7 @@ export function PoliciesPage() {
 
   const save = async (key: string, value: string, enforcement: Enforcement) => {
     try {
-      await api.put("/settings", { scope, scopeId: scope === "ORG" ? "org" : scopeId, key, value, enforcement });
+      await rpc.policy.setSetting({ ...target, key, value, enforcement });
       reload();
     } catch (e) {
       const def = data?.schema.find((d) => d.key === key);
@@ -50,7 +51,7 @@ export function PoliciesPage() {
     }
   };
   const clear = async (key: string) => {
-    try { await api.del(`/settings${qs({ scope, scopeId: scope === "ORG" ? "org" : scopeId, key })}`); reload(); } catch (e) { toast.error(e); }
+    try { await rpc.policy.clearSetting({ ...target, key }); reload(); } catch (e) { toast.error(e); }
   };
 
   return (
@@ -74,7 +75,7 @@ export function PoliciesPage() {
           Teams inherit from their project, and projects from the organization. Administrators can lock a setting or set a minimum that lower levels cannot weaken.
         </p>
       </div>
-      {!path ? <Card><Empty title={`Select a ${scope.toLowerCase()}`} /></Card> : !data ? <div className="flex justify-center p-10"><Spinner /></div> : (
+      {!ready ? <Card><Empty title={`Select a ${scope.toLowerCase()}`} /></Card> : !data ? <div className="flex justify-center p-10"><Spinner /></div> : (
         <Card className="divide-y">
           {data.schema.filter((d) => d.scopes.includes(scope)).map((def) => {
             const eff = data.effective.find((e) => e.key === def.key)!;
@@ -151,7 +152,7 @@ function RequestChange({ request, scope, scopeId, onClose }: { request: { def: S
           <form className="space-y-4" onSubmit={async (e) => {
             e.preventDefault();
             try {
-              await api.post("/change-requests", { scope, scopeId, key: def.key, value: value || request!.value, reason });
+              await rpc.policy.requestChange({ scope, scopeId, key: def.key, value: value || request!.value, reason });
               toast.show("Request sent to the administrators.", "success");
               setReason(""); onClose();
             } catch (err) { toast.error(err); }
@@ -169,11 +170,11 @@ function RequestChange({ request, scope, scopeId, onClose }: { request: { def: S
 export function ChangeRequestsPage() {
   const { isAdmin, teamName, projects } = useSession();
   const toast = useToast();
-  const { data, reload } = useQuery<ChangeRequest[]>("/change-requests");
+  const { data, reload } = useQuery(() => items(rpc.policy.listChangeRequests<Page<ChangeRequest>>()), []);
   useLive((t) => t.startsWith("change_request."), reload);
   const scopeName = (c: ChangeRequest) => c.scope === "ORG" ? "Organization" : c.scope === "TEAM" ? teamName(c.scopeId) : projects.find((p) => p.id === c.scopeId)?.name ?? c.scopeId;
   const decide = async (id: string, approve: boolean) => {
-    try { await api.post(`/change-requests/${id}/decision`, { approve, note: "" }); reload(); } catch (e) { toast.error(e); }
+    try { await rpc.policy.decideChange({ id, approve, note: "" }); reload(); } catch (e) { toast.error(e); }
   };
   if (!data) return <div className="flex justify-center p-10"><Spinner /></div>;
   if (data.length === 0) return <Card><Empty icon={<MessageSquarePlus />} title="No change requests">When a setting is locked, people can request a change. Requests appear here.</Empty></Card>;

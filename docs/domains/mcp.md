@@ -43,4 +43,4 @@ Mayday exposes its use cases as tools. External agents use them through the MCP 
 
 ## Rebuild checklist
 
-Pass the MCP part of `ApiContractTest` and the tool parts of `AgentTest`.
+Pass the MCP part of `HttpEdgesContractTest`, the pull-agent part of `GrpcContractTest` and the tool parts of `AgentTest`.

@@ -106,21 +106,21 @@ data class IncidentFilter(
 
 interface IncidentRepository {
     /** Allocate the next monotonic incident number. Never reuses a number. */
-    fun nextNumber(): Long
-    fun get(id: String): Incident?
-    fun byNumber(number: Long): Incident?
+    suspend fun nextNumber(): Long
+    suspend fun get(id: String): Incident?
+    suspend fun byNumber(number: Long): Incident?
 
     /** Optimistic concurrency: fails with Conflict when the stored version differs from [expectedVersion]. */
-    fun save(incident: Incident, expectedVersion: Long?)
+    suspend fun save(incident: Incident, expectedVersion: Long?)
 
     /** Newest first. Cursor is opaque to callers. */
-    fun list(filter: IncidentFilter, cursor: String?, limit: Int): Page<Incident>
+    suspend fun list(filter: IncidentFilter, cursor: String?, limit: Int): Page<Incident>
 
     /** All incidents reported in [from, to) that match the filter; used for reports. */
-    fun scan(filter: IncidentFilter, consumer: (Incident) -> Unit)
+    suspend fun scan(filter: IncidentFilter, consumer: (Incident) -> Unit)
 }
 
 interface TimelineRepository {
-    fun append(entry: TimelineEntry)
-    fun list(incidentId: String): List<TimelineEntry>
+    suspend fun append(entry: TimelineEntry)
+    suspend fun list(incidentId: String): List<TimelineEntry>
 }

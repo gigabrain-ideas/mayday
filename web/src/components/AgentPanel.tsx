@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { Bot, FileText, GitPullRequest, ListChecks, ScrollText, Search, Wrench } from "lucide-react";
-import { ACTION_LABEL, api, type AgentAction, type AgentConfig, type AgentRun } from "@/lib/api";
+import { ACTION_LABEL, items, rpc, type AgentAction, type AgentConfig, type AgentRun, type Page } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -10,12 +10,14 @@ import { Button, Card, CardHeader, Dialog, DialogContent, Empty, Field, NativeSe
 import { DictateButton, RunStatusBadge } from "@/components/common";
 import { Markdown } from "@/lib/markdown";
 
+export interface Subject { kind: "INCIDENT" | "ALERT"; ref: string }
+
 export const ACTION_ICON: Record<AgentAction, typeof Bot> = {
   ANALYZE: Search, REMEDIATE: Wrench, PATCH: GitPullRequest, TIMELINE: ListChecks, POSTMORTEM: FileText, RUNBOOK: ScrollText,
 };
 
 /** Starts an agent on behalf of the signed-in person; the agent gets that person's permissions. */
-export function useAgentTrigger(base: string, onStarted?: () => void) {
+export function useAgentTrigger(subject: Subject, onStarted?: () => void) {
   const toast = useToast();
   const [pending, setPending] = useState<AgentAction | null>(null);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
@@ -27,7 +29,7 @@ export function useAgentTrigger(base: string, onStarted?: () => void) {
     setPending(action);
     setPrompt("");
     try {
-      const list = await api.get<AgentConfig[]>(`/agents/eligible?action=${action}`);
+      const list = await items(rpc.agents.listEligibleAgents<Page<AgentConfig>>({ action }));
       setAgents(list);
       setAgentId(list[0]?.id ?? "");
     } catch (e) {
@@ -39,7 +41,7 @@ export function useAgentTrigger(base: string, onStarted?: () => void) {
     if (!pending) return;
     setBusy(true);
     try {
-      await api.post<AgentRun>(`${base}/agent-runs`, { action: pending, agentId: agentId || undefined, prompt });
+      await rpc.agentRuns.startRun({ subjectKind: subject.kind, subjectRef: subject.ref, action: pending, agentId: agentId || undefined, prompt });
       toast.show(`${ACTION_LABEL[pending]} started. Progress appears on the timeline.`, "success");
       setPending(null);
       onStarted?.();
@@ -84,9 +86,9 @@ export function useAgentTrigger(base: string, onStarted?: () => void) {
   return { open, dialog };
 }
 
-export function AgentActions({ base, actions }: { base: string; actions: AgentAction[] }) {
+export function AgentActions({ subject, actions }: { subject: Subject; actions: AgentAction[] }) {
   const { canWrite } = useSession();
-  const trigger = useAgentTrigger(base);
+  const trigger = useAgentTrigger(subject);
   if (!canWrite) return null;
   return (
     <Card>
@@ -106,8 +108,8 @@ export function AgentActions({ base, actions }: { base: string; actions: AgentAc
   );
 }
 
-export function AgentRuns({ base, subjectId }: { base: string; subjectId: string }) {
-  const { data, reload } = useQuery<AgentRun[]>(`${base}/agent-runs`);
+export function AgentRuns({ subject, subjectId }: { subject: Subject; subjectId: string }) {
+  const { data, reload } = useQuery(() => items(rpc.agentRuns.listRuns<Page<AgentRun>>({ subjectKind: subject.kind, subjectRef: subject.ref })), [subject.kind, subject.ref]);
   const { userName, canWrite } = useSession();
   const toast = useToast();
   useLive((t, _id, d) => t === "agent_run.updated" && d.subjectId === subjectId, reload);
@@ -133,7 +135,7 @@ export function AgentRuns({ base, subjectId }: { base: string; subjectId: string
               {r.output && <Markdown text={r.output} />}
               {r.error && <p className="text-destructive">{r.error}</p>}
               {canWrite && !["SUCCEEDED", "FAILED", "CANCELLED"].includes(r.status) && (
-                <Button size="sm" variant="ghost" onClick={() => api.post(`/agent-runs/${r.id}/cancel`).then(reload).catch(toast.error)}>Cancel run</Button>
+                <Button size="sm" variant="ghost" onClick={() => rpc.agentRuns.cancelRun({ id: r.id }).then(reload).catch(toast.error)}>Cancel run</Button>
               )}
             </div>
           </details>

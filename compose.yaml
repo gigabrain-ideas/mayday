@@ -21,7 +21,8 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8080:8080"   # web, gRPC-Web, MCP, alert intake
+      - "9090:9090"   # native gRPC
     environment:
       MAYDAY_PUBLIC_URL: http://localhost:8080
       MAYDAY_DATABASE_URL: postgresql://postgres:5432/mayday

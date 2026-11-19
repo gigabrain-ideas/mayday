@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { qs, SEVERITIES, type Report, type Severity } from "@/lib/api";
+import { rpc, SEVERITIES, type Report, type Severity } from "@/lib/api";
 import { useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { cn, duration } from "@/lib/utils";
@@ -31,7 +31,7 @@ export function ReportsPage() {
     const end = new Date();
     return { from: new Date(end.getTime() - days * 86400000).toISOString(), to: end.toISOString() };
   }, [period, from, to]);
-  const { data: r, loading } = useQuery<Report>(`/reports${qs({ team, severity, from: range.from, to: range.to })}`);
+  const { data: r, loading } = useQuery(() => rpc.reports.getReport<Report>({ team, severity, from: range.from, to: range.to }), [team.join(), severity.join(), range.from, range.to]);
 
   const set = (k: string, v: string | string[]) => {
     const n = new URLSearchParams(params);

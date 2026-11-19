@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Bot, Plug, Plus, RotateCw, Trash2 } from "lucide-react";
 import {
-  ACTION_LABEL, AGENT_ACTIONS, api, SEVERITIES, type AgentAction, type AgentConfig, type AgentCredentials, type AgentRun, type AgentTrigger, type LlmView,
-  type McpServerView, type OrgRole,
+  ACTION_LABEL, AGENT_ACTIONS, items, rpc, SEVERITIES, type AgentAction, type AgentConfig, type AgentCredentials, type AgentRun, type AgentTrigger, type LlmView,
+  type McpServerView, type OrgRole, type Page,
 } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
@@ -18,8 +18,8 @@ const blank: Draft = { name: "", description: "", kind: "EXTERNAL", delivery: "P
 export function AgentsPage() {
   const { isAdmin, me } = useSession();
   const toast = useToast();
-  const { data, reload } = useQuery<AgentConfig[]>("/agents");
-  const runs = useQuery<AgentRun[]>("/agent-runs?limit=25");
+  const { data, reload } = useQuery(() => items(rpc.agents.listAgents<Page<AgentConfig>>()), []);
+  const runs = useQuery(() => items(rpc.agentRuns.listRuns<Page<AgentRun>>({ limit: 25 })), []);
   useLive((t) => t === "agent.changed", reload);
   useLive((t) => t === "agent_run.updated", runs.reload);
   const [edit, setEdit] = useState<{ id?: string; draft: Draft } | null>(null);
@@ -28,8 +28,8 @@ export function AgentsPage() {
   const save = async () => {
     if (!edit) return;
     try {
-      if (edit.id) await api.put(`/agents/${edit.id}`, edit.draft);
-      else setCreds(await api.post<AgentCredentials>("/agents", edit.draft));
+      if (edit.id) await rpc.agents.updateAgent({ id: edit.id, agent: edit.draft });
+      else setCreds(await rpc.agents.createAgent<AgentCredentials>(edit.draft));
       setEdit(null);
       reload();
     } catch (e) { toast.error(e); }
@@ -65,8 +65,8 @@ export function AgentsPage() {
                 {isAdmin && (
                   <div className="flex gap-1">
                     <Button size="sm" variant="ghost" onClick={() => setEdit({ id: a.id, draft: { ...a } })}>Edit</Button>
-                    {a.kind === "EXTERNAL" && <Button size="sm" variant="ghost" onClick={() => api.post<AgentCredentials>(`/agents/${a.id}/credentials`).then(setCreds).catch(toast.error)}><RotateCw /> Credentials</Button>}
-                    {a.kind === "EXTERNAL" && <Button size="icon" variant="ghost" aria-label="Delete" onClick={() => toast.undoable(`${a.name} will be deleted.`, () => api.del(`/agents/${a.id}`).then(reload))}><Trash2 /></Button>}
+                    {a.kind === "EXTERNAL" && <Button size="sm" variant="ghost" onClick={() => rpc.agents.rotateAgentCredentials<AgentCredentials>({ id: a.id }).then(setCreds).catch(toast.error)}><RotateCw /> Credentials</Button>}
+                    {a.kind === "EXTERNAL" && <Button size="icon" variant="ghost" aria-label="Delete" onClick={() => toast.undoable(`${a.name} will be deleted.`, () => rpc.agents.deleteAgent({ id: a.id }).then(reload))}><Trash2 /></Button>}
                   </div>
                 )}
               </div>
@@ -102,7 +102,7 @@ export function AgentsPage() {
               {creds.signingSecret && creds.agent.delivery === "PUSH" && <SecretOnce label="Webhook signing secret" value={creds.signingSecret} />}
               <p className="text-[12px] text-muted-foreground">
                 Push agents receive POST requests with the header X-Mayday-Signature: sha256=HMAC(secret, timestamp + "." + body). Pull agents call
-                POST /api/v1/agent-runs/claim or the MCP tool claim_agent_runs. Each run carries a delegated token when a person started it.
+                the gRPC method AgentRunService.ClaimRuns or the MCP tool claim_agent_runs. Each run carries a delegated token when a person started it.
               </p>
             </div>
           </DialogContent>
@@ -186,11 +186,11 @@ function AgentForm({ draft, isNew, onChange, onSave }: { draft: Draft; isNew: bo
 export function LlmPage() {
   const toast = useToast();
   const { reloadMe } = useSession();
-  const { data, setData } = useQuery<LlmView>("/llm");
+  const { data, setData } = useQuery(() => rpc.agents.getLlm<LlmView>(), []);
   const [key, setKey] = useState("");
   if (!data) return <div className="flex justify-center p-10"><Spinner /></div>;
-  const save = async (body: Record<string, unknown>) => {
-    try { setData(await api.put<LlmView>("/llm", body)); reloadMe(); toast.show("LLM provider saved.", "success"); } catch (e) { toast.error(e); }
+  const save = async (body: { model: string; effort: string; baseUrl: string; enabled: boolean; apiKey?: string }) => {
+    try { setData(await rpc.agents.updateLlm<LlmView>(body)); reloadMe(); toast.show("LLM provider saved.", "success"); } catch (e) { toast.error(e); }
   };
   return (
     <Card className="max-w-2xl p-5">
@@ -224,7 +224,7 @@ export function LlmPage() {
 export function McpPage() {
   const { isAdmin } = useSession();
   const toast = useToast();
-  const { data, reload } = useQuery<McpServerView[]>("/mcp-servers");
+  const { data, reload } = useQuery(() => items(rpc.agents.listMcpServers<Page<McpServerView>>()), []);
   const [form, setForm] = useState({ name: "", url: "", headerName: "Authorization", credential: "", toolAllowlist: "" });
   const origin = window.location.origin;
   return (
@@ -255,7 +255,7 @@ export function McpPage() {
             <div key={s.id} className="flex items-center gap-3 px-4 py-3">
               <Plug className="size-4" />
               <div className="min-w-0 flex-1"><div>{s.name} {!s.enabled && <Badge tone="warning">Disabled</Badge>}</div><div className="truncate text-[12px] text-muted-foreground">{s.url}{s.toolAllowlist.length ? ` · ${s.toolAllowlist.length} tools allowed` : " · all tools"}</div></div>
-              {isAdmin && <Button size="icon" variant="ghost" aria-label="Remove" onClick={() => toast.undoable(`${s.name} will be removed.`, () => api.del(`/mcp-servers/${s.id}`).then(reload))}><Trash2 /></Button>}
+              {isAdmin && <Button size="icon" variant="ghost" aria-label="Remove" onClick={() => toast.undoable(`${s.name} will be removed.`, () => rpc.agents.deleteMcpServer({ id: s.id }).then(reload))}><Trash2 /></Button>}
             </div>
           ))}
           {data?.length === 0 && <Empty title="No MCP servers" />}
@@ -264,7 +264,7 @@ export function McpPage() {
           <form className="space-y-3 border-t p-4" onSubmit={async (e) => {
             e.preventDefault();
             try {
-              await api.post("/mcp-servers", { ...form, credential: form.credential || undefined, toolAllowlist: form.toolAllowlist.split(",").map((x) => x.trim()).filter(Boolean) });
+              await rpc.agents.saveMcpServer({ ...form, credential: form.credential || undefined, toolAllowlist: form.toolAllowlist.split(",").map((x) => x.trim()).filter(Boolean) });
               setForm({ name: "", url: "", headerName: "Authorization", credential: "", toolAllowlist: "" });
               reload();
             } catch (err) { toast.error(err); }

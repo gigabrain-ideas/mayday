@@ -41,7 +41,18 @@ persistence:
 
 service:
   type: ClusterIP
-  port: 80
+  port: 80                    # web interface, gRPC-Web, MCP, alert intake
+  grpcPort: 9090              # native gRPC (h2c)
+
+# Native gRPC for scripts and services. Browsers use gRPC-Web on the HTTP port and need no extra setup.
+grpc:
+  enabled: true
+  ingress:
+    enabled: false            # needs an ingress controller with gRPC support and TLS (HTTP/2)
+    host: grpc.mayday.example.com
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: GRPC
+    tls: []
 
 ingress:
   enabled: false

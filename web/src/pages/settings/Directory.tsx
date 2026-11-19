@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Copy, KeyRound, Plus, Trash2, Users } from "lucide-react";
-import { api, type ApiToken, type IssuedToken, type OrgRole, type Page, type TeamRole, type TokenScope, type User } from "@/lib/api";
+import { items, rpc, type ApiToken, type IssuedToken, type OrgRole, type Page, type TeamRole, type TokenScope, type User } from "@/lib/api";
 import { useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -18,7 +18,7 @@ export function DirectoryPage() {
       <Card>
         <CardHeader title="Projects" />
         {isAdmin && (
-          <form className="flex gap-2 border-b p-4" onSubmit={(e) => { e.preventDefault(); run(api.post("/projects", { name: project })); setProject(""); }}>
+          <form className="flex gap-2 border-b p-4" onSubmit={(e) => { e.preventDefault(); run(rpc.directory.createProject({ name: project })); setProject(""); }}>
             <Input value={project} onChange={(e) => setProject(e.target.value)} placeholder="New project name" required />
             <Button type="submit" variant="outline"><Plus /> Add</Button>
           </form>
@@ -27,7 +27,7 @@ export function DirectoryPage() {
           {projects.map((p) => (
             <div key={p.id} className="flex items-center gap-3 px-4 py-3">
               <div className="flex-1"><div>{p.name}</div><div className="text-[12px] text-muted-foreground">{p.slug} · {teams.filter((t) => t.projectId === p.id).length} teams</div></div>
-              {isAdmin && <Button variant="ghost" size="icon" aria-label="Delete project" onClick={() => toast.undoable(`Project ${p.name} will be deleted.`, () => api.del(`/projects/${p.id}`).then(reloadDirectory))}><Trash2 /></Button>}
+              {isAdmin && <Button variant="ghost" size="icon" aria-label="Delete project" onClick={() => toast.undoable(`Project ${p.name} will be deleted.`, () => rpc.directory.deleteProject({ id: p.id }).then(reloadDirectory))}><Trash2 /></Button>}
             </div>
           ))}
           {projects.length === 0 && <Empty title="No projects">Projects group teams and share settings.</Empty>}
@@ -36,7 +36,7 @@ export function DirectoryPage() {
       <Card>
         <CardHeader title="Teams" />
         {isAdmin && (
-          <form className="flex flex-wrap gap-2 border-b p-4" onSubmit={(e) => { e.preventDefault(); run(api.post("/teams", { name: team.name, projectId: team.projectId || undefined })); setTeam({ name: "", projectId: "" }); }}>
+          <form className="flex flex-wrap gap-2 border-b p-4" onSubmit={(e) => { e.preventDefault(); run(rpc.directory.createTeam({ name: team.name, projectId: team.projectId || undefined })); setTeam({ name: "", projectId: "" }); }}>
             <Input value={team.name} onChange={(e) => setTeam({ ...team, name: e.target.value })} placeholder="New team name" required className="flex-1" />
             <NativeSelect value={team.projectId} onChange={(e) => setTeam({ ...team, projectId: e.target.value })} className="w-44">
               <option value="">No project</option>
@@ -50,12 +50,12 @@ export function DirectoryPage() {
             <div key={t.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
               <div className="flex-1"><div>{t.name}</div><div className="text-[12px] text-muted-foreground">{t.slug}</div></div>
               {isAdmin ? (
-                <NativeSelect value={t.projectId ?? ""} onChange={(e) => run(api.patch(`/teams/${t.id}`, { name: t.name, projectId: e.target.value }))} className="w-44" aria-label="Project">
+                <NativeSelect value={t.projectId ?? ""} onChange={(e) => run(rpc.directory.updateTeam({ id: t.id, name: t.name, description: t.description, projectId: e.target.value }))} className="w-44" aria-label="Project">
                   <option value="">No project</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </NativeSelect>
               ) : <span className="text-muted-foreground">{projects.find((p) => p.id === t.projectId)?.name}</span>}
-              {isAdmin && <Button variant="ghost" size="icon" aria-label="Delete team" onClick={() => toast.undoable(`Team ${t.name} will be deleted.`, () => api.del(`/teams/${t.id}`).then(reloadDirectory))}><Trash2 /></Button>}
+              {isAdmin && <Button variant="ghost" size="icon" aria-label="Delete team" onClick={() => toast.undoable(`Team ${t.name} will be deleted.`, () => rpc.directory.deleteTeam({ id: t.id }).then(reloadDirectory))}><Trash2 /></Button>}
             </div>
           ))}
         </div>
@@ -68,11 +68,11 @@ export function UsersPage() {
   const { isAdmin, teams, me, reloadDirectory } = useSession();
   const toast = useToast();
   const [q, setQ] = useState("");
-  const { data, reload } = useQuery<Page<User>>(`/users?limit=200${q ? `&q=${encodeURIComponent(q)}` : ""}`);
+  const { data, reload } = useQuery(() => rpc.users.listUsers<Page<User>>({ limit: 200, q: q || undefined }), [q]);
   const [editing, setEditing] = useState<User | null>(null);
   const [invite, setInvite] = useState({ email: "", name: "", role: "MEMBER" as OrgRole });
-  const update = async (id: string, body: Record<string, unknown>) => {
-    try { await api.patch(`/users/${id}`, body); reload(); reloadDirectory(); } catch (e) { toast.error(e); }
+  const update = async (id: string, body: { role?: string; teams?: Record<string, TeamRole>; replaceTeams?: boolean; disabled?: boolean }) => {
+    try { await rpc.users.updateUser({ id, ...body }); reload(); reloadDirectory(); } catch (e) { toast.error(e); }
   };
   return (
     <div className="space-y-4">
@@ -81,7 +81,7 @@ export function UsersPage() {
         {isAdmin && (
           <form className="ml-auto flex flex-wrap gap-2" onSubmit={async (e) => {
             e.preventDefault();
-            try { await api.post("/users", invite); setInvite({ email: "", name: "", role: "MEMBER" }); reload(); reloadDirectory(); } catch (err) { toast.error(err); }
+            try { await rpc.users.createUser(invite); setInvite({ email: "", name: "", role: "MEMBER" }); reload(); reloadDirectory(); } catch (err) { toast.error(err); }
           }}>
             <Input type="email" value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} placeholder="email@company.com" required className="w-56" />
             <NativeSelect value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value as OrgRole })} className="w-32">
@@ -137,7 +137,7 @@ export function UsersPage() {
               ))}
               <div className="flex justify-between gap-2 pt-4">
                 <Button variant="destructive" size="sm" onClick={() => { update(editing.id, { disabled: !editing.disabled }); setEditing(null); }}>{editing.disabled ? "Enable account" : "Disable account"}</Button>
-                <Button onClick={() => { update(editing.id, { teams: editing.teams }); setEditing(null); }}>Save</Button>
+                <Button onClick={() => { update(editing.id, { teams: editing.teams, replaceTeams: true }); setEditing(null); }}>Save</Button>
               </div>
             </div>
           </DialogContent>
@@ -162,7 +162,7 @@ export function SecretOnce({ label, value }: { label: string; value: string }) {
 export function TokensPage() {
   const { isAdmin } = useSession();
   const toast = useToast();
-  const { data, reload } = useQuery<ApiToken[]>("/tokens");
+  const { data, reload } = useQuery(() => items(rpc.users.listTokens<Page<ApiToken>>()), []);
   const [form, setForm] = useState({ name: "", scopes: ["READ"] as TokenScope[], ttlDays: "90" });
   const [issued, setIssued] = useState<IssuedToken | null>(null);
   const all: TokenScope[] = ["READ", "WRITE", "ALERTS_INGEST", ...(isAdmin ? ["ADMIN" as TokenScope] : [])];
@@ -181,7 +181,7 @@ export function TokensPage() {
                   <div className="text-[12px] text-muted-foreground">created {ago(t.createdAt)}{t.expiresAt ? ` · expires ${new Date(t.expiresAt).toLocaleDateString()}` : " · no expiry"}</div>
                 </div>
                 <div className="flex gap-1">{t.scopes.map((s) => <Badge key={s} tone="outline">{s}</Badge>)}</div>
-                <Button variant="ghost" size="icon" aria-label="Revoke" onClick={() => toast.undoable(`Token ${t.name} will be revoked.`, () => api.del(`/tokens/${t.id}`).then(reload))}><Trash2 /></Button>
+                <Button variant="ghost" size="icon" aria-label="Revoke" onClick={() => toast.undoable(`Token ${t.name} will be revoked.`, () => rpc.users.revokeToken({ id: t.id }).then(reload))}><Trash2 /></Button>
               </div>
             ))}
           </div>
@@ -191,7 +191,7 @@ export function TokensPage() {
         <form className="space-y-4" onSubmit={async (e) => {
           e.preventDefault();
           try {
-            setIssued(await api.post<IssuedToken>("/tokens", { name: form.name, scopes: form.scopes, ttlDays: form.ttlDays ? Number(form.ttlDays) : undefined }));
+            setIssued(await rpc.users.issueToken<IssuedToken>({ name: form.name, scopes: form.scopes, ttlDays: form.ttlDays ? Number(form.ttlDays) : undefined }));
             setForm({ ...form, name: "" });
             reload();
           } catch (err) { toast.error(err); }

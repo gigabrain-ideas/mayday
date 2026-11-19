@@ -12,7 +12,7 @@ class InternalAgent(
     private val clock: Clock,
     private val maxTurns: Int = 24,
 ) {
-    fun run(agent: AgentConfig, run: AgentRun, principal: Principal, subject: JsonObject): String {
+    suspend fun run(agent: AgentConfig, run: AgentRun, principal: Principal, subject: JsonObject): String {
         val tools = catalog.tools(principal, internal = true)
         val messages = mutableListOf(LlmMessage(LlmRole.USER, listOf(LlmBlock.Text(task(run, subject)))))
         val system = SYSTEM_PROMPT + if (agent.instructions.isNotBlank()) "\n\nOrganization instructions:\n${agent.instructions}" else ""

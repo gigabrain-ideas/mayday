@@ -2,7 +2,7 @@ import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import "./index.css";
-import { api, type Me } from "@/lib/api";
+import { rpc, type Me } from "@/lib/api";
 import { SessionProvider } from "@/lib/session";
 import { ToastProvider } from "@/lib/toast";
 import { TooltipProvider, Spinner } from "@/components/ui";
@@ -22,7 +22,7 @@ try {
 
 function Root() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
-  const loadMe = useCallback(() => api.get<Me>("/me").then(setMe).catch(() => setMe(null)), []);
+  const loadMe = useCallback(() => rpc.auth.getMe<Me>().then(setMe).catch(() => setMe(null)), []);
   useEffect(() => {
     loadMe();
     const off = () => setMe(null);

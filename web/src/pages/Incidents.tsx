@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { Plus, Search, Siren } from "lucide-react";
-import { api, qs, SEVERITIES, type Incident, type Page, type Severity } from "@/lib/api";
+import { rpc, SEVERITIES, type Incident, type Page, type Severity } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -19,8 +19,9 @@ export function IncidentsPage() {
   const [q, setQ] = useState(params.get("q") ?? "");
   const [extra, setExtra] = useState<Incident[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
-  const query = qs({ open: scope === "open" ? "true" : undefined, severity, team, q: params.get("q"), limit: 50 });
-  const { data, loading, reload } = useQuery<Page<Incident>>(`/incidents${query}`);
+  const filter = { open: scope === "open", severity, team, q: params.get("q") || undefined, limit: 50 };
+  const list = (cursor?: string) => rpc.incidents.listIncidents<Page<Incident>>({ ...filter, cursor });
+  const { data, loading, reload } = useQuery(() => list(), [JSON.stringify(filter)]);
   useLive((t) => t.startsWith("incident."), () => { setExtra([]); reload(); });
 
   const set = (k: string, v: string | string[]) => {
@@ -34,7 +35,7 @@ export function IncidentsPage() {
   const items = [...(data?.items ?? []), ...extra];
   const next = extra.length ? cursor : data?.nextCursor;
   const more = async () => {
-    const p = await api.get<Page<Incident>>(`/incidents${query}&cursor=${next}`);
+    const p = await list(next);
     setExtra((e) => [...e, ...p.items]);
     setCursor(p.nextCursor);
   };
@@ -105,7 +106,7 @@ function DeclareIncident() {
     if (form.teamIds.length === 0) return toast.show("Select at least one responder team.", "error");
     setBusy(true);
     try {
-      const inc = await api.post<Incident>("/incidents", {
+      const inc = await rpc.incidents.declareIncident<Incident>({
         ...form, commanderId: form.commanderId || undefined, impactStartedAt: fromLocalInput(form.impactStartedAt),
       });
       setOpen(false);

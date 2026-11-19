@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+
+enum AlertStatus {
+  ALERT_STATUS_UNSPECIFIED = 0;
+  ALERT_STATUS_FIRING = 1;
+  ALERT_STATUS_ACKNOWLEDGED = 2;
+  ALERT_STATUS_RESOLVED = 3;
+}
+
+message AlertUpdate {
+  google.protobuf.Timestamp at = 1;
+  Actor actor = 2;
+  string text = 3;
+}
+
+message Alert {
+  string id = 1;
+  string fingerprint = 2;
+  string source = 3;
+  string title = 4;
+  string description = 5;
+  Severity severity = 6;
+  AlertStatus status = 7;
+  string team_id = 8;
+  map<string, string> labels = 9;
+  optional string external_url = 10;
+  optional string incident_id = 11;
+  google.protobuf.Timestamp first_seen_at = 12;
+  google.protobuf.Timestamp last_seen_at = 13;
+  int64 count = 14;
+  Actor acknowledged_by = 15;
+  google.protobuf.Timestamp resolved_at = 16;
+  repeated AlertUpdate updates = 17;
+  int64 version = 18;
+}
+
+message AlertPage {
+  repeated Alert items = 1;
+  optional string next_cursor = 2;
+}
+
+// An alert signal from a monitoring system. Mayday deduplicates by fingerprint.
+message AlertSignal {
+  string title = 1;
+  Severity severity = 2;
+  // Team id or slug.
+  string team = 3;
+  string source = 4;
+  optional string fingerprint = 5;
+  AlertStatus status = 6;
+  string description = 7;
+  map<string, string> labels = 8;
+  optional string external_url = 9;
+}
+
+message IngestResult {
+  Alert alert = 1;
+  bool created = 2;
+  optional string incident_key = 3;
+}
+
+message ListAlertsRequest {
+  repeated AlertStatus status = 1;
+  repeated Severity severity = 2;
+  repeated string team = 3;
+  optional string q = 4;
+  google.protobuf.Timestamp from = 5;
+  google.protobuf.Timestamp to = 6;
+  optional string cursor = 7;
+  int32 limit = 8;
+}
+
+message AlertTextRequest {
+  string id = 1;
+  string text = 2;
+}
+
+message LinkAlertRequest {
+  string id = 1;
+  // Incident key, number or id.
+  string incident = 2;
+}
+
+service AlertService {
+  rpc ListAlerts(ListAlertsRequest) returns (AlertPage);
+  rpc IngestAlert(AlertSignal) returns (IngestResult);
+  rpc GetAlert(IdRequest) returns (Alert);
+  rpc AcknowledgeAlert(IdRequest) returns (Alert);
+  rpc ResolveAlert(AlertTextRequest) returns (Alert);
+  rpc AddAlertUpdate(AlertTextRequest) returns (Alert);
+  rpc LinkAlert(LinkAlertRequest) returns (Alert);
+}

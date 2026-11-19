@@ -25,12 +25,12 @@ class McpServer(private val catalog: ToolCatalog, private val version: String) {
     }
 
     /** Returns null for notifications. */
-    fun handle(principal: Principal, body: JsonElement): JsonElement? = when (body) {
+    suspend fun handle(principal: Principal, body: JsonElement): JsonElement? = when (body) {
         is JsonArray -> buildJsonArray { body.forEach { m -> handleOne(principal, m)?.let { add(it) } } }.takeIf { it.isNotEmpty() }
         else -> handleOne(principal, body)
     }
 
-    private fun handleOne(principal: Principal, msg: JsonElement): JsonElement? {
+    private suspend fun handleOne(principal: Principal, msg: JsonElement): JsonElement? {
         val o = msg as? JsonObject ?: return error(JsonNull, -32600, "Invalid request")
         val id = o["id"]
         val method = (o["method"] as? JsonPrimitive)?.content ?: return error(id ?: JsonNull, -32600, "Invalid request")
@@ -46,9 +46,9 @@ class McpServer(private val catalog: ToolCatalog, private val version: String) {
                     put("instructions", INSTRUCTIONS)
                 })
                 "ping" -> result(id, JsonObject(emptyMap()))
-                "tools/list" -> result(id, buildJsonObject {
+                "tools/list" -> { val tools = catalog.tools(principal, internal = false); result(id, buildJsonObject {
                     putJsonArray("tools") {
-                        catalog.tools(principal, internal = false).forEach { t ->
+                        tools.forEach { t ->
                             add(buildJsonObject {
                                 put("name", t.name)
                                 put("description", t.description)
@@ -60,7 +60,7 @@ class McpServer(private val catalog: ToolCatalog, private val version: String) {
                             })
                         }
                     }
-                })
+                }) }
                 "tools/call" -> {
                     val name = params["name"]?.jsonPrimitive?.content ?: return error(id, -32602, "Missing tool name")
                     val args = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())

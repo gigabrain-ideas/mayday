@@ -1,0 +1,52 @@
+# Every setting has a MAYDAY_* environment variable. See docs/deployment.md.
+spring:
+  application.name: mayday
+  main.banner-mode: off
+  codec.max-in-memory-size: 4MB
+  grpc.server:
+    port: ${MAYDAY_GRPC_PORT:9090}
+    inprocess.name: mayday-inprocess
+    shutdown.grace-period: 10s
+
+server:
+  port: ${PORT:${MAYDAY_PORT:8080}}
+  address: ${MAYDAY_HOST:0.0.0.0}
+  shutdown: graceful
+  compression:
+    enabled: true
+    min-response-size: 1KB
+
+management:
+  endpoints.web:
+    base-path: /
+    exposure.include: health,prometheus
+    path-mapping:
+      health: healthz
+      prometheus: metrics
+  endpoint.health.probes:
+    enabled: true
+    add-additional-paths: true
+
+mayday:
+  public-url: ${MAYDAY_PUBLIC_URL:http://localhost:${server.port}}
+  data-dir: ${MAYDAY_DATA_DIR:./data}
+  database:
+    url: ${MAYDAY_DATABASE_URL:}
+    user: ${MAYDAY_DATABASE_USER:}
+    password: ${MAYDAY_DATABASE_PASSWORD:}
+    pool: ${MAYDAY_DATABASE_POOL:20}
+  secret-key: ${MAYDAY_SECRET_KEY:}
+  dev-login: ${MAYDAY_DEV_LOGIN:false}
+  demo: ${MAYDAY_DEMO:false}
+  admin-emails: ${MAYDAY_ADMIN_EMAILS:}
+  oidc:
+    issuer: ${MAYDAY_OIDC_ISSUER:}
+    client-id: ${MAYDAY_OIDC_CLIENT_ID:}
+    client-secret: ${MAYDAY_OIDC_CLIENT_SECRET:}
+    scopes: ${MAYDAY_OIDC_SCOPES:openid email profile}
+    audiences: ${MAYDAY_OIDC_AUDIENCES:}
+  anthropic-api-key: ${ANTHROPIC_API_KEY:}
+  web-dir: ${MAYDAY_WEB_DIR:}
+  session-hours: ${MAYDAY_SESSION_HOURS:12}
+  max-live-connections: ${MAYDAY_MAX_LIVE_CONNECTIONS:100000}
+  agent-concurrency: ${MAYDAY_AGENT_CONCURRENCY:16}

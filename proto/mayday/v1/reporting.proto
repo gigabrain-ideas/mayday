@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+
+message ReportRequest {
+  // Team ids or slugs. Empty means all teams.
+  repeated string team = 1;
+  repeated Severity severity = 2;
+  // Default: 30 days before "to".
+  google.protobuf.Timestamp from = 3;
+  // Default: now.
+  google.protobuf.Timestamp to = 4;
+}
+
+message TeamRow {
+  string team_id = 1;
+  string team_name = 2;
+  int32 incidents = 3;
+  int32 open = 4;
+  optional double mttr_minutes = 5;
+  int32 alerts = 6;
+}
+
+message DayRow {
+  string day = 1;
+  map<string, int32> by_severity = 2;
+  int32 alerts = 3;
+}
+
+message IncidentRow {
+  string key = 1;
+  string title = 2;
+  Severity severity = 3;
+  string status = 4;
+  optional double duration_minutes = 5;
+  repeated string team_ids = 6;
+}
+
+message Report {
+  int32 incidents = 1;
+  int32 open = 2;
+  int32 resolved = 3;
+  int32 alerts = 4;
+  int32 alerts_with_incident = 5;
+  map<string, int32> by_severity = 6;
+  optional double mtta_minutes = 7;
+  optional double mttr_minutes = 8;
+  optional double mttd_minutes = 9;
+  int32 postmortems_required = 10;
+  int32 postmortems_published = 11;
+  int32 postmortems_overdue = 12;
+  repeated TeamRow by_team = 13;
+  repeated DayRow by_day = 14;
+  repeated IncidentRow longest = 15;
+}
+
+service ReportService {
+  rpc GetReport(ReportRequest) returns (Report);
+}

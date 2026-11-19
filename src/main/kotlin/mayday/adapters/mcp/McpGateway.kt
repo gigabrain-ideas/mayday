@@ -19,6 +19,8 @@ import mayday.directory.slugify
 import mayday.identity.Principal
 import mayday.shared.JSON
 import mayday.shared.SecretBox
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -102,10 +104,10 @@ class McpGateway(private val servers: McpServerRepository, private val box: Secr
     private data class Cached(val at: Instant, val server: McpServerConfig, val client: McpClient, val tools: List<ToolSpec>, val names: Map<String, String>)
     private val cache = ConcurrentHashMap<String, Cached>()
 
-    private fun load(s: McpServerConfig): Cached? {
+    private suspend fun load(s: McpServerConfig): Cached? {
         val c = cache[s.id]
         if (c != null && c.server == s && c.at.isAfter(Instant.now().minusSeconds(120))) return c
-        return runCatching {
+        return withContext(Dispatchers.IO) { runCatching {
             val client = c?.takeIf { it.server == s }?.client ?: McpClient(s.url, s.headerName, box.open(s.credentialSealed), http)
             val prefix = slugify(s.name).replace('-', '_')
             val names = HashMap<String, String>()
@@ -118,20 +120,20 @@ class McpGateway(private val servers: McpServerRepository, private val box: Secr
                     (t["inputSchema"] as? JsonObject) ?: buildJsonObject { put("type", "object") })
             }
             Cached(Instant.now(), s, client, tools, names).also { cache[s.id] = it }
-        }.getOrNull()
+        }.getOrNull() }
     }
 
-    override fun tools(principal: Principal, internal: Boolean): List<ToolSpec> {
+    override suspend fun tools(principal: Principal, internal: Boolean): List<ToolSpec> {
         if (!internal) return emptyList()
         return servers.list().filter { it.enabled }.mapNotNull { load(it) }.flatMap { it.tools }
     }
 
-    override fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome {
+    override suspend fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome {
         if (!internal) return ToolOutcome("Unknown tool '$name'", true)
         for (s in servers.list().filter { it.enabled }) {
             val c = load(s) ?: continue
             val remote = c.names[name] ?: continue
-            return runCatching { c.client.callTool(remote, args) }.getOrElse { ToolOutcome(it.message ?: "Tool failed", true) }
+            return withContext(Dispatchers.IO) { runCatching { c.client.callTool(remote, args) } }.getOrElse { ToolOutcome(it.message ?: "Tool failed", true) }
         }
         return ToolOutcome("Unknown tool '$name'", true)
     }

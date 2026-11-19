@@ -61,27 +61,27 @@ data class ApiToken(
 )
 
 interface UserRepository {
-    fun get(id: String): User?
-    fun byEmail(email: String): User?
-    fun byExternalId(externalId: String): User?
-    fun list(query: String?, cursor: String?, limit: Int): Page<User>
-    fun count(): Long
-    fun save(user: User)
+    suspend fun get(id: String): User?
+    suspend fun byEmail(email: String): User?
+    suspend fun byExternalId(externalId: String): User?
+    suspend fun list(query: String?, cursor: String?, limit: Int): Page<User>
+    suspend fun count(): Long
+    suspend fun save(user: User)
 }
 
 interface TokenRepository {
-    fun byHash(hash: String): ApiToken?
-    fun byOwner(kind: OwnerKind, ownerId: String): List<ApiToken>
-    fun get(id: String): ApiToken?
-    fun save(token: ApiToken)
-    fun delete(id: String)
+    suspend fun byHash(hash: String): ApiToken?
+    suspend fun byOwner(kind: OwnerKind, ownerId: String): List<ApiToken>
+    suspend fun get(id: String): ApiToken?
+    suspend fun save(token: ApiToken)
+    suspend fun delete(id: String)
 }
 
 /** Agent identity as seen by the identity context; the agents context provides it. */
 data class AgentIdentity(val id: String, val name: String, val role: OrgRole, val enabled: Boolean)
 
-fun interface AgentIdentityLookup {
-    fun find(agentId: String): AgentIdentity?
+interface AgentIdentityLookup {
+    suspend fun find(agentId: String): AgentIdentity?
 }
 
 /**
@@ -150,11 +150,11 @@ class IdentityService(
     private val clock: Clock,
     private val bootstrapAdmins: Set<String>,
 ) {
-    fun user(id: String) = users.get(id) ?: throw NotFound("User")
-    fun list(query: String?, cursor: String?, limit: Int) = users.list(query, cursor, limit.coerceIn(1, 500))
+    suspend fun user(id: String) = users.get(id) ?: throw NotFound("User")
+    suspend fun list(query: String?, cursor: String?, limit: Int) = users.list(query, cursor, limit.coerceIn(1, 500))
 
     /** Find or create the user for a verified SSO login. */
-    fun upsertSso(externalId: String, email: String, name: String): User {
+    suspend fun upsertSso(externalId: String, email: String, name: String): User {
         val normalized = email.trim().lowercase()
         val existing = users.byExternalId(externalId) ?: users.byEmail(normalized)
         val user = if (existing != null) {
@@ -168,16 +168,16 @@ class IdentityService(
         return user
     }
 
-    fun createUser(by: Principal, email: String, name: String, role: OrgRole): User {
+    suspend fun createUser(by: Principal, email: String, name: String, role: OrgRole): User {
         Access.requireAdmin(by)
         val normalized = email.trim().lowercase()
         if (!normalized.contains('@')) throw Invalid("A valid email is required")
         if (users.byEmail(normalized) != null) throw Conflict("A user with this email exists")
         return User(Ids.new(), normalized, name.ifBlank { normalized.substringBefore('@') }, role, createdAt = clock.now())
-            .also(users::save)
+            .also { users.save(it) }
     }
 
-    fun updateUser(
+    suspend fun updateUser(
         by: Principal,
         id: String,
         name: String? = null,
@@ -198,31 +198,31 @@ class IdentityService(
             teams = teamsUpdate ?: u.teams,
             projectAdmin = projectAdmin ?: u.projectAdmin,
             disabled = disabled ?: u.disabled,
-        ).also(users::save)
+        ).also { users.save(it) }
     }
 
-    fun issueToken(by: Principal, name: String, scopes: Set<TokenScope>, ttl: Duration?): IssuedToken {
+    suspend fun issueToken(by: Principal, name: String, scopes: Set<TokenScope>, ttl: Duration?): IssuedToken {
         val owner = by.user ?: throw Forbidden("Only users can create personal tokens")
         if (by.isDelegated) throw Forbidden("Agents cannot create tokens for users")
         val allowed = scopes.filter { it != TokenScope.ADMIN || owner.orgRole == OrgRole.ADMIN }.toSet()
         return mint(OwnerKind.USER, owner.id, name, allowed.ifEmpty { setOf(TokenScope.READ) }, ttl)
     }
 
-    fun issueAgentToken(agentId: String, name: String, scopes: Set<TokenScope>): IssuedToken =
+    suspend fun issueAgentToken(agentId: String, name: String, scopes: Set<TokenScope>): IssuedToken =
         mint(OwnerKind.AGENT, agentId, name, scopes, null)
 
-    fun tokensOf(kind: OwnerKind, ownerId: String) = tokens.byOwner(kind, ownerId)
+    suspend fun tokensOf(kind: OwnerKind, ownerId: String) = tokens.byOwner(kind, ownerId)
 
-    fun revokeToken(by: Principal, id: String) {
+    suspend fun revokeToken(by: Principal, id: String) {
         val t = tokens.get(id) ?: throw NotFound("Token")
         val own = t.ownerKind == OwnerKind.USER && t.ownerId == by.user?.id && !by.isDelegated
         if (!own) Access.requireAdmin(by)
         tokens.delete(id)
     }
 
-    fun revokeAgentTokens(agentId: String) = tokens.byOwner(OwnerKind.AGENT, agentId).forEach { tokens.delete(it.id) }
+    suspend fun revokeAgentTokens(agentId: String) = tokens.byOwner(OwnerKind.AGENT, agentId).forEach { tokens.delete(it.id) }
 
-    private fun mint(kind: OwnerKind, ownerId: String, name: String, scopes: Set<TokenScope>, ttl: Duration?): IssuedToken {
+    private suspend fun mint(kind: OwnerKind, ownerId: String, name: String, scopes: Set<TokenScope>, ttl: Duration?): IssuedToken {
         val secret = "mdy_" + Ids.secret(30)
         val token = ApiToken(
             id = Ids.new(),
@@ -245,12 +245,12 @@ class IdentityService(
     }
 
     /** Resolve an opaque API token (mdy_...) or a delegated token (JWS) to a principal. */
-    fun authenticate(bearer: String): Principal {
+    suspend fun authenticate(bearer: String): Principal {
         if (bearer.startsWith("mdy_")) return authenticateApiToken(bearer)
         return authenticateDelegated(bearer) ?: throw Unauthenticated("Invalid token")
     }
 
-    private fun authenticateApiToken(secret: String): Principal {
+    private suspend fun authenticateApiToken(secret: String): Principal {
         val t = tokens.byHash(Crypto.sha256Hex(secret)) ?: throw Unauthenticated("Invalid token")
         if (t.expiresAt?.isBefore(clock.now()) == true) throw Unauthenticated("Token expired")
         return when (t.ownerKind) {
@@ -283,7 +283,7 @@ class IdentityService(
     }
 
     /** RFC 8693 style exchange: an agent presents its own token and a user's token and receives a delegated token. */
-    fun exchange(subject: Principal, actor: Principal, ttl: Duration): String {
+    suspend fun exchange(subject: Principal, actor: Principal, ttl: Duration): String {
         val user = subject.user ?: throw Forbidden("The subject token must identify a user")
         if (subject.isAgent) throw Forbidden("The subject token must belong to a user")
         if (!actor.isAgent || actor.isDelegated) throw Forbidden("The actor token must belong to an agent")
@@ -291,7 +291,7 @@ class IdentityService(
         return delegate(user, agent, null, ttl, subject.scopes)
     }
 
-    private fun authenticateDelegated(token: String): Principal? {
+    private suspend fun authenticateDelegated(token: String): Principal? {
         val claims = signer.verify(token) ?: return null
         if (claims["typ"]?.jsonPrimitive?.content != "obo") return null
         val exp = claims["exp"]?.jsonPrimitive?.long ?: return null

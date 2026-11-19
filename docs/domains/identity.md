@@ -18,8 +18,8 @@ Identity knows who makes a request and what that identity can do. It supports si
 
 ## Authentication paths
 
-1. Browser: OIDC authorization code flow with PKCE → session cookie.
-2. `Authorization: Bearer mdy_...`: API token of a user or agent.
+1. Browser: OIDC authorization code flow with PKCE → session cookie. The browser sends the cookie with each gRPC-Web call.
+2. `Authorization: Bearer mdy_...` (HTTP header or gRPC metadata `authorization`): API token of a user or agent.
 3. `Authorization: Bearer <delegated JWT>`: agent on behalf of a user.
 4. `Authorization: Bearer <IdP JWT>`: an access token from the configured issuer (validated with JWKS, audience = client id or `MAYDAY_OIDC_AUDIENCES`). This lets an agent act on behalf of the user with the user's own SSO token.
 5. `POST /oauth/token` (RFC 8693 token exchange): agent token + user token → delegated token.
@@ -50,4 +50,4 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 
 ## Rebuild checklist
 
-Pass `IdentityTest` and the token parts of `ApiContractTest` and `StoreContract`.
+Pass `IdentityTest`, the credential, token and scope parts of `GrpcContractTest`, the sign-in and token-exchange parts of `HttpEdgesContractTest`, and the token part of `StoreContract`.

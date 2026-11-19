@@ -40,12 +40,12 @@ class PolicyTest {
     private val policy = f.app.policy
 
     @Test
-    fun `defaults apply when nothing is set`() {
+    fun `defaults apply when nothing is set`() = suspendTest {
         assertEquals("SEV2", policy.effective(listOf(f.team.id))[Keys.POSTMORTEM_MIN_SEVERITY])
     }
 
     @Test
-    fun `team admins override within the admin minimum and cannot go below it`() {
+    fun `team admins override within the admin minimum and cannot go below it`() = suspendTest {
         policy.set(f.admin, Scope.ORG, "org", Keys.POSTMORTEM_MIN_SEVERITY, "SEV2", Enforcement.MINIMUM)
         policy.set(f.lead, Scope.TEAM, f.team.id, Keys.POSTMORTEM_MIN_SEVERITY, "SEV4", Enforcement.NONE)
         assertEquals("SEV4", policy.effective(listOf(f.team.id))[Keys.POSTMORTEM_MIN_SEVERITY])
@@ -54,7 +54,7 @@ class PolicyTest {
     }
 
     @Test
-    fun `locked settings cannot change and a change request grants an exception`() {
+    fun `locked settings cannot change and a change request grants an exception`() = suspendTest {
         policy.set(f.admin, Scope.ORG, "org", Keys.AGENT_AUTO_ANALYSIS, "false", Enforcement.LOCKED)
         assertFailsWith<SettingLocked> { policy.set(f.lead, Scope.TEAM, f.team.id, Keys.AGENT_AUTO_ANALYSIS, "true", Enforcement.NONE) }
         val cr = policy.requestChange(f.lead, Scope.TEAM, f.team.id, Keys.AGENT_AUTO_ANALYSIS, "true", "Our agent is safe")
@@ -65,7 +65,7 @@ class PolicyTest {
     }
 
     @Test
-    fun `only admins enforce and members cannot change team settings`() {
+    fun `only admins enforce and members cannot change team settings`() = suspendTest {
         assertFailsWith<Forbidden> { policy.set(f.lead, Scope.TEAM, f.team.id, Keys.POSTMORTEM_DUE_DAYS, "5", Enforcement.LOCKED) }
         assertFailsWith<Forbidden> { policy.set(f.member, Scope.TEAM, f.team.id, Keys.POSTMORTEM_DUE_DAYS, "5", Enforcement.NONE) }
         assertFailsWith<Forbidden> { policy.set(f.lead, Scope.TEAM, f.other.id, Keys.POSTMORTEM_DUE_DAYS, "5", Enforcement.NONE) }
@@ -74,14 +74,14 @@ class PolicyTest {
     }
 
     @Test
-    fun `multi-team values resolve to the strictest`() {
+    fun `multi-team values resolve to the strictest`() = suspendTest {
         policy.set(f.admin, Scope.TEAM, f.team.id, Keys.POSTMORTEM_MIN_SEVERITY, "SEV4", Enforcement.NONE)
         policy.set(f.admin, Scope.TEAM, f.other.id, Keys.POSTMORTEM_MIN_SEVERITY, "SEV1", Enforcement.NONE)
         assertEquals("SEV4", policy.effective(listOf(f.team.id, f.other.id))[Keys.POSTMORTEM_MIN_SEVERITY])
     }
 
     @Test
-    fun `project settings apply to their teams`() {
+    fun `project settings apply to their teams`() = suspendTest {
         policy.set(f.admin, Scope.PROJECT, f.project.id, Keys.POSTMORTEM_DUE_DAYS, "3", Enforcement.NONE)
         assertEquals("3", policy.effective(listOf(f.team.id))[Keys.POSTMORTEM_DUE_DAYS])
         assertEquals("7", policy.effective(listOf(f.other.id))[Keys.POSTMORTEM_DUE_DAYS])
@@ -93,7 +93,7 @@ class IncidentTest {
     private val svc = f.app.incidents
 
     @Test
-    fun `incidents get monotonic keys with the configured prefix`() {
+    fun `incidents get monotonic keys with the configured prefix`() = suspendTest {
         val a = svc.declare(f.member, NewIncident("A", severity = Severity.SEV3, teamIds = listOf("checkout")))
         f.app.policy.set(f.admin, Scope.ORG, "org", Keys.INCIDENT_PREFIX, "OPS", Enforcement.NONE)
         val b = svc.declare(f.member, NewIncident("B", severity = Severity.SEV3, teamIds = listOf(f.team.id)))
@@ -104,7 +104,7 @@ class IncidentTest {
     }
 
     @Test
-    fun `postmortem is mandatory by policy and gets a due date on resolution`() {
+    fun `postmortem is mandatory by policy and gets a due date on resolution`() = suspendTest {
         val i = svc.declare(f.member, NewIncident("Down", severity = Severity.SEV1, teamIds = listOf(f.team.id)))
         assertTrue(i.postmortemRequired)
         assertFailsWith<Invalid> { svc.update(f.member, i.key, IncidentPatch(postmortemRequired = false)) }
@@ -118,7 +118,7 @@ class IncidentTest {
     }
 
     @Test
-    fun `reopening clears the resolution time`() {
+    fun `reopening clears the resolution time`() = suspendTest {
         val i = svc.declare(f.member, NewIncident("X", severity = Severity.SEV3, teamIds = listOf(f.team.id)))
         svc.update(f.member, i.key, IncidentPatch(status = IncidentStatus.RESOLVED))
         val reopened = svc.update(f.member, i.key, IncidentPatch(status = IncidentStatus.INVESTIGATING))
@@ -126,7 +126,7 @@ class IncidentTest {
     }
 
     @Test
-    fun `every change is on the timeline`() {
+    fun `every change is on the timeline`() = suspendTest {
         val i = svc.declare(f.member, NewIncident("X", severity = Severity.SEV3, teamIds = listOf(f.team.id)))
         svc.update(f.member, i.key, IncidentPatch(severity = Severity.SEV2, status = IncidentStatus.IDENTIFIED, title = "Y"))
         svc.addEntry(f.member, i.key, "Rolled back")
@@ -135,7 +135,7 @@ class IncidentTest {
     }
 
     @Test
-    fun `viewers read but cannot write and stale versions are rejected`() {
+    fun `viewers read but cannot write and stale versions are rejected`() = suspendTest {
         val i = svc.declare(f.member, NewIncident("X", severity = Severity.SEV3, teamIds = listOf(f.team.id)))
         assertFailsWith<Forbidden> { svc.declare(f.viewer, NewIncident("X", severity = Severity.SEV3, teamIds = listOf(f.team.id))) }
         assertFailsWith<Forbidden> { svc.addEntry(f.viewer, i.key, "hi") }
@@ -144,7 +144,7 @@ class IncidentTest {
     }
 
     @Test
-    fun `incidents need a title and a known team`() {
+    fun `incidents need a title and a known team`() = suspendTest {
         assertFailsWith<Invalid> { svc.declare(f.member, NewIncident(" ", severity = Severity.SEV3, teamIds = listOf(f.team.id))) }
         assertFailsWith<mayday.shared.NotFound> { svc.declare(f.member, NewIncident("X", severity = Severity.SEV3, teamIds = listOf("nope"))) }
         assertFailsWith<Invalid> { svc.declare(f.member, NewIncident("X", severity = Severity.SEV3, teamIds = emptyList())) }
@@ -156,7 +156,7 @@ class AlertTest {
     private val svc = f.app.alerts
 
     @Test
-    fun `severe alerts open an incident and duplicates only count`() {
+    fun `severe alerts open an incident and duplicates only count`() = suspendTest {
         val r1 = svc.ingest(f.member, AlertSignal("DB down", Severity.SEV1, "checkout"))
         assertTrue(r1.created)
         assertNotNull(r1.incidentKey)
@@ -167,12 +167,12 @@ class AlertTest {
     }
 
     @Test
-    fun `minor alerts do not open incidents`() {
+    fun `minor alerts do not open incidents`() = suspendTest {
         assertNull(svc.ingest(f.member, AlertSignal("Disk 70%", Severity.SEV4, "checkout")).incidentKey)
     }
 
     @Test
-    fun `resolve signals resolve and a quick refire reopens the same alert`() {
+    fun `resolve signals resolve and a quick refire reopens the same alert`() = suspendTest {
         val a = svc.ingest(f.member, AlertSignal("Flappy", Severity.SEV3, "checkout", fingerprint = "fp1")).alert
         val resolved = svc.ingest(f.member, AlertSignal("Flappy", Severity.SEV3, "checkout", fingerprint = "fp1", status = AlertStatus.RESOLVED))
         assertEquals(AlertStatus.RESOLVED, resolved.alert.status)
@@ -182,7 +182,7 @@ class AlertTest {
     }
 
     @Test
-    fun `ingest needs an ingest or write scope`() {
+    fun `ingest needs an ingest or write scope`() = suspendTest {
         val tok = f.app.identity.issueToken(f.member, "ro", setOf(TokenScope.READ), null)
         val p = f.app.identity.authenticate(tok.secret)
         assertFailsWith<Forbidden> { svc.ingest(p, AlertSignal("x", Severity.SEV3, "checkout")) }
@@ -193,7 +193,7 @@ class IdentityTest {
     private val f = Fixture()
 
     @Test
-    fun `api tokens authenticate with their scopes and can be revoked`() {
+    fun `api tokens authenticate with their scopes and can be revoked`() = suspendTest {
         val t = f.app.identity.issueToken(f.member, "cli", setOf(TokenScope.READ, TokenScope.ADMIN), null)
         val p = f.app.identity.authenticate(t.secret)
         assertEquals(f.memberUser.id, p.user!!.id)
@@ -203,7 +203,7 @@ class IdentityTest {
     }
 
     @Test
-    fun `delegated tokens carry the user identity and the agent as actor`() {
+    fun `delegated tokens carry the user identity and the agent as actor`() = suspendTest {
         val creds = f.app.agents.create(f.admin, AgentInput("Bot", delivery = Delivery.PULL, actions = setOf(AgentAction.ANALYZE), role = OrgRole.VIEWER))
         val agentPrincipal = f.app.identity.authenticate(creds.token!!.secret)
         assertTrue(agentPrincipal.isAgent)
@@ -218,7 +218,7 @@ class IdentityTest {
     }
 
     @Test
-    fun `tampered or foreign tokens are rejected`() {
+    fun `tampered or foreign tokens are rejected`() = suspendTest {
         assertFailsWith<Unauthenticated> { f.app.identity.authenticate("mdy_nope") }
         assertFailsWith<Unauthenticated> { f.app.identity.authenticate("a.b.c") }
     }
@@ -227,16 +227,16 @@ class IdentityTest {
 class AgentTest {
     private val f = Fixture()
 
-    private fun incident() = f.app.incidents.declare(f.member, NewIncident("Checkout down", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+    private suspend fun incident() = f.app.incidents.declare(f.member, NewIncident("Checkout down", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
 
     @Test
-    fun `without an LLM provider the built-in agent is not available`() {
+    fun `without an LLM provider the built-in agent is not available`() = suspendTest {
         val i = incident()
         assertFailsWith<Unavailable> { f.app.agents.trigger(f.member, AgentAction.ANALYZE, SubjectKind.INCIDENT, i.key, null, "") }
     }
 
     @Test
-    fun `manual analysis runs on behalf of the person who pressed the button`() {
+    fun `manual analysis runs on behalf of the person who pressed the button`() = suspendTest {
         f.enableLlm()
         val i = incident()
         f.llm.toolCall("add_timeline_entry", buildJsonObject { put("ref", i.key); put("text", "Found errors in logs") })
@@ -254,7 +254,7 @@ class AgentTest {
     }
 
     @Test
-    fun `agents cannot do more than the delegating user`() {
+    fun `agents cannot do more than the delegating user`() = suspendTest {
         f.enableLlm()
         val i = incident()
         f.llm.toolCall("set_setting", buildJsonObject { put("scope", "ORG"); put("key", Keys.MCP_WRITE); put("value", "true") })
@@ -266,19 +266,18 @@ class AgentTest {
     }
 
     @Test
-    fun `viewers cannot start agents`() {
+    fun `viewers cannot start agents`() = suspendTest {
         f.enableLlm()
         val i = incident()
         assertFailsWith<Forbidden> { f.app.agents.trigger(f.viewer, AgentAction.ANALYZE, SubjectKind.INCIDENT, i.key, null, "") }
     }
 
     @Test
-    fun `push agents receive a delegated token that acts as the user`() {
+    fun `push agents receive a delegated token that acts as the user`() = suspendTest {
         val creds = f.app.agents.create(f.admin, AgentInput("Fixer", endpointUrl = "https://agent.example.com/hook", actions = setOf(AgentAction.PATCH)))
         val i = incident()
         val run = f.app.agents.trigger(f.member, AgentAction.PATCH, SubjectKind.INCIDENT, i.key, creds.agent.id, "")
-        val end = System.currentTimeMillis() + 3000
-        while (f.dispatcher.sent.isEmpty() && System.currentTimeMillis() < end) Thread.sleep(10)
+        eventually { f.dispatcher.sent.isNotEmpty() }
         val payload = f.dispatcher.sent.single().second
         assertEquals(run.id, payload.run.id)
         assertEquals("http://mayday.test/mcp", payload.mcpUrl)
@@ -290,7 +289,7 @@ class AgentTest {
     }
 
     @Test
-    fun `failed deliveries mark the run as failed`() {
+    fun `failed deliveries mark the run as failed`() = suspendTest {
         f.dispatcher.fail = true
         val creds = f.app.agents.create(f.admin, AgentInput("Down", endpointUrl = "https://agent.example.com/hook", actions = setOf(AgentAction.ANALYZE)))
         val run = f.app.agents.trigger(f.member, AgentAction.ANALYZE, SubjectKind.INCIDENT, incident().key, creds.agent.id, "")
@@ -298,7 +297,7 @@ class AgentTest {
     }
 
     @Test
-    fun `pull agents claim queued runs and only the owner completes them`() {
+    fun `pull agents claim queued runs and only the owner completes them`() = suspendTest {
         val a = f.app.agents.create(f.admin, AgentInput("Puller", delivery = Delivery.PULL, actions = setOf(AgentAction.RUNBOOK)))
         val b = f.app.agents.create(f.admin, AgentInput("Other", delivery = Delivery.PULL, actions = setOf(AgentAction.RUNBOOK)))
         val run = f.app.agents.trigger(f.member, AgentAction.RUNBOOK, SubjectKind.INCIDENT, incident().key, a.agent.id, "")
@@ -314,7 +313,7 @@ class AgentTest {
     }
 
     @Test
-    fun `alerts trigger automatic analysis only when policy allows`() {
+    fun `alerts trigger automatic analysis only when policy allows`() = suspendTest {
         val creds = f.app.agents.create(f.admin, AgentInput("Auto", delivery = Delivery.PULL, actions = setOf(AgentAction.ANALYZE, AgentAction.REMEDIATE),
             triggers = listOf(AgentTrigger(minSeverity = Severity.SEV3, action = AgentAction.ANALYZE), AgentTrigger(minSeverity = Severity.SEV3, action = AgentAction.REMEDIATE))))
         f.app.alerts.ingest(f.member, AlertSignal("Errors", Severity.SEV2, "checkout"))
@@ -327,7 +326,7 @@ class AgentTest {
     }
 
     @Test
-    fun `postmortem and runbook generation write through the tools`() {
+    fun `postmortem and runbook generation write through the tools`() = suspendTest {
         f.enableLlm()
         val i = incident()
         f.llm.toolCall("set_postmortem", buildJsonObject { put("ref", i.key); put("summary", "Pool exhausted"); put("rootCause", "Config change") })

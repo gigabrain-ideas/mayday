@@ -5,7 +5,7 @@ metadata:
   name: {{ include "mayday.fullname" . }}
   labels: {{- include "mayday.labels" . | nindent 4 }}
   annotations:
-    # Live updates use Server-Sent Events: keep connections open and unbuffered.
+    # The web interface gets live updates over a gRPC-Web stream: keep connections open and unbuffered.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     {{- with .Values.ingress.annotations }}
@@ -26,6 +26,35 @@ spec:
             pathType: Prefix
             backend:
               service: { name: {{ include "mayday.fullname" . }}, port: { name: http } }
+{{- end }}
+{{- if and .Values.grpc.enabled .Values.grpc.ingress.enabled }}
+---
+# Native gRPC. The backend speaks h2c; the controller must accept HTTP/2 from clients, so it needs TLS.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mayday.fullname" . }}-grpc
+  labels: {{- include "mayday.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    {{- with .Values.grpc.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.grpc.ingress.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.grpc.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: {{ include "mayday.fullname" . }}, port: { name: grpc } }
 {{- end }}
 {{- if and .Values.persistence.enabled (not .Values.database.url) }}
 ---

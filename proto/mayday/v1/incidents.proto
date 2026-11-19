@@ -1,0 +1,198 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+
+enum IncidentStatus {
+  INCIDENT_STATUS_UNSPECIFIED = 0;
+  INCIDENT_STATUS_INVESTIGATING = 1;
+  INCIDENT_STATUS_IDENTIFIED = 2;
+  INCIDENT_STATUS_MONITORING = 3;
+  INCIDENT_STATUS_RESOLVED = 4;
+  INCIDENT_STATUS_CLOSED = 5;
+}
+
+enum PostmortemStatus {
+  POSTMORTEM_STATUS_UNSPECIFIED = 0;
+  POSTMORTEM_STATUS_DRAFT = 1;
+  POSTMORTEM_STATUS_IN_REVIEW = 2;
+  POSTMORTEM_STATUS_PUBLISHED = 3;
+}
+
+enum EntryKind {
+  ENTRY_KIND_UNSPECIFIED = 0;
+  ENTRY_KIND_NOTE = 1;
+  ENTRY_KIND_STATUS = 2;
+  ENTRY_KIND_SEVERITY = 3;
+  ENTRY_KIND_FIELD = 4;
+  ENTRY_KIND_ALERT = 5;
+  ENTRY_KIND_AGENT = 6;
+  ENTRY_KIND_POSTMORTEM = 7;
+  ENTRY_KIND_RUNBOOK = 8;
+  ENTRY_KIND_RESOLUTION = 9;
+}
+
+message ActionItem {
+  string text = 1;
+  string owner = 2;
+  bool done = 3;
+}
+
+message Postmortem {
+  PostmortemStatus status = 1;
+  string summary = 2;
+  string impact = 3;
+  string root_cause = 4;
+  string detection = 5;
+  string resolution = 6;
+  string lessons = 7;
+  repeated ActionItem action_items = 8;
+  Actor updated_by = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message Runbook {
+  string title = 1;
+  string body = 2;
+  Actor generated_by = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message Incident {
+  string id = 1;
+  int64 number = 2;
+  string key = 3;
+  string title = 4;
+  string description = 5;
+  Severity severity = 6;
+  IncidentStatus status = 7;
+  repeated string team_ids = 8;
+  optional string commander_id = 9;
+  google.protobuf.Timestamp impact_started_at = 10;
+  google.protobuf.Timestamp impact_ended_at = 11;
+  google.protobuf.Timestamp discovered_at = 12;
+  google.protobuf.Timestamp reported_at = 13;
+  google.protobuf.Timestamp acknowledged_at = 14;
+  google.protobuf.Timestamp resolved_at = 15;
+  bool postmortem_required = 16;
+  google.protobuf.Timestamp postmortem_due_at = 17;
+  Postmortem postmortem = 18;
+  string resolution_notes = 19;
+  Runbook runbook = 20;
+  repeated string alert_ids = 21;
+  map<string, string> labels = 22;
+  Actor created_by = 23;
+  google.protobuf.Timestamp created_at = 24;
+  google.protobuf.Timestamp updated_at = 25;
+  int64 version = 26;
+}
+
+message IncidentPage {
+  repeated Incident items = 1;
+  optional string next_cursor = 2;
+}
+
+message TimelineEntry {
+  string id = 1;
+  string incident_id = 2;
+  google.protobuf.Timestamp at = 3;
+  EntryKind kind = 4;
+  Actor actor = 5;
+  string text = 6;
+  map<string, string> data = 7;
+}
+
+message TimelineEntries {
+  repeated TimelineEntry items = 1;
+}
+
+message ListIncidentsRequest {
+  bool open = 1;
+  repeated IncidentStatus status = 2;
+  repeated Severity severity = 3;
+  // Team ids or slugs.
+  repeated string team = 4;
+  optional string q = 5;
+  google.protobuf.Timestamp from = 6;
+  google.protobuf.Timestamp to = 7;
+  optional string cursor = 8;
+  int32 limit = 9;
+}
+
+message DeclareIncidentRequest {
+  string title = 1;
+  string description = 2;
+  Severity severity = 3;
+  repeated string team_ids = 4;
+  optional string commander_id = 5;
+  google.protobuf.Timestamp impact_started_at = 6;
+  google.protobuf.Timestamp discovered_at = 7;
+  map<string, string> labels = 8;
+}
+
+// Key (INC-42), number or id.
+message IncidentRef {
+  string ref = 1;
+}
+
+// Unset or empty fields keep their value. Set replace_labels to clear the labels.
+message IncidentPatch {
+  optional string title = 1;
+  optional string description = 2;
+  Severity severity = 3;
+  IncidentStatus status = 4;
+  repeated string team_ids = 5;
+  optional string commander_id = 7;
+  google.protobuf.Timestamp impact_started_at = 8;
+  google.protobuf.Timestamp impact_ended_at = 9;
+  google.protobuf.Timestamp discovered_at = 10;
+  map<string, string> labels = 11;
+  bool replace_labels = 12;
+  optional bool postmortem_required = 13;
+  // Optimistic concurrency: the update fails with ABORTED when the incident has another version.
+  optional int64 version = 14;
+}
+
+message UpdateIncidentRequest {
+  string ref = 1;
+  IncidentPatch patch = 2;
+}
+
+message AddTimelineEntryRequest {
+  string ref = 1;
+  string text = 2;
+  google.protobuf.Timestamp at = 3;
+}
+
+message SavePostmortemRequest {
+  string ref = 1;
+  Postmortem postmortem = 2;
+}
+
+message SaveResolutionRequest {
+  string ref = 1;
+  string notes = 2;
+}
+
+message SaveRunbookRequest {
+  string ref = 1;
+  string title = 2;
+  string body = 3;
+}
+
+service IncidentService {
+  rpc ListIncidents(ListIncidentsRequest) returns (IncidentPage);
+  rpc DeclareIncident(DeclareIncidentRequest) returns (Incident);
+  rpc GetIncident(IncidentRef) returns (Incident);
+  rpc UpdateIncident(UpdateIncidentRequest) returns (Incident);
+  rpc ListTimeline(IncidentRef) returns (TimelineEntries);
+  rpc AddTimelineEntry(AddTimelineEntryRequest) returns (TimelineEntry);
+  rpc SavePostmortem(SavePostmortemRequest) returns (Incident);
+  rpc SaveResolution(SaveResolutionRequest) returns (Incident);
+  rpc SaveRunbook(SaveRunbookRequest) returns (Incident);
+}

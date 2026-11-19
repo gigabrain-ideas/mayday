@@ -1,6 +1,10 @@
 package mayday.contract
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import mayday.Ports
+import mayday.suspendTest
 import mayday.agents.AgentAction
 import mayday.agents.AgentRun
 import mayday.agents.LlmConfig
@@ -54,13 +58,13 @@ abstract class StoreContract {
             createdBy = Actor.system, createdAt = at, updatedAt = at)
 
     @Test
-    fun `incident numbers increase monotonically and are never reused`() {
+    fun `incident numbers increase monotonically and are never reused`() = suspendTest {
         val a = p.incidents.nextNumber(); val b = p.incidents.nextNumber(); val c = p.incidents.nextNumber()
         assertTrue(a < b && b < c)
     }
 
     @Test
-    fun `incident round trip by id and number`() {
+    fun `incident round trip by id and number`() = suspendTest {
         val i = incident(p.incidents.nextNumber())
         p.incidents.save(i, null)
         assertEquals(i, p.incidents.get(i.id))
@@ -69,7 +73,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `incident save enforces optimistic concurrency`() {
+    fun `incident save enforces optimistic concurrency`() = suspendTest {
         val i = incident(p.incidents.nextNumber())
         p.incidents.save(i, null)
         assertFailsWith<Conflict> { p.incidents.save(i, null) }
@@ -80,7 +84,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `incident list is newest first, filtered and paginated`() {
+    fun `incident list is newest first, filtered and paginated`() = suspendTest {
         repeat(7) { n ->
             val num = p.incidents.nextNumber()
             p.incidents.save(incident(num, status = if (n % 2 == 0) IncidentStatus.RESOLVED else IncidentStatus.INVESTIGATING,
@@ -92,8 +96,13 @@ abstract class StoreContract {
         assertTrue(first.items.zipWithNext().all { (x, y) -> x.number > y.number })
         val second = p.incidents.list(IncidentFilter(), first.nextCursor, 3)
         assertTrue(second.items.first().number < first.items.last().number)
-        val all = generateSequence(p.incidents.list(IncidentFilter(), null, 2)) { pg -> pg.nextCursor?.let { p.incidents.list(IncidentFilter(), it, 2) } }
-            .flatMap { it.items }.toList()
+        val all = mutableListOf<Incident>()
+        var cursor: String? = null
+        do {
+            val pg = p.incidents.list(IncidentFilter(), cursor, 2)
+            all += pg.items
+            cursor = pg.nextCursor
+        } while (cursor != null)
         assertEquals(7, all.size)
         assertEquals(3, p.incidents.list(IncidentFilter(severities = setOf(Severity.SEV1)), null, 50).items.size)
         assertEquals(4, p.incidents.list(IncidentFilter(statuses = setOf(IncidentStatus.RESOLVED)), null, 50).items.size)
@@ -102,7 +111,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `incident scan honours the time range`() {
+    fun `incident scan honours the time range`() = suspendTest {
         p.incidents.save(incident(p.incidents.nextNumber(), at = now.minus(10, ChronoUnit.DAYS)), null)
         p.incidents.save(incident(p.incidents.nextNumber(), at = now.minus(1, ChronoUnit.DAYS)), null)
         val seen = mutableListOf<Incident>()
@@ -111,7 +120,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `timeline is ordered by event time`() {
+    fun `timeline is ordered by event time`() = suspendTest {
         val i = incident(p.incidents.nextNumber()); p.incidents.save(i, null)
         val late = TimelineEntry(Ids.new(), i.id, now, EntryKind.NOTE, Actor.system, "late")
         val early = TimelineEntry(Ids.new(), i.id, now.minusSeconds(60), EntryKind.NOTE, Actor.system, "early")
@@ -124,7 +133,7 @@ abstract class StoreContract {
         Alert(Ids.new(), fp, "test", "Alert $fp", severity = sev, teamId = team, firstSeenAt = at, lastSeenAt = at)
 
     @Test
-    fun `alerts by fingerprint return the latest`() {
+    fun `alerts by fingerprint return the latest`() = suspendTest {
         val old = alert("fp", now.minusSeconds(3600)); val new = alert("fp", now)
         p.alerts.save(old, null); p.alerts.save(new, null)
         assertEquals(new.id, p.alerts.latestByFingerprint("fp")!!.id)
@@ -132,7 +141,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `alerts list, filter, paginate and enforce versions`() {
+    fun `alerts list, filter, paginate and enforce versions`() = suspendTest {
         val items = (0 until 5).map { alert("fp$it", now.minusSeconds(it * 10L), team = if (it < 2) "a" else "b") }
         items.forEach { p.alerts.save(it, null) }
         val pg = p.alerts.list(AlertFilter(), null, 2)
@@ -147,7 +156,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `users are unique by email and found by external id`() {
+    fun `users are unique by email and found by external id`() = suspendTest {
         val u = User(Ids.new(), "a@example.com", "A", externalId = "idp|1", createdAt = now)
         p.users.save(u)
         assertEquals(u, p.users.byEmail("a@example.com"))
@@ -159,7 +168,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `users list pages by email`() {
+    fun `users list pages by email`() = suspendTest {
         listOf("c", "a", "d", "b").forEach { p.users.save(User(Ids.new(), "$it@example.com", it.uppercase(), createdAt = now)) }
         val pg = p.users.list(null, null, 3)
         assertEquals(listOf("a@example.com", "b@example.com", "c@example.com"), pg.items.map { it.email })
@@ -168,7 +177,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `tokens are found by hash and owner and can be deleted`() {
+    fun `tokens are found by hash and owner and can be deleted`() = suspendTest {
         val t = ApiToken(Ids.new(), "n", OwnerKind.AGENT, "agent1", "hash1", "mdy_", setOf(TokenScope.READ), now)
         p.tokens.save(t)
         assertEquals(t, p.tokens.byHash("hash1"))
@@ -178,7 +187,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `settings upsert by scope and key`() {
+    fun `settings upsert by scope and key`() = suspendTest {
         val v = SettingValue(Scope.TEAM, "t1", "k", "1", updatedBy = Actor.system, updatedAt = now)
         p.settings.save(v); p.settings.save(v.copy(value = "2"))
         assertEquals(listOf("2"), p.settings.all().map { it.value })
@@ -187,7 +196,7 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `teams are found by slug`() {
+    fun `teams are found by slug`() = suspendTest {
         val t = Team(Ids.new(), "sre", "SRE", createdAt = now)
         p.teams.save(t)
         assertEquals(t, p.teams.bySlug("sre"))
@@ -199,7 +208,7 @@ abstract class StoreContract {
         trigger = RunTrigger.MANUAL, requestedBy = Actor.system, createdAt = at)
 
     @Test
-    fun `claiming runs is atomic and oldest first`() {
+    fun `claiming runs is atomic and oldest first`() = suspendTest {
         val r1 = run("a1", now.minusSeconds(30)); val r2 = run("a1", now.minusSeconds(20)); val other = run("a2", now)
         listOf(r1, r2, other).forEach { p.runs.save(it, null) }
         val claimed = p.runs.claim("a1", 1, now)
@@ -212,17 +221,16 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `concurrent claims never hand out a run twice`() {
+    fun `concurrent claims never hand out a run twice`() = suspendTest {
         repeat(40) { p.runs.save(run("a1", now.minusSeconds(it.toLong())), null) }
         val got = java.util.concurrent.ConcurrentLinkedQueue<String>()
-        val threads = (0 until 8).map { Thread.ofVirtual().start { repeat(10) { p.runs.claim("a1", 3, now).forEach { got += it.id } } } }
-        threads.forEach { it.join() }
+        (0 until 8).map { launch(Dispatchers.IO) { repeat(10) { p.runs.claim("a1", 3, now).forEach { got += it.id } } } }.joinAll()
         assertEquals(40, got.size)
         assertEquals(40, got.toSet().size)
     }
 
     @Test
-    fun `llm config round trip`() {
+    fun `llm config round trip`() = suspendTest {
         assertNull(p.config.llm())
         p.config.saveLlm(LlmConfig(model = "m", enabled = true))
         assertEquals("m", p.config.llm()!!.model)

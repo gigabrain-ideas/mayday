@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { Bell, Copy, FileText, Pencil, Plus, ScrollText, Send, Trash2 } from "lucide-react";
 import {
-  api, INCIDENT_STATUSES, SEVERITIES, type ActionItem, type Alert, type Incident, type IncidentStatus, type Postmortem, type Severity, type TimelineEntry,
+  items, rpc, INCIDENT_STATUSES, SEVERITIES, type ActionItem, type Alert, type Incident, type IncidentStatus, type Page, type Postmortem, type Severity, type TimelineEntry,
 } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
@@ -17,8 +17,8 @@ import { AgentActions, AgentRuns, useAgentTrigger } from "@/components/AgentPane
 
 export function IncidentPage() {
   const { key = "" } = useParams();
-  const { data: inc, error, reload, setData } = useQuery<Incident>(`/incidents/${key}`);
-  const timeline = useQuery<TimelineEntry[]>(`/incidents/${key}/timeline`);
+  const { data: inc, error, reload, setData } = useQuery(() => rpc.incidents.getIncident<Incident>({ ref: key }), [key]);
+  const timeline = useQuery(() => items(rpc.incidents.listTimeline<Page<TimelineEntry>>({ ref: key })), [key]);
   const [tab, setTab] = useState("timeline");
   useLive((t, id) => t.startsWith("incident.") && id === inc?.id, () => { reload(); timeline.reload(); });
   const toast = useToast();
@@ -28,7 +28,7 @@ export function IncidentPage() {
 
   const patch = async (body: Partial<Incident> & Record<string, unknown>) => {
     try {
-      setData(await api.patch<Incident>(`/incidents/${inc.key}`, { ...body, version: inc.version }));
+      setData(await rpc.incidents.updateIncident<Incident>({ ref: inc.key, patch: { ...body, version: inc.version } }));
       timeline.reload();
     } catch (e) {
       toast.error(e);
@@ -53,11 +53,11 @@ export function IncidentPage() {
             <TabsContent value="resolution"><Resolution inc={inc} onSaved={setData} onRunbook={() => setTab("runbook")} /></TabsContent>
             <TabsContent value="postmortem"><PostmortemTab inc={inc} onSaved={setData} /></TabsContent>
             <TabsContent value="runbook"><RunbookTab inc={inc} /></TabsContent>
-            <TabsContent value="agents"><AgentRuns base={`/incidents/${inc.key}`} subjectId={inc.id} /></TabsContent>
+            <TabsContent value="agents"><AgentRuns subject={{ kind: "INCIDENT", ref: inc.key }} subjectId={inc.id} /></TabsContent>
           </Tabs>
         </Card>
         <div className="space-y-5">
-          <AgentActions base={`/incidents/${inc.key}`} actions={["ANALYZE", "PATCH", "REMEDIATE", "TIMELINE"]} />
+          <AgentActions subject={{ kind: "INCIDENT", ref: inc.key }} actions={["ANALYZE", "PATCH", "REMEDIATE", "TIMELINE"]} />
           <Details inc={inc} patch={patch} />
           <LinkedAlerts inc={inc} />
         </div>
@@ -117,7 +117,7 @@ function Timeline({ inc, entries, onAdded }: { inc: Incident; entries?: Timeline
     e.preventDefault();
     if (!text.trim()) return;
     try {
-      await api.post(`/incidents/${inc.key}/timeline`, { text, at: fromLocalInput(at) });
+      await rpc.incidents.addTimelineEntry({ ref: inc.key, text, at: fromLocalInput(at) });
       setText(""); setAt("");
       onAdded();
     } catch (err) { toast.error(err); }
@@ -167,10 +167,10 @@ function Resolution({ inc, onSaved, onRunbook }: { inc: Incident; onSaved: (i: I
   const toast = useToast();
   const [notes, setNotes] = useState(inc.resolutionNotes);
   const dirty = notes !== inc.resolutionNotes;
-  const trigger = useAgentTrigger(`/incidents/${inc.key}`, onRunbook);
+  const trigger = useAgentTrigger({ kind: "INCIDENT", ref: inc.key }, onRunbook);
   useEffect(() => { if (!dirty) setNotes(inc.resolutionNotes); }, [inc.resolutionNotes]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = async () => {
-    try { onSaved(await api.put<Incident>(`/incidents/${inc.key}/resolution`, { notes })); toast.show("Resolution saved.", "success"); } catch (e) { toast.error(e); }
+    try { onSaved(await rpc.incidents.saveResolution<Incident>({ ref: inc.key, notes })); toast.show("Resolution saved.", "success"); } catch (e) { toast.error(e); }
   };
   return (
     <div className="space-y-3 p-5">
@@ -205,11 +205,11 @@ function PostmortemTab({ inc, onSaved }: { inc: Incident; onSaved: (i: Incident)
   const empty: Postmortem = { status: "DRAFT", summary: "", impact: "", rootCause: "", detection: "", resolution: "", lessons: "", actionItems: [] };
   const [pm, setPm] = useState<Postmortem>(inc.postmortem ?? empty);
   const [dirty, setDirty] = useState(false);
-  const trigger = useAgentTrigger(`/incidents/${inc.key}`);
+  const trigger = useAgentTrigger({ kind: "INCIDENT", ref: inc.key });
   useEffect(() => { if (!dirty) setPm(inc.postmortem ?? empty); }, [inc.postmortem]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (p: Partial<Postmortem>) => { setPm((x) => ({ ...x, ...p })); setDirty(true); };
   const save = async () => {
-    try { onSaved(await api.put<Incident>(`/incidents/${inc.key}/postmortem`, pm)); setDirty(false); toast.show("Postmortem saved.", "success"); } catch (e) { toast.error(e); }
+    try { onSaved(await rpc.incidents.savePostmortem<Incident>({ ref: inc.key, postmortem: pm })); setDirty(false); toast.show("Postmortem saved.", "success"); } catch (e) { toast.error(e); }
   };
   const items = pm.actionItems;
   const setItem = (i: number, v: Partial<ActionItem>) => set({ actionItems: items.map((x, j) => (j === i ? { ...x, ...v } : x)) });
@@ -317,7 +317,7 @@ function Details({ inc, patch }: { inc: Incident; patch: (b: Record<string, unkn
 function LinkedAlerts({ inc }: { inc: Incident }) {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   useEffect(() => {
-    Promise.all(inc.alertIds.slice(0, 20).map((id) => api.get<Alert>(`/alerts/${id}`).catch(() => null))).then((a) => setAlerts(a.filter(Boolean) as Alert[]));
+    Promise.all(inc.alertIds.slice(0, 20).map((id) => rpc.alerts.getAlert<Alert>({ id }).catch(() => null))).then((a) => setAlerts(a.filter(Boolean) as Alert[]));
   }, [inc.alertIds]);
   if (inc.alertIds.length === 0) return null;
   return (

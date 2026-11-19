@@ -94,8 +94,8 @@ data class DomainEvent(
     val data: Map<String, String> = emptyMap(),
 )
 
-fun interface EventPublisher {
-    fun publish(event: DomainEvent)
+interface EventPublisher {
+    suspend fun publish(event: DomainEvent)
 }
 
 interface EventBus : EventPublisher {
@@ -105,7 +105,9 @@ interface EventBus : EventPublisher {
 class InProcessEventBus : EventBus {
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<(DomainEvent) -> Unit>()
 
-    override fun publish(event: DomainEvent) {
+    override suspend fun publish(event: DomainEvent) = deliver(event)
+
+    fun deliver(event: DomainEvent) {
         for (l in listeners) runCatching { l(event) }
     }
 

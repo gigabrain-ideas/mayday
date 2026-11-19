@@ -77,16 +77,16 @@ data class AlertFilter(
 )
 
 interface AlertRepository {
-    fun get(id: String): Alert?
-    fun latestByFingerprint(fingerprint: String): Alert?
-    fun save(alert: Alert, expectedVersion: Long?)
-    fun list(filter: AlertFilter, cursor: String?, limit: Int): Page<Alert>
-    fun scan(filter: AlertFilter, consumer: (Alert) -> Unit)
+    suspend fun get(id: String): Alert?
+    suspend fun latestByFingerprint(fingerprint: String): Alert?
+    suspend fun save(alert: Alert, expectedVersion: Long?)
+    suspend fun list(filter: AlertFilter, cursor: String?, limit: Int): Page<Alert>
+    suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit)
 }
 
 /** Port that the agents context implements to react to new alerts. */
-fun interface AlertAutomation {
-    fun onAlertCreated(alert: Alert)
+interface AlertAutomation {
+    suspend fun onAlertCreated(alert: Alert)
 }
 
 @Serializable
@@ -100,14 +100,14 @@ class AlertService(
     private val events: EventPublisher,
     private val clock: Clock,
 ) {
-    @Volatile var automation: AlertAutomation = AlertAutomation { }
+    @Volatile var automation: AlertAutomation = object : AlertAutomation { override suspend fun onAlertCreated(alert: Alert) = Unit }
 
-    fun get(by: Principal, id: String): Alert = Access.requireRead(by).let { alerts.get(id) ?: throw NotFound("Alert") }
+    suspend fun get(by: Principal, id: String): Alert = Access.requireRead(by).let { alerts.get(id) ?: throw NotFound("Alert") }
 
-    fun list(by: Principal, filter: AlertFilter, cursor: String?, limit: Int) =
+    suspend fun list(by: Principal, filter: AlertFilter, cursor: String?, limit: Int) =
         Access.requireRead(by).let { alerts.list(filter, cursor, limit.coerceIn(1, 200)) }
 
-    fun ingest(by: Principal, signal: AlertSignal): IngestResult {
+    suspend fun ingest(by: Principal, signal: AlertSignal): IngestResult {
         if (!by.has(TokenScope.ALERTS_INGEST) && !by.has(TokenScope.WRITE)) throw Forbidden("The token cannot send alerts")
         if (signal.title.isBlank()) throw Invalid("Alert title is required")
         val team = directory.team(signal.team)
@@ -170,7 +170,7 @@ class AlertService(
         return IngestResult(result, true, incidentKey)
     }
 
-    private fun createAlert(signal: AlertSignal, fp: String, teamId: String, now: Instant): Alert {
+    private suspend fun createAlert(signal: AlertSignal, fp: String, teamId: String, now: Instant): Alert {
         val a = Alert(
             id = Ids.new(),
             fingerprint = fp,
@@ -188,7 +188,7 @@ class AlertService(
         return a
     }
 
-    fun acknowledge(by: Principal, id: String): Alert {
+    suspend fun acknowledge(by: Principal, id: String): Alert {
         Access.requireWrite(by)
         val cur = get(by, id)
         if (cur.status != AlertStatus.FIRING) return cur
@@ -203,14 +203,14 @@ class AlertService(
         return next
     }
 
-    fun resolve(by: Principal, id: String, note: String = ""): Alert {
+    suspend fun resolve(by: Principal, id: String, note: String = ""): Alert {
         Access.requireWrite(by)
         val cur = get(by, id)
         if (cur.status == AlertStatus.RESOLVED) return cur
         return resolveInternal(cur, by.actor, note.ifBlank { "Resolved." })
     }
 
-    private fun resolveInternal(cur: Alert, actor: Actor, text: String): Alert {
+    private suspend fun resolveInternal(cur: Alert, actor: Actor, text: String): Alert {
         val now = clock.now()
         val next = cur.copy(
             status = AlertStatus.RESOLVED,
@@ -224,7 +224,7 @@ class AlertService(
         return next
     }
 
-    fun addUpdate(by: Principal, id: String, text: String): Alert {
+    suspend fun addUpdate(by: Principal, id: String, text: String): Alert {
         Access.requireWrite(by)
         if (text.isBlank()) throw Invalid("Text is required")
         val cur = get(by, id)
@@ -235,7 +235,7 @@ class AlertService(
         return next
     }
 
-    fun linkIncident(by: Principal, id: String, incidentRef: String): Alert {
+    suspend fun linkIncident(by: Principal, id: String, incidentRef: String): Alert {
         Access.requireWrite(by)
         val cur = get(by, id)
         val inc = incidents.get(by, incidentRef)
@@ -247,12 +247,12 @@ class AlertService(
         return next
     }
 
-    private fun incidentTimeline(incidentId: String, actor: Actor, text: String) {
+    private suspend fun incidentTimeline(incidentId: String, actor: Actor, text: String) {
         val inc = runCatching { incidents.get(mayday.identity.Principal.system, incidentId) }.getOrNull() ?: return
         if (policy.bool(Keys.TIMELINE_AUTO, inc.teamIds)) incidents.systemEntry(incidentId, EntryKind.ALERT, actor, text)
     }
 
-    private fun publish(type: String, a: Alert) =
+    private suspend fun publish(type: String, a: Alert) =
         events.publish(DomainEvent(type, a.id, clock.now(), listOf(a.teamId), mapOf("severity" to a.severity.name, "status" to a.status.name)))
 
     companion object {

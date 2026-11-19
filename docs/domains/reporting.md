@@ -39,4 +39,4 @@ Reports show how a team or an organization handles incidents over a period: coun
 
 ## Rebuild checklist
 
-Keep the metric definitions. `ApiContractTest` checks the report endpoint.
+Keep the metric definitions. `GrpcContractTest` checks `ReportService.GetReport`.

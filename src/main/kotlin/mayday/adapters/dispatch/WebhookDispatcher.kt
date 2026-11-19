@@ -5,6 +5,8 @@ import mayday.agents.AgentDispatcher
 import mayday.agents.DispatchPayload
 import mayday.shared.Crypto
 import mayday.shared.JSON
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.future.await
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -18,7 +20,7 @@ import java.time.Duration
 class WebhookDispatcher(
     private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build(),
 ) : AgentDispatcher {
-    override fun dispatch(agent: AgentConfig, secret: String, payload: DispatchPayload) {
+    override suspend fun dispatch(agent: AgentConfig, secret: String, payload: DispatchPayload) {
         val url = agent.endpointUrl ?: throw IllegalStateException("The agent has no endpoint URL")
         val body = JSON.encodeToString(DispatchPayload.serializer(), payload)
         val ts = (System.currentTimeMillis() / 1000).toString()
@@ -36,16 +38,18 @@ class WebhookDispatcher(
                     .header("X-Mayday-Signature", "sha256=$sig")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build()
-                val resp = http.send(req, HttpResponse.BodyHandlers.discarding())
+                val resp = http.sendAsync(req, HttpResponse.BodyHandlers.discarding()).await()
                 if (resp.statusCode() in 200..299) return
                 if (resp.statusCode() in 400..499 && resp.statusCode() != 429) throw IllegalStateException("Endpoint answered HTTP ${resp.statusCode()}")
                 last = IllegalStateException("Endpoint answered HTTP ${resp.statusCode()}")
             } catch (e: IllegalStateException) {
                 throw e
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 last = e
             }
-            Thread.sleep(500L shl attempt)
+            delay(500L shl attempt)
         }
         throw last ?: IllegalStateException("Delivery failed")
     }

@@ -59,7 +59,7 @@ class ReportService(
     private val alerts: AlertRepository,
     private val directory: DirectoryService,
 ) {
-    fun report(by: Principal, q: ReportQuery, now: Instant = Instant.now()): Report {
+    suspend fun report(by: Principal, q: ReportQuery, now: Instant = Instant.now()): Report {
         Access.requireRead(by)
         if (!q.to.isAfter(q.from)) throw Invalid("The end of the period must be after the start")
         if (Duration.between(q.from, q.to).toDays() > 731) throw Invalid("The period can be at most two years")

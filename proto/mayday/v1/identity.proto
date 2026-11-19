@@ -1,0 +1,142 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+
+enum OrgRole {
+  ORG_ROLE_UNSPECIFIED = 0;
+  ORG_ROLE_VIEWER = 1;
+  ORG_ROLE_MEMBER = 2;
+  ORG_ROLE_ADMIN = 3;
+}
+
+enum TeamRole {
+  TEAM_ROLE_UNSPECIFIED = 0;
+  TEAM_ROLE_MEMBER = 1;
+  TEAM_ROLE_ADMIN = 2;
+}
+
+enum TokenScope {
+  TOKEN_SCOPE_UNSPECIFIED = 0;
+  TOKEN_SCOPE_READ = 1;
+  TOKEN_SCOPE_WRITE = 2;
+  TOKEN_SCOPE_ADMIN = 3;
+  TOKEN_SCOPE_ALERTS_INGEST = 4;
+}
+
+enum OwnerKind {
+  OWNER_KIND_UNSPECIFIED = 0;
+  OWNER_KIND_USER = 1;
+  OWNER_KIND_AGENT = 2;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  OrgRole org_role = 4;
+  map<string, TeamRole> teams = 5;
+  repeated string project_admin = 6;
+  optional string external_id = 7;
+  bool disabled = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message UserPage {
+  repeated User items = 1;
+  optional string next_cursor = 2;
+}
+
+message ApiToken {
+  string id = 1;
+  string name = 2;
+  OwnerKind owner_kind = 3;
+  string owner_id = 4;
+  string prefix = 5;
+  repeated TokenScope scopes = 6;
+  google.protobuf.Timestamp created_at = 7;
+  optional google.protobuf.Timestamp expires_at = 8;
+}
+
+message ApiTokens {
+  repeated ApiToken items = 1;
+}
+
+// The secret is in this response only. Mayday stores a hash.
+message IssuedToken {
+  ApiToken token = 1;
+  string secret = 2;
+}
+
+message AuthConfig {
+  bool sso = 1;
+  bool dev_login = 2;
+  string sso_name = 3;
+}
+
+message Me {
+  User user = 1;
+  string actor_kind = 2;
+  repeated TokenScope scopes = 3;
+  bool agent_ready = 4;
+}
+
+message WhoAmIResponse {
+  string actor = 1;
+  string kind = 2;
+  string role = 3;
+  string on_behalf_of = 4;
+  string scopes = 5;
+}
+
+message ListUsersRequest {
+  optional string q = 1;
+  optional string cursor = 2;
+  int32 limit = 3;
+}
+
+message CreateUserRequest {
+  string email = 1;
+  string name = 2;
+  OrgRole role = 3;
+}
+
+message UpdateUserRequest {
+  string id = 1;
+  optional string name = 2;
+  OrgRole role = 3;
+  // Replaces the team memberships when replace_teams is true.
+  map<string, TeamRole> teams = 4;
+  bool replace_teams = 5;
+  repeated string project_admin = 6;
+  bool replace_project_admin = 7;
+  optional bool disabled = 8;
+}
+
+message IssueTokenRequest {
+  string name = 1;
+  repeated TokenScope scopes = 2;
+  optional int64 ttl_days = 3;
+}
+
+// Session and identity. GetAuthConfig needs no credentials.
+service AuthService {
+  rpc GetAuthConfig(google.protobuf.Empty) returns (AuthConfig);
+  rpc GetMe(google.protobuf.Empty) returns (Me);
+  rpc WhoAmI(google.protobuf.Empty) returns (WhoAmIResponse);
+}
+
+service UserService {
+  rpc ListUsers(ListUsersRequest) returns (UserPage);
+  rpc CreateUser(CreateUserRequest) returns (User);
+  rpc UpdateUser(UpdateUserRequest) returns (User);
+  rpc ListTokens(google.protobuf.Empty) returns (ApiTokens);
+  rpc IssueToken(IssueTokenRequest) returns (IssuedToken);
+  rpc RevokeToken(IdRequest) returns (google.protobuf.Empty);
+}

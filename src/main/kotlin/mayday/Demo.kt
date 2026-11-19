@@ -28,7 +28,7 @@ import kotlin.random.Random
 
 /** Sample data for local trials and screenshots. Runs only when the store has no incidents. */
 object Demo {
-    fun seed(app: App) {
+    suspend fun seed(app: App) {
         val p = app.ports
         if (p.incidents.list(mayday.incidents.IncidentFilter(), null, 1).items.isNotEmpty()) return
         val now = Instant.now()
@@ -41,8 +41,8 @@ object Demo {
         val identityTeam = d.createTeam("Identity", "identity", platform.id)
         val teams = listOf(checkout, billing, sre, identityTeam)
 
-        fun user(email: String, name: String, role: OrgRole, t: Map<String, TeamRole>) =
-            (p.users.byEmail(email) ?: User(Ids.new(), email, name, role, t, createdAt = now)).copy(orgRole = role, teams = t, name = name).also(p.users::save)
+        suspend fun user(email: String, name: String, role: OrgRole, t: Map<String, TeamRole>) =
+            (p.users.byEmail(email) ?: User(Ids.new(), email, name, role, t, createdAt = now)).copy(orgRole = role, teams = t, name = name).also { p.users.save(it) }
         val admin = user("admin@example.com", "Alex Admin", OrgRole.ADMIN, mapOf(sre.id to TeamRole.ADMIN))
         val ana = user("ana@example.com", "Ana Responder", OrgRole.MEMBER, mapOf(checkout.id to TeamRole.ADMIN, billing.id to TeamRole.MEMBER))
         user("sam@example.com", "Sam Oncall", OrgRole.MEMBER, mapOf(sre.id to TeamRole.MEMBER, identityTeam.id to TeamRole.MEMBER))

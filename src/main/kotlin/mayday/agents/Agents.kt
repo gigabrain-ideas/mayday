@@ -109,33 +109,33 @@ data class LlmConfig(
 )
 
 interface AgentRepository {
-    fun get(id: String): AgentConfig?
-    fun list(): List<AgentConfig>
-    fun save(agent: AgentConfig)
-    fun delete(id: String)
+    suspend fun get(id: String): AgentConfig?
+    suspend fun list(): List<AgentConfig>
+    suspend fun save(agent: AgentConfig)
+    suspend fun delete(id: String)
 }
 
 interface RunRepository {
-    fun get(id: String): AgentRun?
-    fun save(run: AgentRun, expectedVersion: Long?)
-    fun bySubject(subjectId: String): List<AgentRun>
-    fun recent(limit: Int): List<AgentRun>
+    suspend fun get(id: String): AgentRun?
+    suspend fun save(run: AgentRun, expectedVersion: Long?)
+    suspend fun bySubject(subjectId: String): List<AgentRun>
+    suspend fun recent(limit: Int): List<AgentRun>
 
     /** Atomically move up to [limit] QUEUED runs of [agentId] to DISPATCHED and return them. */
-    fun claim(agentId: String, limit: Int, at: java.time.Instant): List<AgentRun>
-    fun active(): List<AgentRun>
+    suspend fun claim(agentId: String, limit: Int, at: java.time.Instant): List<AgentRun>
+    suspend fun active(): List<AgentRun>
 }
 
 interface McpServerRepository {
-    fun get(id: String): McpServerConfig?
-    fun list(): List<McpServerConfig>
-    fun save(server: McpServerConfig)
-    fun delete(id: String)
+    suspend fun get(id: String): McpServerConfig?
+    suspend fun list(): List<McpServerConfig>
+    suspend fun save(server: McpServerConfig)
+    suspend fun delete(id: String)
 }
 
 interface ConfigRepository {
-    fun llm(): LlmConfig?
-    fun saveLlm(config: LlmConfig)
+    suspend fun llm(): LlmConfig?
+    suspend fun saveLlm(config: LlmConfig)
 }
 
 // ---- LLM port (provider neutral) ----
@@ -171,8 +171,8 @@ enum class StopReason { END, TOOL_USE, MAX_TOKENS, REFUSAL, OTHER }
 
 data class LlmResponse(val message: LlmMessage, val stopReason: StopReason)
 
-fun interface LlmProvider {
-    fun complete(request: LlmRequest): LlmResponse
+interface LlmProvider {
+    suspend fun complete(request: LlmRequest): LlmResponse
 }
 
 fun interface LlmProviderFactory {
@@ -185,8 +185,8 @@ data class ToolOutcome(val content: String, val isError: Boolean = false)
 
 /** Tools that an agent can call. [internal] is true for the built-in agent, which bypasses the MCP write switch. */
 interface ToolCatalog {
-    fun tools(principal: Principal, internal: Boolean): List<ToolSpec>
-    fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome
+    suspend fun tools(principal: Principal, internal: Boolean): List<ToolSpec>
+    suspend fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome
 }
 
 // ---- Push delivery port ----
@@ -201,7 +201,7 @@ data class DispatchPayload(
     val subject: JsonObject,
 )
 
-fun interface AgentDispatcher {
+interface AgentDispatcher {
     /** Deliver a run to a push agent. Throws on a delivery failure. */
-    fun dispatch(agent: AgentConfig, secret: String, payload: DispatchPayload)
+    suspend fun dispatch(agent: AgentConfig, secret: String, payload: DispatchPayload)
 }

@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+
+enum Scope {
+  SCOPE_UNSPECIFIED = 0;
+  SCOPE_ORG = 1;
+  SCOPE_PROJECT = 2;
+  SCOPE_TEAM = 3;
+}
+
+enum Enforcement {
+  ENFORCEMENT_UNSPECIFIED = 0;
+  ENFORCEMENT_NONE = 1;
+  ENFORCEMENT_MINIMUM = 2;
+  ENFORCEMENT_LOCKED = 3;
+}
+
+enum SettingType {
+  SETTING_TYPE_UNSPECIFIED = 0;
+  SETTING_TYPE_BOOL = 1;
+  SETTING_TYPE_INT = 2;
+  SETTING_TYPE_SEVERITY = 3;
+  SETTING_TYPE_STRING = 4;
+}
+
+enum Strictness {
+  STRICTNESS_UNSPECIFIED = 0;
+  STRICTNESS_HIGHER = 1;
+  STRICTNESS_LOWER = 2;
+  STRICTNESS_TRUE = 3;
+  STRICTNESS_FALSE = 4;
+  STRICTNESS_NONE = 5;
+}
+
+enum ChangeRequestStatus {
+  CHANGE_REQUEST_STATUS_UNSPECIFIED = 0;
+  CHANGE_REQUEST_STATUS_PENDING = 1;
+  CHANGE_REQUEST_STATUS_APPROVED = 2;
+  CHANGE_REQUEST_STATUS_REJECTED = 3;
+}
+
+message SettingDef {
+  string key = 1;
+  string label = 2;
+  string description = 3;
+  SettingType type = 4;
+  string default = 5;
+  repeated Scope scopes = 6;
+  Strictness strictness = 7;
+  optional int32 min = 8;
+  optional int32 max = 9;
+}
+
+message EffectiveSetting {
+  string key = 1;
+  string value = 2;
+  Scope source = 3;
+  Scope enforced_by = 4;
+  Enforcement enforcement = 5;
+  optional string enforced_value = 6;
+}
+
+message SettingValue {
+  Scope scope = 1;
+  string scope_id = 2;
+  string key = 3;
+  string value = 4;
+  Enforcement enforcement = 5;
+  bool exception = 6;
+  Actor updated_by = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message SettingsView {
+  repeated SettingDef schema = 1;
+  repeated EffectiveSetting effective = 2;
+  repeated SettingValue raw = 3;
+}
+
+message ChangeRequest {
+  string id = 1;
+  Scope scope = 2;
+  string scope_id = 3;
+  string key = 4;
+  string proposed_value = 5;
+  string reason = 6;
+  ChangeRequestStatus status = 7;
+  Actor requested_by = 8;
+  google.protobuf.Timestamp created_at = 9;
+  Actor decided_by = 10;
+  google.protobuf.Timestamp decided_at = 11;
+  string decision_note = 12;
+}
+
+message ChangeRequests {
+  repeated ChangeRequest items = 1;
+}
+
+message GetSettingsRequest {
+  Scope scope = 1;
+  // Project or team id or slug. Not used for ORG.
+  string scope_id = 2;
+}
+
+message SetSettingRequest {
+  Scope scope = 1;
+  string scope_id = 2;
+  string key = 3;
+  string value = 4;
+  Enforcement enforcement = 5;
+}
+
+message ClearSettingRequest {
+  Scope scope = 1;
+  string scope_id = 2;
+  string key = 3;
+}
+
+message ListChangeRequestsRequest {
+  ChangeRequestStatus status = 1;
+}
+
+message RequestChangeRequest {
+  Scope scope = 1;
+  string scope_id = 2;
+  string key = 3;
+  string value = 4;
+  string reason = 5;
+}
+
+message DecideChangeRequest {
+  string id = 1;
+  bool approve = 2;
+  string note = 3;
+}
+
+service PolicyService {
+  rpc GetSettings(GetSettingsRequest) returns (SettingsView);
+  rpc SetSetting(SetSettingRequest) returns (SettingValue);
+  rpc ClearSetting(ClearSettingRequest) returns (google.protobuf.Empty);
+  rpc ListChangeRequests(ListChangeRequestsRequest) returns (ChangeRequests);
+  rpc RequestChange(RequestChangeRequest) returns (ChangeRequest);
+  rpc DecideChange(DecideChangeRequest) returns (ChangeRequest);
+}

@@ -33,11 +33,16 @@ import mayday.shared.JSON
 import mayday.shared.NotFound
 import mayday.shared.SecretBox
 import mayday.shared.Unavailable
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.net.URI
 import java.time.Duration
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.Semaphore
 
 const val INTERNAL_AGENT_ID = "mayday"
 
@@ -105,14 +110,14 @@ class AgentService(
     private val envApiKey: String?,
     concurrency: Int = 16,
 ) : AgentIdentityLookup, AlertAutomation {
-    private val executor: ExecutorService = Executors.newVirtualThreadPerTaskExecutor()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("agent-runs"))
     private val permits = Semaphore(concurrency)
     private val delegationTtl = Duration.ofHours(1)
 
-    override fun find(agentId: String): AgentIdentity? =
+    override suspend fun find(agentId: String): AgentIdentity? =
         agents.get(agentId)?.let { AgentIdentity(it.id, it.name, it.role, it.enabled) }
 
-    fun ensureInternalAgent() {
+    suspend fun ensureInternalAgent() {
         if (agents.get(INTERNAL_AGENT_ID) != null) return
         val now = clock.now()
         agents.save(
@@ -132,12 +137,12 @@ class AgentService(
 
     // ---- configuration (admin) ----
 
-    fun list(by: Principal): List<AgentConfig> = Access.requireRead(by).let { agents.list().sortedBy { it.name.lowercase() }.map(::redact) }
-    fun get(by: Principal, id: String) = Access.requireRead(by).let { redact(agents.get(id) ?: throw NotFound("Agent")) }
+    suspend fun list(by: Principal): List<AgentConfig> = Access.requireRead(by).let { agents.list().sortedBy { it.name.lowercase() }.map(::redact) }
+    suspend fun get(by: Principal, id: String) = Access.requireRead(by).let { redact(agents.get(id) ?: throw NotFound("Agent")) }
 
     private fun redact(a: AgentConfig) = a.copy(secretSealed = if (a.secretSealed.isEmpty()) "" else "set")
 
-    fun create(by: Principal, input: AgentInput): AgentCredentials {
+    suspend fun create(by: Principal, input: AgentInput): AgentCredentials {
         Access.requireAdmin(by)
         if (input.kind == AgentKind.INTERNAL) throw Invalid("The built-in agent exists already. Create external agents only.")
         validate(input)
@@ -165,7 +170,7 @@ class AgentService(
         return AgentCredentials(redact(agent), token, secret)
     }
 
-    fun update(by: Principal, id: String, input: AgentInput): AgentConfig {
+    suspend fun update(by: Principal, id: String, input: AgentInput): AgentConfig {
         Access.requireAdmin(by)
         val cur = agents.get(id) ?: throw NotFound("Agent")
         if (cur.kind == AgentKind.EXTERNAL) validate(input)
@@ -189,7 +194,7 @@ class AgentService(
         return redact(next)
     }
 
-    fun rotateCredentials(by: Principal, id: String): AgentCredentials {
+    suspend fun rotateCredentials(by: Principal, id: String): AgentCredentials {
         Access.requireAdmin(by)
         val cur = agents.get(id) ?: throw NotFound("Agent")
         if (cur.kind != AgentKind.EXTERNAL) throw Invalid("The built-in agent has no credentials")
@@ -201,7 +206,7 @@ class AgentService(
         return AgentCredentials(redact(next), token, secret)
     }
 
-    fun delete(by: Principal, id: String) {
+    suspend fun delete(by: Principal, id: String) {
         Access.requireAdmin(by)
         if (id == INTERNAL_AGENT_ID) throw Invalid("Disable the built-in agent instead of deleting it")
         agents.get(id) ?: throw NotFound("Agent")
@@ -231,12 +236,12 @@ class AgentService(
 
     // ---- LLM provider and tool gateway (admin) ----
 
-    fun llm(by: Principal): LlmView = Access.requireRead(by).let { view(config.llm() ?: LlmConfig()) }
+    suspend fun llm(by: Principal): LlmView = Access.requireRead(by).let { view(config.llm() ?: LlmConfig()) }
 
     private fun view(c: LlmConfig) = LlmView(c.provider, c.model, c.baseUrl, c.effort, c.enabled,
         c.apiKeySealed.isNotEmpty() || !envApiKey.isNullOrBlank(), llmReady(c))
 
-    fun updateLlm(by: Principal, input: LlmInput): LlmView {
+    suspend fun updateLlm(by: Principal, input: LlmInput): LlmView {
         Access.requireAdmin(by)
         val cur = config.llm() ?: LlmConfig()
         val effort = input.effort ?: cur.effort
@@ -258,21 +263,21 @@ class AgentService(
 
     private fun llmReady(c: LlmConfig) = c.enabled && (c.apiKeySealed.isNotEmpty() || !envApiKey.isNullOrBlank())
 
-    fun internalReady(): Boolean = llmReady(config.llm() ?: LlmConfig()) && agents.get(INTERNAL_AGENT_ID)?.enabled == true
+    suspend fun internalReady(): Boolean = llmReady(config.llm() ?: LlmConfig()) && agents.get(INTERNAL_AGENT_ID)?.enabled == true
 
-    private fun llmProvider(): LlmProvider {
+    private suspend fun llmProvider(): LlmProvider {
         val c = config.llm() ?: throw Unavailable("No LLM provider is configured")
         if (!llmReady(c)) throw Unavailable("The LLM provider is disabled or has no API key")
         val key = if (c.apiKeySealed.isNotEmpty()) box.open(c.apiKeySealed) else envApiKey.orEmpty()
         return llmFactory.create(c, key)
     }
 
-    fun mcpServers(by: Principal): List<McpServerView> {
+    suspend fun mcpServers(by: Principal): List<McpServerView> {
         Access.requireRead(by)
         return mcpServers.list().sortedBy { it.name.lowercase() }.map { McpServerView(it.id, it.name, it.url, it.headerName, it.credentialSealed.isNotEmpty(), it.toolAllowlist, it.enabled) }
     }
 
-    fun saveMcpServer(by: Principal, id: String?, input: McpServerInput): McpServerView {
+    suspend fun saveMcpServer(by: Principal, id: String?, input: McpServerInput): McpServerView {
         Access.requireAdmin(by)
         val uri = runCatching { URI(input.url.trim()) }.getOrNull()
         if (uri == null || uri.scheme !in setOf("http", "https")) throw Invalid("The MCP server URL must use http or https")
@@ -297,7 +302,7 @@ class AgentService(
         return McpServerView(s.id, s.name, s.url, s.headerName, s.credentialSealed.isNotEmpty(), s.toolAllowlist, s.enabled)
     }
 
-    fun deleteMcpServer(by: Principal, id: String) {
+    suspend fun deleteMcpServer(by: Principal, id: String) {
         Access.requireAdmin(by)
         mcpServers.delete(id)
         events.publish(DomainEvent("mcp_server.changed", id, clock.now()))
@@ -305,12 +310,12 @@ class AgentService(
 
     // ---- runs ----
 
-    fun runsFor(by: Principal, subjectId: String): List<AgentRun> = Access.requireRead(by).let { runs.bySubject(subjectId).sortedByDescending { it.createdAt } }
-    fun recentRuns(by: Principal, limit: Int) = Access.requireRead(by).let { runs.recent(limit.coerceIn(1, 200)) }
-    fun run(by: Principal, id: String): AgentRun = Access.requireRead(by).let { runs.get(id) ?: throw NotFound("Agent run") }
+    suspend fun runsFor(by: Principal, subjectId: String): List<AgentRun> = Access.requireRead(by).let { runs.bySubject(subjectId).sortedByDescending { it.createdAt } }
+    suspend fun recentRuns(by: Principal, limit: Int) = Access.requireRead(by).let { runs.recent(limit.coerceIn(1, 200)) }
+    suspend fun run(by: Principal, id: String): AgentRun = Access.requireRead(by).let { runs.get(id) ?: throw NotFound("Agent run") }
 
     /** Agents that can perform [action] right now, the built-in agent first. */
-    fun eligible(action: AgentAction): List<AgentConfig> = agents.list()
+    suspend fun eligible(action: AgentAction): List<AgentConfig> = agents.list()
         .filter { it.enabled && action in it.actions && (it.kind == AgentKind.EXTERNAL || internalReady()) }
         .sortedBy { if (it.kind == AgentKind.INTERNAL) 0 else 1 }
         .map(::redact)
@@ -319,7 +324,7 @@ class AgentService(
      * A human presses a button. The agent receives a delegated token and acts on behalf of that human,
      * so the human's RBAC applies to every change the agent makes.
      */
-    fun trigger(by: Principal, action: AgentAction, subjectKind: SubjectKind, subjectRef: String, agentId: String?, prompt: String): AgentRun {
+    suspend fun trigger(by: Principal, action: AgentAction, subjectKind: SubjectKind, subjectRef: String, agentId: String?, prompt: String): AgentRun {
         Access.requireWrite(by)
         val user = by.user ?: throw Forbidden("Only a person can start an agent manually")
         if (by.isDelegated) throw Forbidden("An agent cannot start another agent")
@@ -353,7 +358,7 @@ class AgentService(
         return runs.get(run.id) ?: run
     }
 
-    override fun onAlertCreated(alert: Alert) {
+    override suspend fun onAlertCreated(alert: Alert) {
         val teams = listOf(alert.teamId)
         for (agent in agents.list()) {
             if (!agent.enabled) continue
@@ -387,16 +392,16 @@ class AgentService(
         }
     }
 
-    private fun start(agent: AgentConfig, run: AgentRun) {
+    private suspend fun start(agent: AgentConfig, run: AgentRun) {
         publish(run)
         when {
-            agent.kind == AgentKind.INTERNAL -> executor.submit { permits.acquire(); try { executeInternal(agent, run.id) } finally { permits.release() } }
-            agent.delivery == Delivery.PUSH -> executor.submit { push(agent, run.id) }
+            agent.kind == AgentKind.INTERNAL -> scope.launch { permits.withPermit { executeInternal(agent, run.id) } }
+            agent.delivery == Delivery.PUSH -> scope.launch { push(agent, run.id) }
             else -> Unit
         }
     }
 
-    private fun push(agent: AgentConfig, runId: String) {
+    private suspend fun push(agent: AgentConfig, runId: String) {
         val run = runs.get(runId) ?: return
         try {
             val payload = DispatchPayload(
@@ -409,12 +414,14 @@ class AgentService(
             )
             dispatcher.dispatch(agent, box.open(agent.secretSealed), payload)
             transition(runId) { it.copy(status = RunStatus.DISPATCHED, startedAt = clock.now()) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             finish(runId, RunStatus.FAILED, "", "Delivery failed: ${e.message ?: e.javaClass.simpleName}")
         }
     }
 
-    fun claim(by: Principal, limit: Int): List<ClaimedRun> {
+    suspend fun claim(by: Principal, limit: Int): List<ClaimedRun> {
         if (!by.isAgent || by.isDelegated) throw Forbidden("Only an agent identity can claim runs")
         val agent = agents.get(by.actor.id) ?: throw NotFound("Agent")
         return runs.claim(agent.id, limit.coerceIn(1, 50), clock.now()).map {
@@ -423,7 +430,7 @@ class AgentService(
         }
     }
 
-    fun complete(by: Principal, runId: String, success: Boolean, output: String, error: String): AgentRun {
+    suspend fun complete(by: Principal, runId: String, success: Boolean, output: String, error: String): AgentRun {
         if (!by.isAgent) throw Forbidden("Only the agent that owns the run can complete it")
         val run = runs.get(runId) ?: throw NotFound("Agent run")
         if (run.agentId != by.actor.id) throw Forbidden("This run belongs to another agent")
@@ -431,7 +438,7 @@ class AgentService(
         return finish(runId, if (success) RunStatus.SUCCEEDED else RunStatus.FAILED, output, error)
     }
 
-    fun progress(by: Principal, runId: String, text: String): AgentRun {
+    suspend fun progress(by: Principal, runId: String, text: String): AgentRun {
         val run = runs.get(runId) ?: throw NotFound("Agent run")
         if (run.agentId != by.actor.id) throw Forbidden("This run belongs to another agent")
         if (run.status.terminal) throw Conflict("The run is already finished")
@@ -440,7 +447,7 @@ class AgentService(
         return next
     }
 
-    fun cancel(by: Principal, runId: String): AgentRun {
+    suspend fun cancel(by: Principal, runId: String): AgentRun {
         Access.requireWrite(by)
         val run = runs.get(runId) ?: throw NotFound("Agent run")
         if (run.status.terminal) return run
@@ -448,38 +455,40 @@ class AgentService(
     }
 
     /** Mark runs that stopped reporting as failed so the queue does not grow without bound. */
-    fun reapStale(maxAge: Duration) {
+    suspend fun reapStale(maxAge: Duration) {
         val limit = clock.now().minus(maxAge)
         runs.active().filter { (it.startedAt ?: it.createdAt).isBefore(limit) }.forEach {
             finish(it.id, RunStatus.FAILED, it.output, "The agent did not report a result in time")
         }
     }
 
-    private fun executeInternal(agent: AgentConfig, runId: String) {
+    private suspend fun executeInternal(agent: AgentConfig, runId: String) {
         val run = transition(runId) { it.copy(status = RunStatus.RUNNING, startedAt = clock.now()) }
         try {
             val principal = principalFor(agent, run)
             val result = InternalAgent(llmProvider(), tools(), clock).run(agent, run, principal, snapshot(run))
             finish(runId, RunStatus.SUCCEEDED, result, "")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             finish(runId, RunStatus.FAILED, "", e.message ?: e.javaClass.simpleName)
         }
     }
 
-    private fun principalFor(agent: AgentConfig, run: AgentRun): Principal {
+    private suspend fun principalFor(agent: AgentConfig, run: AgentRun): Principal {
         val user = run.onBehalfOf?.let { runCatching { identity().user(it) }.getOrNull() }
         val actor = Actor(ActorKind.AGENT, agent.id, agent.name, onBehalfOf = user?.id)
         val scopes = if (user != null) Principal.ALL else scopesFor(agent.role)
         return Principal(actor, user, agent.role, scopes, run.id)
     }
 
-    private fun delegatedToken(agent: AgentConfig, run: AgentRun): String? {
+    private suspend fun delegatedToken(agent: AgentConfig, run: AgentRun): String? {
         val userId = run.onBehalfOf ?: return null
         val user = runCatching { identity().user(userId) }.getOrNull() ?: return null
         return identity().delegate(user, AgentIdentity(agent.id, agent.name, agent.role, agent.enabled), run.id, delegationTtl, Principal.ALL)
     }
 
-    private fun finish(runId: String, status: RunStatus, output: String, error: String): AgentRun {
+    private suspend fun finish(runId: String, status: RunStatus, output: String, error: String): AgentRun {
         val done = transition(runId) { it.copy(status = status, output = output.take(100_000), error = error.take(4000), finishedAt = clock.now()) }
         val agentActor = Actor(ActorKind.AGENT, done.agentId, done.agentName, done.onBehalfOf)
         when (status) {
@@ -490,7 +499,7 @@ class AgentService(
         return done
     }
 
-    private fun transition(runId: String, f: (AgentRun) -> AgentRun): AgentRun {
+    private suspend fun transition(runId: String, f: (AgentRun) -> AgentRun): AgentRun {
         repeat(5) {
             val cur = runs.get(runId) ?: throw NotFound("Agent run")
             val next = f(cur).copy(version = cur.version + 1)
@@ -504,19 +513,19 @@ class AgentService(
         throw Conflict("The run changed too often; try again")
     }
 
-    private fun note(run: AgentRun, text: String, actor: Actor = Actor.system) {
+    private suspend fun note(run: AgentRun, text: String, actor: Actor = Actor.system) {
         when (run.subjectKind) {
             SubjectKind.INCIDENT -> incidents.systemEntry(run.subjectId, EntryKind.AGENT, actor, text, mapOf("runId" to run.id))
             SubjectKind.ALERT -> runCatching { alerts.addUpdate(Principal.system, run.subjectId, text) }
         }
     }
 
-    private fun subject(by: Principal, kind: SubjectKind, ref: String): Pair<String, String> = when (kind) {
+    private suspend fun subject(by: Principal, kind: SubjectKind, ref: String): Pair<String, String> = when (kind) {
         SubjectKind.INCIDENT -> incidents.get(by, ref).let { it.id to it.key }
         SubjectKind.ALERT -> alerts.get(by, ref).let { it.id to it.title.take(80) }
     }
 
-    private fun snapshot(run: AgentRun): JsonObject = when (run.subjectKind) {
+    private suspend fun snapshot(run: AgentRun): JsonObject = when (run.subjectKind) {
         SubjectKind.INCIDENT -> {
             val inc = incidents.get(Principal.system, run.subjectId)
             buildJsonObject {
@@ -531,8 +540,8 @@ class AgentService(
         }
     }
 
-    private fun publish(run: AgentRun) =
+    private suspend fun publish(run: AgentRun) =
         events.publish(DomainEvent("agent_run.updated", run.id, clock.now(), data = mapOf("subjectId" to run.subjectId, "status" to run.status.name)))
 
-    fun shutdown() = executor.shutdownNow()
+    fun shutdown() = scope.cancel()
 }

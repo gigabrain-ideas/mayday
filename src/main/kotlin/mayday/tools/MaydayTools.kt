@@ -85,17 +85,17 @@ class MaydayTools(
     private val identity: () -> IdentityService,
     private val agents: () -> AgentService,
 ) : ToolCatalog {
-    private class Tool(val spec: ToolSpec, val handler: (Principal, JsonObject, Gate) -> JsonElement)
+    private class Tool(val spec: ToolSpec, val handler: suspend (Principal, JsonObject, Gate) -> JsonElement)
 
     /** Checks the MCP write switch for external callers. */
     private inner class Gate(val internal: Boolean) {
-        fun write(teamIds: List<String>) {
+        suspend fun write(teamIds: List<String>) {
             if (!internal && !policy.bool(Keys.MCP_WRITE, teamIds)) {
                 throw Forbidden("MCP write access is turned off for these teams. An administrator can turn on '${Keys.MCP_WRITE}'.")
             }
         }
-        fun incident(p: Principal, ref: String) = incidents.get(p, ref).also { write(it.teamIds) }
-        fun alert(p: Principal, id: String) = alerts.get(p, id).also { write(listOf(it.teamId)) }
+        suspend fun incident(p: Principal, ref: String) = incidents.get(p, ref).also { write(it.teamIds) }
+        suspend fun alert(p: Principal, id: String) = alerts.get(p, id).also { write(listOf(it.teamId)) }
     }
 
     private val sevs = Severity.entries.map { it.name }
@@ -303,7 +303,7 @@ class MaydayTools(
         i.resolvedAt?.let { put("resolvedAt", it.toString()) }
     }
 
-    override fun tools(principal: Principal, internal: Boolean): List<ToolSpec> = list.map { it.spec }.filter { spec ->
+    override suspend fun tools(principal: Principal, internal: Boolean): List<ToolSpec> = list.map { it.spec }.filter { spec ->
         when {
             spec.admin -> Access.isAdmin(principal)
             spec.name in setOf("claim_agent_runs", "report_agent_run") -> principal.isAgent && !internal
@@ -312,7 +312,7 @@ class MaydayTools(
         }
     }
 
-    override fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome {
+    override suspend fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome {
         val tool = byName[name] ?: return ToolOutcome("Unknown tool '$name'", true)
         return try {
             val r = tool.handler(principal, args, Gate(internal))
@@ -325,9 +325,9 @@ class MaydayTools(
 
 /** Combines tool catalogs; names of later catalogs get a prefix when they collide. */
 class CompositeCatalog(private val parts: List<ToolCatalog>) : ToolCatalog {
-    override fun tools(principal: Principal, internal: Boolean) = parts.flatMap { it.tools(principal, internal) }.distinctBy { it.name }
+    override suspend fun tools(principal: Principal, internal: Boolean) = parts.flatMap { it.tools(principal, internal) }.distinctBy { it.name }
 
-    override fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome {
+    override suspend fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome {
         for (p in parts) if (p.tools(principal, internal).any { it.name == name }) return p.call(principal, name, args, internal)
         return ToolOutcome("Unknown tool '$name'", true)
     }

@@ -27,6 +27,8 @@ import mayday.agents.LlmRequest
 import mayday.agents.LlmResponse
 import mayday.agents.LlmRole
 import mayday.agents.StopReason
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 
@@ -47,7 +49,9 @@ object AnthropicFactory : LlmProviderFactory {
 }
 
 class AnthropicProvider(private val client: AnthropicClient, private val config: LlmConfig) : LlmProvider {
-    override fun complete(request: LlmRequest): LlmResponse {
+    override suspend fun complete(request: LlmRequest): LlmResponse = withContext(Dispatchers.IO) { completeBlocking(request) }
+
+    private fun completeBlocking(request: LlmRequest): LlmResponse {
         val b = MessageCreateParams.builder()
             .model(config.model)
             .maxTokens(request.maxTokens)

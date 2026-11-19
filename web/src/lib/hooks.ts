@@ -1,29 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError } from "./api";
+import { subscribeEvents, type ApiError, type LiveEvent } from "./api";
 
-type Listener = (type: string, data: { subjectId: string; teamIds: string[]; data: Record<string, string> }) => void;
+type Listener = (e: LiveEvent) => void;
 const listeners = new Set<Listener>();
-let source: EventSource | null = null;
+let live: AbortController | null = null;
 
-const EVENT_TYPES = [
-  "incident.created", "incident.updated", "incident.timeline", "alert.created", "alert.updated",
-  "agent_run.updated", "setting.changed", "change_request.created", "change_request.decided", "agent.changed", "mcp_server.changed",
-];
-
-function ensureSource() {
-  if (source || typeof EventSource === "undefined") return;
-  source = new EventSource("/api/v1/events");
-  for (const t of EVENT_TYPES) {
-    source.addEventListener(t, (e) => {
-      const data = JSON.parse((e as MessageEvent).data);
-      listeners.forEach((l) => l(t, data));
-    });
-  }
+function ensureLive() {
+  if (live) return;
+  const ctl = (live = new AbortController());
+  (async () => {
+    while (!ctl.signal.aborted) {
+      try {
+        for await (const e of subscribeEvents(ctl.signal)) listeners.forEach((l) => l(e));
+      } catch { /* reconnect below */ }
+      if (!ctl.signal.aborted) await new Promise((r) => setTimeout(r, 3000));
+    }
+  })();
 }
 
 export function closeLive() {
-  source?.close();
-  source = null;
+  live?.abort();
+  live = null;
 }
 
 /** Subscribe to live domain events. The filter decides which events are relevant. */
@@ -31,10 +28,10 @@ export function useLive(filter: (type: string, subjectId: string, data: Record<s
   const ref = useRef({ filter, onEvent });
   ref.current = { filter, onEvent };
   useEffect(() => {
-    ensureSource();
+    ensureLive();
     let timer: number | undefined;
-    const l: Listener = (type, d) => {
-      if (!ref.current.filter(type, d.subjectId, d.data)) return;
+    const l: Listener = (e) => {
+      if (!ref.current.filter(e.type, e.subjectId, e.data)) return;
       window.clearTimeout(timer);
       timer = window.setTimeout(() => ref.current.onEvent(), 150);
     };
@@ -46,16 +43,21 @@ export function useLive(filter: (type: string, subjectId: string, data: Record<s
   }, []);
 }
 
-export function useQuery<T>(path: string | null, deps: unknown[] = []) {
+/** Loads data with the loader. It reloads when a dependency changes. A null loader loads nothing. */
+export function useQuery<T>(loader: (() => Promise<T>) | null, deps: unknown[] = []) {
   const [data, setData] = useState<T | undefined>();
   const [error, setError] = useState<ApiError | undefined>();
   const [loading, setLoading] = useState(true);
   const seq = useRef(0);
+  const fn = useRef(loader);
+  fn.current = loader;
+  const enabled = loader !== null;
   const reload = useCallback(async () => {
-    if (!path) return;
+    const load = fn.current;
+    if (!load) return;
     const n = ++seq.current;
     try {
-      const d = await api.get<T>(path);
+      const d = await load();
       if (n === seq.current) {
         setData(d);
         setError(undefined);
@@ -66,7 +68,7 @@ export function useQuery<T>(path: string | null, deps: unknown[] = []) {
       if (n === seq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, ...deps]);
+  }, [enabled, ...deps]);
   useEffect(() => {
     setLoading(true);
     reload();

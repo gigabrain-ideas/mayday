@@ -58,31 +58,31 @@ class IncidentService(
     private val keyPattern = Regex("^([A-Za-z0-9]+)-(\\d+)$")
 
     /** Accepts an id, a key (INC-42) or a number (42). */
-    fun get(by: Principal, ref: String): Incident {
+    suspend fun get(by: Principal, ref: String): Incident {
         Access.requireRead(by)
         return find(ref) ?: throw NotFound("Incident")
     }
 
-    private fun find(ref: String): Incident? {
+    private suspend fun find(ref: String): Incident? {
         keyPattern.matchEntire(ref)?.let { return incidents.byNumber(it.groupValues[2].toLong()) }
         ref.toLongOrNull()?.let { return incidents.byNumber(it) }
         return incidents.get(ref)
     }
 
-    fun list(by: Principal, filter: IncidentFilter, cursor: String?, limit: Int) =
+    suspend fun list(by: Principal, filter: IncidentFilter, cursor: String?, limit: Int) =
         Access.requireRead(by).let { incidents.list(filter, cursor, limit.coerceIn(1, 200)) }
 
-    fun timeline(by: Principal, ref: String): List<TimelineEntry> = timeline.list(get(by, ref).id)
+    suspend fun timeline(by: Principal, ref: String): List<TimelineEntry> = timeline.list(get(by, ref).id)
 
-    fun declare(by: Principal, input: NewIncident): Incident {
+    suspend fun declare(by: Principal, input: NewIncident): Incident {
         Access.requireWrite(by)
         return create(by.actor, input)
     }
 
     /** Used by the alerting context; the trigger is a policy decision, not a user action. */
-    fun declareFromAlert(input: NewIncident): Incident = create(Actor.system, input)
+    suspend fun declareFromAlert(input: NewIncident): Incident = create(Actor.system, input)
 
-    private fun create(actor: Actor, input: NewIncident): Incident {
+    private suspend fun create(actor: Actor, input: NewIncident): Incident {
         val teams = input.teamIds.distinct().map { directory.team(it).id }
         val now = clock.now()
         val number = incidents.nextNumber()
@@ -112,7 +112,7 @@ class IncidentService(
         return incident
     }
 
-    fun update(by: Principal, ref: String, patch: IncidentPatch): Incident {
+    suspend fun update(by: Principal, ref: String, patch: IncidentPatch): Incident {
         Access.requireWrite(by)
         val cur = get(by, ref)
         val now = clock.now()
@@ -172,7 +172,7 @@ class IncidentService(
         return next
     }
 
-    fun addEntry(by: Principal, ref: String, text: String, kind: EntryKind = EntryKind.NOTE, at: Instant? = null, data: Map<String, String> = emptyMap()): TimelineEntry {
+    suspend fun addEntry(by: Principal, ref: String, text: String, kind: EntryKind = EntryKind.NOTE, at: Instant? = null, data: Map<String, String> = emptyMap()): TimelineEntry {
         Access.requireWrite(by)
         if (text.isBlank()) throw Invalid("Text is required")
         val inc = get(by, ref)
@@ -182,13 +182,13 @@ class IncidentService(
         return e
     }
 
-    fun systemEntry(incidentId: String, kind: EntryKind, actor: Actor, text: String, data: Map<String, String> = emptyMap()) {
+    suspend fun systemEntry(incidentId: String, kind: EntryKind, actor: Actor, text: String, data: Map<String, String> = emptyMap()) {
         val inc = incidents.get(incidentId) ?: return
         record(inc, kind, actor, text, null, data)
         publish("incident.timeline", inc)
     }
 
-    fun linkAlert(incidentId: String, alertId: String) {
+    suspend fun linkAlert(incidentId: String, alertId: String) {
         val cur = incidents.get(incidentId) ?: return
         if (alertId in cur.alertIds) return
         val next = cur.copy(alertIds = cur.alertIds + alertId, updatedAt = clock.now(), version = cur.version + 1)
@@ -196,7 +196,7 @@ class IncidentService(
         publish("incident.updated", next)
     }
 
-    fun savePostmortem(by: Principal, ref: String, pm: Postmortem): Incident {
+    suspend fun savePostmortem(by: Principal, ref: String, pm: Postmortem): Incident {
         Access.requireWrite(by)
         val cur = get(by, ref)
         val next = cur.copy(
@@ -211,7 +211,7 @@ class IncidentService(
         return next
     }
 
-    fun saveResolution(by: Principal, ref: String, notes: String): Incident {
+    suspend fun saveResolution(by: Principal, ref: String, notes: String): Incident {
         Access.requireWrite(by)
         val cur = get(by, ref)
         val next = cur.copy(resolutionNotes = notes, updatedAt = clock.now(), version = cur.version + 1)
@@ -223,7 +223,7 @@ class IncidentService(
         return next
     }
 
-    fun saveRunbook(by: Principal, ref: String, title: String, body: String): Incident {
+    suspend fun saveRunbook(by: Principal, ref: String, title: String, body: String): Incident {
         Access.requireWrite(by)
         if (body.isBlank()) throw Invalid("Runbook body is required")
         val cur = get(by, ref)
@@ -238,17 +238,17 @@ class IncidentService(
         return next
     }
 
-    private fun postmortemRequired(severity: Severity, teams: List<String>): Boolean {
+    private suspend fun postmortemRequired(severity: Severity, teams: List<String>): Boolean {
         val min = policy.severity(Keys.POSTMORTEM_MIN_SEVERITY, teams) ?: return false
         return severity.atLeast(min)
     }
 
-    private fun record(inc: Incident, kind: EntryKind, actor: Actor, text: String, at: Instant? = null, data: Map<String, String> = emptyMap()): TimelineEntry {
+    private suspend fun record(inc: Incident, kind: EntryKind, actor: Actor, text: String, at: Instant? = null, data: Map<String, String> = emptyMap()): TimelineEntry {
         val e = TimelineEntry(Ids.new(), inc.id, at ?: clock.now(), kind, actor, text, data)
         timeline.append(e)
         return e
     }
 
-    private fun publish(type: String, inc: Incident) =
+    private suspend fun publish(type: String, inc: Incident) =
         events.publish(DomainEvent(type, inc.id, clock.now(), inc.teamIds, mapOf("key" to inc.key, "severity" to inc.severity.name)))
 }

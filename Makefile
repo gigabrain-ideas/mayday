@@ -1,9 +1,12 @@
 # Targets use local tools when present and Docker otherwise.
 GRADLE := $(shell [ -x ./gradlew ] && echo ./gradlew || echo gradle)
-NPM_DOCKER := docker run --rm -v "$(CURDIR)/web":/app -w /app node:24-alpine npm
+# The web build generates its gRPC-Web client from ../proto, so Docker mounts the repository root.
+NPM_DOCKER := docker run --rm -v "$(CURDIR)":/src -w /src/web node:24-alpine npm
 GRADLE_DOCKER := docker run --rm -v "$(CURDIR)":/src -v mayday-gradle:/home/gradle/.gradle -w /src gradle:9-jdk25 gradle --no-daemon
+JAVA_DOCKER := docker run --rm -it -p 8080:8080 -p 9090:9090 -v "$(CURDIR)/build/libs":/opt/mayday -e MAYDAY_DATA_DIR -e MAYDAY_DEMO -e MAYDAY_DEV_LOGIN eclipse-temurin:25-jre-alpine java
 HAVE_NODE := $(shell command -v npm 2>/dev/null)
 HAVE_JAVA := $(shell command -v java 2>/dev/null)
+JAR := build/libs/mayday.jar
 
 .PHONY: web build test run demo image up down clean
 
@@ -16,9 +19,9 @@ endif
 
 build: web
 ifdef HAVE_JAVA
-	$(GRADLE) installDist
+	$(GRADLE) bootJar
 else
-	$(GRADLE_DOCKER) installDist
+	$(GRADLE_DOCKER) bootJar
 endif
 
 test:
@@ -29,10 +32,18 @@ else
 endif
 
 run: build
-	./build/install/mayday/bin/mayday
+ifdef HAVE_JAVA
+	java -jar $(JAR)
+else
+	$(JAVA_DOCKER) -jar /opt/mayday/mayday.jar
+endif
 
 demo: build
-	MAYDAY_DEMO=true MAYDAY_DEV_LOGIN=true MAYDAY_DATA_DIR=none ./build/install/mayday/bin/mayday
+ifdef HAVE_JAVA
+	MAYDAY_DEMO=true MAYDAY_DEV_LOGIN=true MAYDAY_DATA_DIR=none java -jar $(JAR)
+else
+	MAYDAY_DEMO=true MAYDAY_DEV_LOGIN=true MAYDAY_DATA_DIR=none $(JAVA_DOCKER) -jar /opt/mayday/mayday.jar
+endif
 
 image:
 	docker build -t mayday:local .

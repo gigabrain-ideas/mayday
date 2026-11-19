@@ -10,6 +10,7 @@ Mayday is an AI-first, self-hosted incident management platform.
 - **Rules that hold.** Administrators set minimums (for example "postmortem mandatory from SEV2") that teams can make stricter but not weaker. Teams can request an exception.
 - **Open to any agent.** A built-in MCP server lets Claude, coding agents and your own bots read incidents and, when allowed, write to them.
 - **Runs anywhere.** One service. A laptop with no database, a VM, or Kubernetes with PostgreSQL and many replicas.
+- **One typed API.** gRPC with a protobuf contract for the web interface, scripts and agents.
 
 ## Example: a SEV1 with an agent
 
@@ -38,9 +39,14 @@ docker compose up --build
 
 Open http://localhost:8080 and sign in as `admin@example.com` (sample data and email sign-in are on in this setup).
 
+| Port | Serves |
+|---|---|
+| 8080 | Web interface, gRPC-Web, MCP (`/mcp`), alert webhooks, health and metrics |
+| 9090 | Native gRPC (for example `grpcurl -plaintext localhost:9090 list`) |
+
 ### Run from source
 
-Needs Java 21+ and Node.js 22+ (or Docker, which the Makefile uses when they are missing).
+Needs Java 21+ and Node.js 22+ (or Docker, which the Makefile uses when they are missing). `make demo` builds `build/libs/mayday.jar` and starts it with `java -jar`.
 
 ```bash
 make demo
@@ -68,4 +74,4 @@ Create the token in **Settings → API tokens**. Write tools need the team setti
 
 ## Documentation
 
-[docs/](docs/README.md): architecture, product brief per domain, API and webhook contracts, testing, deployment, decisions.
+[docs/](docs/README.md): architecture, product brief per domain, API (gRPC, HTTP) and webhook contracts, testing, deployment, decisions. API contract: [proto/mayday/v1](proto/mayday/v1).

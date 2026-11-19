@@ -20,7 +20,7 @@ class PgEventBus(private val pool: Pool) : EventBus, AutoCloseable {
     @Volatile private var running = true
     private val thread = Thread.ofVirtual().name("pg-listen").start { listen() }
 
-    override fun publish(event: DomainEvent) {
+    override suspend fun publish(event: DomainEvent) {
         local.publish(event)
         val payload = JSON.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), buildJsonObject {
             put("o", origin); put("e", JSON.encodeToJsonElement(DomainEvent.serializer(), event))
@@ -42,7 +42,7 @@ class PgEventBus(private val pool: Pool) : EventBus, AutoCloseable {
                         pg.getNotifications(10_000)?.forEach { n ->
                             val o = runCatching { JSON.parseToJsonElement(n.parameter).jsonObject }.getOrNull() ?: return@forEach
                             if (o["o"]?.jsonPrimitive?.content == origin) return@forEach
-                            local.publish(JSON.decodeFromJsonElement(DomainEvent.serializer(), o["e"]!!))
+                            local.deliver(JSON.decodeFromJsonElement(DomainEvent.serializer(), o["e"]!!))
                         }
                     }
                 }

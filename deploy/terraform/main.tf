@@ -62,5 +62,13 @@ resource "helm_release" "mayday" {
       className = var.ingress_class
       tls       = var.ingress_tls_secret == "" ? [] : [{ hosts = [var.ingress_host], secretName = var.ingress_tls_secret }]
     }
+    grpc = {
+      enabled = var.grpc_enabled
+      ingress = {
+        enabled = var.grpc_enabled && var.grpc_ingress_host != ""
+        host    = var.grpc_ingress_host
+        tls     = var.ingress_tls_secret == "" ? [] : [{ hosts = [var.grpc_ingress_host], secretName = var.ingress_tls_secret }]
+      }
+    }
   })]
 }

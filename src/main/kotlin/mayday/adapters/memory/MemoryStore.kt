@@ -167,35 +167,34 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
     private fun inRange(t: Instant, from: Instant?, to: Instant?) = (from == null || !t.isBefore(from)) && (to == null || t.isBefore(to))
 
     val projects = object : ProjectRepository {
-        override fun get(id: String) = projectsC.map[id]
-        override fun bySlug(slug: String) = projectsC.map.values.firstOrNull { it.slug == slug }
-        override fun list() = projectsC.map.values.toList()
-        override fun save(project: Project) = projectsC.put(project.id, project)
-        override fun delete(id: String) = projectsC.remove(id)
+        override suspend fun get(id: String) = projectsC.map[id]
+        override suspend fun bySlug(slug: String) = projectsC.map.values.firstOrNull { it.slug == slug }
+        override suspend fun list() = projectsC.map.values.toList()
+        override suspend fun save(project: Project) = projectsC.put(project.id, project)
+        override suspend fun delete(id: String) = projectsC.remove(id)
     }
 
     val teams = object : TeamRepository {
-        override fun get(id: String) = teamsC.map[id]
-        override fun bySlug(slug: String) = teamsC.map.values.firstOrNull { it.slug == slug }
-        override fun list() = teamsC.map.values.toList()
-        override fun save(team: Team) = teamsC.put(team.id, team)
-        override fun delete(id: String) = teamsC.remove(id)
+        override suspend fun get(id: String) = teamsC.map[id]
+        override suspend fun bySlug(slug: String) = teamsC.map.values.firstOrNull { it.slug == slug }
+        override suspend fun list() = teamsC.map.values.toList()
+        override suspend fun save(team: Team) = teamsC.put(team.id, team)
+        override suspend fun delete(id: String) = teamsC.remove(id)
     }
 
     val users = object : UserRepository {
-        override fun get(id: String) = usersC.map[id]
-        override fun byEmail(email: String) = usersByEmail[email.lowercase()]?.let { usersC.map[it] }
-        override fun byExternalId(externalId: String) = usersByExternal[externalId]?.let { usersC.map[it] }
-        override fun count() = usersC.map.size.toLong()
-        override fun list(query: String?, cursor: String?, limit: Int): Page<User> {
+        override suspend fun get(id: String) = usersC.map[id]
+        override suspend fun byEmail(email: String) = usersByEmail[email.lowercase()]?.let { usersC.map[it] }
+        override suspend fun byExternalId(externalId: String) = usersByExternal[externalId]?.let { usersC.map[it] }
+        override suspend fun count() = usersC.map.size.toLong()
+        override suspend fun list(query: String?, cursor: String?, limit: Int): Page<User> {
             val q = query?.lowercase()?.trim().orEmpty()
             val seq = usersC.map.values.asSequence().sortedBy { it.email }
                 .filter { cursor == null || it.email > cursor }
                 .filter { q.isEmpty() || it.email.contains(q) || it.name.lowercase().contains(q) }
             return page(seq, limit) { it.email }
         }
-        @Synchronized
-        override fun save(user: User) {
+        override suspend fun save(user: User) = synchronized(this) {
             usersC.map[user.id]?.let { old -> if (old.email != user.email) usersByEmail.remove(old.email) }
             usersByEmail[user.email]?.let { if (it != user.id) throw Conflict("A user with this email exists") }
             usersC.put(user.id, user)
@@ -204,36 +203,35 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
     }
 
     val tokens = object : TokenRepository {
-        override fun byHash(hash: String) = tokensByHash[hash]?.let { tokensC.map[it] }
-        override fun byOwner(kind: OwnerKind, ownerId: String) = tokensC.map.values.filter { it.ownerKind == kind && it.ownerId == ownerId }
-        override fun get(id: String) = tokensC.map[id]
-        override fun save(token: ApiToken) { tokensC.put(token.id, token); tokensByHash[token.hash] = token.id }
-        override fun delete(id: String) { tokensC.map[id]?.let { tokensByHash.remove(it.hash) }; tokensC.remove(id) }
+        override suspend fun byHash(hash: String) = tokensByHash[hash]?.let { tokensC.map[it] }
+        override suspend fun byOwner(kind: OwnerKind, ownerId: String) = tokensC.map.values.filter { it.ownerKind == kind && it.ownerId == ownerId }
+        override suspend fun get(id: String) = tokensC.map[id]
+        override suspend fun save(token: ApiToken) { tokensC.put(token.id, token); tokensByHash[token.hash] = token.id }
+        override suspend fun delete(id: String) { tokensC.map[id]?.let { tokensByHash.remove(it.hash) }; tokensC.remove(id) }
     }
 
     val settings = object : SettingRepository {
-        override fun all() = settingsC.map.values.toList()
-        override fun save(value: SettingValue) = settingsC.put(value.id, value)
-        override fun delete(id: String) = settingsC.remove(id)
+        override suspend fun all() = settingsC.map.values.toList()
+        override suspend fun save(value: SettingValue) = settingsC.put(value.id, value)
+        override suspend fun delete(id: String) = settingsC.remove(id)
     }
 
     val changeRequests = object : ChangeRequestRepository {
-        override fun get(id: String) = requestsC.map[id]
-        override fun list(status: ChangeRequestStatus?) = requestsC.map.values.filter { status == null || it.status == status }
-        override fun save(request: ChangeRequest) = requestsC.put(request.id, request)
+        override suspend fun get(id: String) = requestsC.map[id]
+        override suspend fun list(status: ChangeRequestStatus?) = requestsC.map.values.filter { status == null || it.status == status }
+        override suspend fun save(request: ChangeRequest) = requestsC.put(request.id, request)
     }
 
     val incidents = object : IncidentRepository {
-        override fun nextNumber(): Long {
+        override suspend fun nextNumber(): Long {
             val n = counter.incrementAndGet()
             journal.write("counter", "incident", JsonPrimitive(n.toString()))
             return n
         }
-        override fun get(id: String) = incidentsC.map[id]
-        override fun byNumber(number: Long) = incidentOrder[number]?.let { incidentsC.map[it] }
+        override suspend fun get(id: String) = incidentsC.map[id]
+        override suspend fun byNumber(number: Long) = incidentOrder[number]?.let { incidentsC.map[it] }
 
-        @Synchronized
-        override fun save(incident: Incident, expectedVersion: Long?) {
+        override suspend fun save(incident: Incident, expectedVersion: Long?) = synchronized(this) {
             val cur = incidentsC.map[incident.id]
             if (expectedVersion == null && cur != null) throw Conflict("Incident exists")
             if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The incident changed. Reload and try again.")
@@ -241,14 +239,14 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
             incidentOrder[incident.number] = incident.id
         }
 
-        override fun list(filter: IncidentFilter, cursor: String?, limit: Int): Page<Incident> {
+        override suspend fun list(filter: IncidentFilter, cursor: String?, limit: Int): Page<Incident> {
             val start = cursor?.toLongOrNull()
             val src = if (start != null) incidentOrder.tailMap(start, false) else incidentOrder
             val seq = src.values.asSequence().mapNotNull { incidentsC.map[it] }.filter { matches(it, filter) }
             return page(seq, limit) { it.number.toString() }
         }
 
-        override fun scan(filter: IncidentFilter, consumer: (Incident) -> Unit) =
+        override suspend fun scan(filter: IncidentFilter, consumer: (Incident) -> Unit) =
             incidentOrder.values.asSequence().mapNotNull { incidentsC.map[it] }.filter { matches(it, filter) }.forEach(consumer)
 
         private fun matches(i: Incident, f: IncidentFilter): Boolean {
@@ -263,7 +261,7 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
     }
 
     val timeline = object : TimelineRepository {
-        override fun append(entry: TimelineEntry) {
+        override suspend fun append(entry: TimelineEntry) {
             timelineC.put(entry.id, entry)
             val list = timelineByIncident.computeIfAbsent(entry.incidentId) { CopyOnWriteArrayList() }
             synchronized(list) {
@@ -271,15 +269,14 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
                 list.add(idx, entry)
             }
         }
-        override fun list(incidentId: String): List<TimelineEntry> = timelineByIncident[incidentId]?.toList() ?: emptyList()
+        override suspend fun list(incidentId: String): List<TimelineEntry> = timelineByIncident[incidentId]?.toList() ?: emptyList()
     }
 
     val alerts = object : AlertRepository {
-        override fun get(id: String) = alertsC.map[id]
-        override fun latestByFingerprint(fingerprint: String) = alertByFingerprint[fingerprint]?.let { alertsC.map[it] }
+        override suspend fun get(id: String) = alertsC.map[id]
+        override suspend fun latestByFingerprint(fingerprint: String) = alertByFingerprint[fingerprint]?.let { alertsC.map[it] }
 
-        @Synchronized
-        override fun save(alert: Alert, expectedVersion: Long?) {
+        override suspend fun save(alert: Alert, expectedVersion: Long?) = synchronized(this) {
             val cur = alertsC.map[alert.id]
             if (expectedVersion == null && cur != null) throw Conflict("Alert exists")
             if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The alert changed. Reload and try again.")
@@ -287,13 +284,13 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
             indexAlert(alert)
         }
 
-        override fun list(filter: AlertFilter, cursor: String?, limit: Int): Page<Alert> {
+        override suspend fun list(filter: AlertFilter, cursor: String?, limit: Int): Page<Alert> {
             val src = if (cursor != null) alertOrder.tailMap(cursor, false) else alertOrder
             val seq = src.values.asSequence().mapNotNull { alertsC.map[it] }.filter { matches(it, filter) }
             return page(seq, limit) { alertKey(it) }
         }
 
-        override fun scan(filter: AlertFilter, consumer: (Alert) -> Unit) =
+        override suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit) =
             alertOrder.values.asSequence().mapNotNull { alertsC.map[it] }.filter { matches(it, filter) }.forEach(consumer)
 
         private fun matches(a: Alert, f: AlertFilter): Boolean {
@@ -308,43 +305,42 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
     }
 
     val agents = object : AgentRepository {
-        override fun get(id: String) = agentsC.map[id]
-        override fun list() = agentsC.map.values.toList()
-        override fun save(agent: AgentConfig) = agentsC.put(agent.id, agent)
-        override fun delete(id: String) = agentsC.remove(id)
+        override suspend fun get(id: String) = agentsC.map[id]
+        override suspend fun list() = agentsC.map.values.toList()
+        override suspend fun save(agent: AgentConfig) = agentsC.put(agent.id, agent)
+        override suspend fun delete(id: String) = agentsC.remove(id)
     }
 
     val runs = object : RunRepository {
-        override fun get(id: String) = runsC.map[id]
+        override suspend fun get(id: String) = runsC.map[id]
 
-        @Synchronized
-        override fun save(run: AgentRun, expectedVersion: Long?) {
+        override suspend fun save(run: AgentRun, expectedVersion: Long?) = synchronized(this) {
             val cur = runsC.map[run.id]
             if (expectedVersion == null && cur != null) throw Conflict("Run exists")
             if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The run changed")
             runsC.put(run.id, run)
         }
 
-        override fun bySubject(subjectId: String) = runsC.map.values.filter { it.subjectId == subjectId }
-        override fun recent(limit: Int) = runsC.map.values.sortedByDescending { it.createdAt }.take(limit)
-        override fun active() = runsC.map.values.filter { !it.status.terminal }
+        override suspend fun bySubject(subjectId: String) = runsC.map.values.filter { it.subjectId == subjectId }
+        override suspend fun recent(limit: Int) = runsC.map.values.sortedByDescending { it.createdAt }.take(limit)
+        override suspend fun active() = runsC.map.values.filter { !it.status.terminal }
 
-        @Synchronized
-        override fun claim(agentId: String, limit: Int, at: Instant): List<AgentRun> =
+        override suspend fun claim(agentId: String, limit: Int, at: Instant): List<AgentRun> = synchronized(this) {
             runsC.map.values.filter { it.agentId == agentId && it.status == RunStatus.QUEUED }
                 .sortedBy { it.createdAt }.take(limit)
                 .map { r -> r.copy(status = RunStatus.DISPATCHED, startedAt = at, version = r.version + 1).also { runsC.put(it.id, it) } }
+        }
     }
 
     val mcpServers = object : McpServerRepository {
-        override fun get(id: String) = mcpC.map[id]
-        override fun list() = mcpC.map.values.toList()
-        override fun save(server: McpServerConfig) = mcpC.put(server.id, server)
-        override fun delete(id: String) = mcpC.remove(id)
+        override suspend fun get(id: String) = mcpC.map[id]
+        override suspend fun list() = mcpC.map.values.toList()
+        override suspend fun save(server: McpServerConfig) = mcpC.put(server.id, server)
+        override suspend fun delete(id: String) = mcpC.remove(id)
     }
 
     val config = object : ConfigRepository {
-        override fun llm() = configC.map["llm"]?.let { JSON.decodeFromJsonElement(LlmConfig.serializer(), it) }
-        override fun saveLlm(config: LlmConfig) = configC.put("llm", JSON.encodeToJsonElement(LlmConfig.serializer(), config))
+        override suspend fun llm() = configC.map["llm"]?.let { JSON.decodeFromJsonElement(LlmConfig.serializer(), it) }
+        override suspend fun saveLlm(config: LlmConfig) = configC.put("llm", JSON.encodeToJsonElement(LlmConfig.serializer(), config))
     }
 }
