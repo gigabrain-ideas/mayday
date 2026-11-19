@@ -4,7 +4,7 @@ Mayday-mayday is an AI-first, streamlined and easy-to-operate enterprise-grade i
 
 At the core, as any other incident platform, it handles incidents and alerts. It has a web interface which is served and includes admin enterprise-level configuration options + incident reports pages for teams or organizations (select all or multiple teams and time periods + severity).
 
-Incidents have a name, incident identifier (a monotonously increasing counter as incidents happen) and responder team(s). Each incident has a description of it, start/end of impact, discovery time, report time etc; A post-mortem can be obligatory or mandatory. Rules can be defined in the project or team settings, depending on the scope required (user configurable). Enterprise admins can enforce minimum settings or config that is not able to be changed by lesser roles (but there's a button to request change for the team/project/whatever scope).
+Incidents have a name, incident identifier (a monotonously increasing counter as incidents happen) and responder team(s). Each incident has a description of it, start/end of impact, discovery time, report time etc; A post-mortem can be optional or mandatory. Rules can be defined in the project or team settings, depending on the scope required (user configurable). Enterprise admins can enforce minimum settings or config that is not able to be changed by lesser roles (but there's a button to request change for the team/project/whatever scope).
 
 The benefit of Mayday-mayday is its agentic-first approach. A few use-case scenarios supported:
 - triggering of an alert can kick-off auto-analysis (or even correction) using an agent configured to act on the alert (configured within Mayday, push and pull configs supported)
