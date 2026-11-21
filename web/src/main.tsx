@@ -13,6 +13,7 @@ import { IncidentPage } from "@/pages/Incident";
 import { AlertsPage } from "@/pages/Alerts";
 import { AlertPage } from "@/pages/Alert";
 import { ReportsPage } from "@/pages/Reports";
+import { OnCallPage } from "@/pages/OnCall";
 import { SettingsPage } from "@/pages/settings/Settings";
 
 try {
@@ -41,6 +42,7 @@ function Root() {
           <Route path="/incidents/:key" element={<IncidentPage />} />
           <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/alerts/:id" element={<AlertPage />} />
+          <Route path="/oncall" element={<OnCallPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings/*" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/incidents" replace />} />

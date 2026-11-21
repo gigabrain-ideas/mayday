@@ -32,7 +32,7 @@ enum class OrgRole(val rank: Int) { VIEWER(0), MEMBER(1), ADMIN(2) }
 enum class TeamRole { MEMBER, ADMIN }
 
 @Serializable
-enum class TokenScope { READ, WRITE, ADMIN, ALERTS_INGEST }
+enum class TokenScope { READ, WRITE, ADMIN, ALERTS_INGEST, SCIM }
 
 @Serializable
 data class User(
@@ -47,7 +47,15 @@ data class User(
     val createdAt: Ts,
     /** The user lets agents keep the admin scope in token exchange. Works only when the organization allows it. */
     val allowAgentAdmin: Boolean = false,
-)
+    /** Groups from the groups claim of the last sign-in. */
+    val idpGroups: Set<String> = emptySet(),
+    /** Keys of the SCIM groups that contain the user. */
+    val scimGroups: Set<String> = emptySet(),
+    /** The externalId that the SCIM client gave the user. */
+    val scimExternalId: String? = null,
+) {
+    val groups: Set<String> get() = idpGroups + scimGroups
+}
 
 @Serializable
 enum class OwnerKind { USER, AGENT }
@@ -73,7 +81,25 @@ interface UserRepository {
     suspend fun count(): Long
     suspend fun save(user: User)
     suspend fun withAgentAdmin(): List<User>
+    suspend fun byTeam(teamId: String): List<User>
+
+    /** Users with at least one of [keys] in [User.idpGroups] or [User.scimGroups]. */
+    suspend fun withGroups(keys: Set<String>): List<User>
+    suspend fun byScimExternalId(externalId: String): User?
 }
+
+/** Told when a person leaves a team, so other contexts (on-call rotations) can follow. */
+interface TeamMembershipListener {
+    suspend fun membershipRemoved(teamId: String, userId: String)
+}
+
+/** Applies the groups of a verified sign-in to team membership. The provisioning context implements it. */
+interface GroupMembershipSync {
+    suspend fun signedIn(user: User, groups: Set<String>): User
+}
+
+@Serializable
+data class TeamMember(val userId: String, val name: String, val email: String, val role: TeamRole, val managed: Boolean, val disabled: Boolean = false)
 
 interface TokenRepository {
     suspend fun byHash(hash: String): ApiToken?
@@ -112,6 +138,7 @@ data class Principal(
 
     companion object {
         val ALL = TokenScope.entries.toSet()
+        val ADMIN_ONLY = setOf(TokenScope.ADMIN, TokenScope.SCIM)
 
         /** Scopes of a delegated run token: the agent can read and write as the user, never administer. */
         val DELEGATED = setOf(TokenScope.READ, TokenScope.WRITE)
@@ -163,11 +190,14 @@ class IdentityService(
     private val bootstrapAdmins: Set<String>,
     private val policy: PolicyReader,
 ) : OrgSettingListener {
+    var membership: TeamMembershipListener? = null
+    var groupSync: GroupMembershipSync? = null
+
     suspend fun user(id: String) = users.get(id) ?: throw NotFound("User")
     suspend fun list(query: String?, cursor: String?, limit: Int) = users.list(query, cursor, limit.coerceIn(1, 500))
 
     /** Find or create the user for a verified SSO login. */
-    suspend fun upsertSso(externalId: String, email: String, name: String): User {
+    suspend fun upsertSso(externalId: String, email: String, name: String, groups: Set<String>? = null): User {
         val normalized = email.trim().lowercase()
         val existing = users.byExternalId(externalId) ?: users.byEmail(normalized)
         val user = if (existing != null) {
@@ -178,7 +208,8 @@ class IdentityService(
         }
         if (user.disabled) throw Forbidden("This account is disabled")
         users.save(user)
-        return user
+        val sync = groupSync
+        return if (groups != null && sync != null) sync.signedIn(user, groups) else user
     }
 
     suspend fun createUser(by: Principal, email: String, name: String, role: OrgRole): User {
@@ -201,7 +232,15 @@ class IdentityService(
     ): User {
         Access.requireAdmin(by)
         val u = user(id)
-        teamsUpdate?.keys?.forEach { if (teams.get(it) == null) throw Invalid("Unknown team $it") }
+        if (teamsUpdate != null) {
+            for ((teamId, role) in teamsUpdate) {
+                val t = teams.get(teamId) ?: throw Invalid("Unknown team $teamId")
+                requireManualChange(t, u.teams[teamId], role)
+            }
+            for ((teamId, role) in u.teams) {
+                if (teamId !in teamsUpdate) teams.get(teamId)?.let { requireManualChange(it, role, null) }
+            }
+        }
         if (by.user?.id == id && (role != null && role != OrgRole.ADMIN || disabled == true)) {
             throw Conflict("You cannot remove your own administrator access")
         }
@@ -211,13 +250,42 @@ class IdentityService(
             teams = teamsUpdate ?: u.teams,
             projectAdmin = projectAdmin ?: u.projectAdmin,
             disabled = disabled ?: u.disabled,
-        ).also { users.save(it) }
+        ).also { saved ->
+            users.save(saved)
+            (u.teams.keys - saved.teams.keys).forEach { membership?.membershipRemoved(it, saved.id) }
+        }
+    }
+
+    suspend fun teamMembers(by: Principal, teamId: String): List<TeamMember> {
+        Access.requireRead(by)
+        val t = teams.get(teamId) ?: teams.bySlug(teamId) ?: throw NotFound("Team")
+        return users.byTeam(t.id).map { TeamMember(it.id, it.name, it.email, it.teams.getValue(t.id), t.membershipManaged || t.ownersManaged, it.disabled) }
+            .sortedBy { it.name.lowercase() }
+    }
+
+    /** Team owners add, remove and promote members. [role] null removes the member. Groups of the identity provider win over manual changes. */
+    suspend fun setTeamMember(by: Principal, teamId: String, userId: String, role: TeamRole?): User {
+        val t = teams.get(teamId) ?: teams.bySlug(teamId) ?: throw NotFound("Team")
+        if (!Access.isTeamAdmin(by, t.id, t.projectId)) throw Forbidden("Only team owners change the team members")
+        val u = user(userId)
+        requireManualChange(t, u.teams[t.id], role)
+        val updated = u.copy(teams = if (role == null) u.teams - t.id else u.teams + (t.id to role))
+        if (updated == u) return u
+        users.save(updated)
+        if (role == null && t.id in u.teams) membership?.membershipRemoved(t.id, u.id)
+        return updated
+    }
+
+    private fun requireManualChange(t: mayday.directory.Team, from: TeamRole?, to: TeamRole?) {
+        if (from == to) return
+        if (t.membershipManaged && (from == null || to == null)) throw Conflict("The identity provider manages the members of ${t.name}")
+        if (t.ownersManaged && (from == TeamRole.ADMIN || to == TeamRole.ADMIN)) throw Conflict("The identity provider manages the owners of ${t.name}")
     }
 
     suspend fun issueToken(by: Principal, name: String, scopes: Set<TokenScope>, ttl: Duration?): IssuedToken {
         val owner = by.user ?: throw Forbidden("Only users can create personal tokens")
         if (by.isDelegated) throw Forbidden("Agents cannot create tokens for users")
-        val allowed = scopes.filter { it != TokenScope.ADMIN || owner.orgRole == OrgRole.ADMIN }.toSet()
+        val allowed = scopes.filter { it !in Principal.ADMIN_ONLY || owner.orgRole == OrgRole.ADMIN }.toSet()
         return mint(OwnerKind.USER, owner.id, name, allowed.ifEmpty { setOf(TokenScope.READ) }, ttl)
     }
 
@@ -301,7 +369,7 @@ class IdentityService(
         if (subject.isAgent) throw Forbidden("The subject token must belong to a user")
         if (!actor.isAgent || actor.isDelegated) throw Forbidden("The actor token must belong to an agent")
         val agent = agents.find(actor.actor.id) ?: throw Forbidden("Unknown agent")
-        val scopes = if (agentAdminAllowed(user)) subject.scopes else subject.scopes - TokenScope.ADMIN
+        val scopes = (if (agentAdminAllowed(user)) subject.scopes else subject.scopes - TokenScope.ADMIN) - TokenScope.SCIM
         return delegate(user, agent, null, ttl, scopes)
     }
 

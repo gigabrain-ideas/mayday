@@ -59,7 +59,8 @@ resource "helm_release" "mayday" {
     existingSecret = local.secret_name
     adminEmails    = join(",", var.admin_emails)
     database       = { url = var.database_url, user = var.database_user }
-    oidc           = { issuer = var.oidc_issuer, clientId = var.oidc_client_id }
+    oidc           = { issuer = var.oidc_issuer, clientId = var.oidc_client_id, groupsClaim = var.oidc_groups_claim }
+    groups         = { autoCreate = var.groups_auto_create, filter = var.groups_filter, ownerSuffix = var.groups_owner_suffix }
     persistence    = { enabled = var.database_url == "" }
     autoscaling    = { enabled = var.database_url != "", minReplicas = var.replicas, maxReplicas = var.max_replicas }
     ingress = {

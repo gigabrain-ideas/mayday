@@ -12,6 +12,8 @@ flowchart LR
   EC[HttpEdgesContractTest] --> E[HTTP edges, MCP, static files, probes]
   PJ[ProtoJsonContractTest] --> C[ProtoJson converter and proto files]
   HC[WebhookContractTest] --> WH[WebhookDispatcher]
+  SCT[ScimContractTest] --> SC[SCIM 2.0 endpoints]
+  OGS[OidcGroupSyncContractTest] --> KC[Keycloak container + OIDC adapter]
   DT[Domain tests] --> S[Services with fakes]
 ```
 
@@ -26,6 +28,8 @@ flowchart LR
 | `HttpEdgesContractTest` | `contract/HttpEdgesContractTest.kt` | HTTP error shape, dev login cookie and safe redirects, logout, token exchange, MCP JSON-RPC and RBAC, CSRF rule (`X-Requested-With`), admin scope in token exchange with `SetAgentAdmin`, alert intake 201/200, Alertmanager format, single-page-app fallback with security headers, health, readiness and metrics |
 | `ProtoJsonContractTest` | `contract/ProtoJsonContractTest.kt` | Domain → proto → domain loses no data. Secrets (token hashes) never reach the proto. Each domain enum value has a proto value. Each proto field has a domain property with the same JSON name. Bad input is `invalid`. |
 | `WebhookContractTest` | `contract/WebhookContractTest.kt` | The webhook signature and payload that push agents rely on |
+| `ScimContractTest` | `contract/ScimContractTest.kt` | SCIM 2.0 with Entra and Okta request shapes: discovery, token rules (401 without token or with a cookie, 403 without SCIM scope or for a non-administrator), user create after a filter miss, 409 `uniqueness`, PATCH with string booleans, value objects and email paths, groups as teams, member add and remove, `excludedAttributes=members`, PUT, deprovisioning, `invalidFilter` |
+| `OidcGroupSyncContractTest` | `contract/OidcGroupSyncContractTest.kt` | A real OpenID Connect provider (Keycloak in a container): access tokens with the groups claim create teams with owner groups, give roles, and follow group changes made with the Keycloak admin API, including a user without groups (Keycloak leaves the claim out) |
 | `LlmProviderContractTest` (`AnthropicProviderContractTest`, `OpenAiProviderContractTest`) | `contract/LlmProviderContractTest.kt` | Both LLM adapters against a fake AI gateway: one auth header in the configured style, agent ID and fixed headers, `traceparent` on every call, token rotation, 401 → one refresh, 429 → `BudgetExhausted` with exactly one request, bounded 5xx retries, tool round trip, base URL with path prefix |
 | `CredentialsContractTest` | `contract/CredentialsContractTest.kt` | OAuth 2.0 client secret and workload identity assertion grants, shared cache, single-flight and early refresh, invalidate, token file, no secrets in errors or spans |
 | `TokenProxyContractTest` | `contract/TokenProxyContractTest.kt` | Token proxy sidecar: identity headers added and client credentials removed, 429 passed through once, 401 → one refresh, streaming |
@@ -34,6 +38,8 @@ flowchart LR
 | `LlmSettingsContractTest` | `contract/LlmSettingsContractTest.kt` | `MAYDAY_LLM_*` values win and lock their fields, generic OAuth 2.0 variables, invalid values, token parameter validation |
 | `PolicyReplicaTest` | `DomainTest.kt` | Two instances on one store and event bus: direct changes and approved change requests clear the settings cache of the other instance |
 | `PolicyTest`, `IncidentTest`, `AlertTest`, `IdentityTest`, `AgentTest` | `DomainTest.kt` | The rules in each product brief, including negative cases |
+| `RotationTest`, `OnCallTest`, `TeamMembersTest` | `OnCallTest.kt` | Rotation math (order, wrap, before start, daylight saving, windows), override precedence and cuts, schedule and override RBAC (owners vs members), integrity rules, leaving a team |
+| `GroupClaimTest`, `GroupSyncTest`, `ProvisioningTest` | `GroupSyncTest.kt` | Groups claim parsing (list, nested path, string, missing claim, overage), automatic teams with filter and owner suffix, reconcile rules, manual changes locked by links, rotation exit on group loss, SCIM groups and users |
 | `DelegationLimitsTest`, `UntrustedSubjectDataTest`, `AlertIngestScopeTest`, `AgentAdminExchangeTest`, `AgentAdminOptInResetTest` | `SecurityTest.kt` | Delegated run tokens have no ADMIN scope and stop when the run is finished; token exchange keeps ADMIN only with the organization setting and the user's opt-in, agents cannot opt in for the user, and turning the organization setting off clears every opt-in; alert content reaches the model only as untrusted data, apart from the task; ingest-only tokens send alerts only for the teams of their owner |
 | `AgentIndependenceTest`, `BudgetExhaustedTest`, `GatewaySettingsTest` | `AgentGatewayTest.kt` | Alerts and incidents work with no agent, a hanging agent or a failing agent; 429 makes one call and pauses the agent; settings and identity headers |
 | `TracingTest`, `TracingServerTest` | `TracingTest.kt` | Agent run trace tree and stored trace ID; server spans for HTTP, gRPC and gRPC-Web; no export without an endpoint |
@@ -48,12 +54,13 @@ Test doubles (`TestSupport.kt`): `FakeLlm` (scripted tool calls and answers) and
 make test
 ```
 
-`make test` needs a running Docker engine. `PostgresStoreContractTest` starts one disposable PostgreSQL container per test run with [Testcontainers](https://java.testcontainers.org/). Each test uses its own schema and closes its pool. The container stops when the run ends.
+`make test` needs a running Docker engine. `OidcGroupSyncContractTest` starts one Keycloak container. `PostgresStoreContractTest` starts one disposable PostgreSQL container per test run with [Testcontainers](https://java.testcontainers.org/). Each test uses its own schema and closes its pool. The container stops when the run ends.
 
 | Variable | Effect |
 |---|---|
 | `MAYDAY_TEST_DATABASE_URL`, `MAYDAY_TEST_DATABASE_USER`, `MAYDAY_TEST_DATABASE_PASSWORD` | Use this disposable database. No container starts. |
 | `MAYDAY_TEST_POSTGRES_IMAGE` | Container image (default `postgres:18-alpine`, same as `compose.yaml`) |
+| `MAYDAY_TEST_KEYCLOAK_IMAGE` | Container image for `OidcGroupSyncContractTest` (default `quay.io/keycloak/keycloak:26.0.7`). The realm is `src/test/resources/keycloak/mayday-realm.json`. |
 
 Without Docker and without `MAYDAY_TEST_DATABASE_URL`, `PostgresStoreContractTest` fails. The contract is not optional.
 

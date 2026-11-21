@@ -127,6 +127,36 @@ class ProtoJsonContractTest {
     }
 
     @Test
+    fun `on-call schedule, override, shift and on-call entry`() {
+        val s = mayday.oncall.Schedule("s1", "t1", "Primary", "Europe/Berlin", t0, 2, mayday.oncall.ShiftUnit.DAYS, listOf("u1", "u2"), "d", t0, t1, 3)
+        assertEquals(s, roundTrip(s, mayday.api.v1.Schedule.newBuilder()))
+        val o = mayday.oncall.ScheduleOverride("o1", "s1", "t1", "u2", t0, t1, "sick", "u1", t0)
+        assertEquals(o, roundTrip(o, mayday.api.v1.ScheduleOverride.newBuilder()))
+        listOf(mayday.oncall.Shift("s1", "u1", t0, t1, "o1"), mayday.oncall.Shift("s1", null, t0, t1)).forEach {
+            assertEquals(it, roundTrip(it, mayday.api.v1.Shift.newBuilder()))
+        }
+        val c = mayday.oncall.OnCall("s1", "Primary", "t1", "u1", t1, "o1")
+        assertEquals(c, roundTrip(c, mayday.api.v1.OnCall.newBuilder()))
+        val empty = mayday.oncall.OnCall("s1", "Primary", "t1")
+        assertEquals(empty, roundTrip(empty, mayday.api.v1.OnCall.newBuilder()))
+    }
+
+    @Test
+    fun `team keeps its group links and team members carry the managed flag`() {
+        val t = mayday.directory.Team("t1", "sre", "SRE", "p1", "d", t0, setOf("g1"), setOf("g1-owners"))
+        assertEquals(t, roundTrip(t, mayday.api.v1.Team.newBuilder()))
+        val m = mayday.identity.TeamMember("u1", "Ann", "ann@example.com", TeamRole.ADMIN, true, false)
+        assertEquals(m, roundTrip(m, mayday.api.v1.TeamMember.newBuilder()))
+    }
+
+    @Test
+    fun `users never carry their identity provider groups`() {
+        val u = User("u1", "a@example.com", "A", createdAt = t0, idpGroups = setOf("secret-group"), scimGroups = setOf("g"), scimExternalId = "e")
+        val proto = u.into(PUser.newBuilder()).build()
+        assertFalse(proto.toString().contains("secret-group"))
+    }
+
+    @Test
     fun `timeline entry`() {
         val e = TimelineEntry("e1", "i1", t0, EntryKind.RESOLUTION, agent, "Done", mapOf("from" to "SEV2"))
         assertEquals(e, roundTrip(e, PTimelineEntry.newBuilder()))
@@ -269,6 +299,7 @@ class ProtoJsonContractTest {
         SettingType.entries.toTypedArray() to mayday.api.v1.SettingType.getDescriptor(),
         Strictness.entries.toTypedArray() to mayday.api.v1.Strictness.getDescriptor(),
         ChangeRequestStatus.entries.toTypedArray() to mayday.api.v1.ChangeRequestStatus.getDescriptor(),
+        mayday.oncall.ShiftUnit.entries.toTypedArray() to mayday.api.v1.ShiftUnit.getDescriptor(),
     )
 
     @Test
@@ -303,6 +334,13 @@ class ProtoJsonContractTest {
         serializer<mayday.incidents.NewIncident>() to mayday.api.v1.DeclareIncidentRequest.getDescriptor(),
         serializer<mayday.alerting.AlertSignal>() to mayday.api.v1.AlertSignal.getDescriptor(),
         serializer<mayday.agents.AgentInput>() to mayday.api.v1.AgentInput.getDescriptor(),
+        serializer<mayday.oncall.Schedule>() to mayday.api.v1.Schedule.getDescriptor(),
+        serializer<mayday.oncall.ScheduleOverride>() to mayday.api.v1.ScheduleOverride.getDescriptor(),
+        serializer<mayday.oncall.Shift>() to mayday.api.v1.Shift.getDescriptor(),
+        serializer<mayday.oncall.OnCall>() to mayday.api.v1.OnCall.getDescriptor(),
+        serializer<mayday.oncall.OverrideInput>() to mayday.api.v1.CreateOverrideRequest.getDescriptor(),
+        serializer<mayday.directory.Team>() to mayday.api.v1.Team.getDescriptor(),
+        serializer<mayday.identity.TeamMember>() to mayday.api.v1.TeamMember.getDescriptor(),
     )
 
     @Test

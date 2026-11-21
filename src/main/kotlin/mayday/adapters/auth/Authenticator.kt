@@ -40,12 +40,12 @@ class Authenticator(
     suspend fun bearer(token: String): Principal {
         if (oidc != null && !token.startsWith("mdy_") && oidc.looksLikeOurs(token)) {
             val id = withContext(Dispatchers.IO) { oidc.verifyAccessToken(token) }
-            return identity.principalForUser(identity.upsertSso(id.subject, id.email, id.name))
+            return identity.principalForUser(identity.upsertSso(id.subject, id.email, id.name, id.groups))
         }
         return identity.authenticate(token)
     }
 
-    suspend fun ssoUser(subject: String, email: String, name: String): User = identity.upsertSso(subject, email, name)
+    suspend fun ssoUser(subject: String, email: String, name: String, groups: Set<String>? = null): User = identity.upsertSso(subject, email, name, groups)
 
     suspend fun exchange(subject: Principal, actor: Principal, ttl: java.time.Duration): String = identity.exchange(subject, actor, ttl)
 

@@ -1,0 +1,37 @@
+{
+  "realm": "mayday",
+  "enabled": true,
+  "groups": [
+    { "name": "oncall-payments" },
+    { "name": "oncall-payments-owners" },
+    { "name": "staff" }
+  ],
+  "users": [
+    {
+      "username": "ana", "email": "ana@example.com", "emailVerified": true, "firstName": "Ana", "lastName": "Responder", "enabled": true,
+      "credentials": [{ "type": "password", "value": "ana-password", "temporary": false }],
+      "groups": ["/oncall-payments", "/oncall-payments-owners", "/staff"]
+    },
+    {
+      "username": "ben", "email": "ben@example.com", "emailVerified": true, "firstName": "Ben", "lastName": "Oncall", "enabled": true,
+      "credentials": [{ "type": "password", "value": "ben-password", "temporary": false }],
+      "groups": ["/oncall-payments"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "mayday", "enabled": true, "publicClient": false, "secret": "mayday-secret",
+      "directAccessGrantsEnabled": true, "standardFlowEnabled": true, "redirectUris": ["*"],
+      "protocolMappers": [
+        {
+          "name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+          "config": { "claim.name": "groups", "full.path": "false", "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true" }
+        },
+        {
+          "name": "audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.client.audience": "mayday", "access.token.claim": "true", "id.token.claim": "false" }
+        }
+      ]
+    }
+  ]
+}

@@ -39,6 +39,12 @@ import mayday.policy.ChangeRequestRepository
 import mayday.policy.ChangeRequestStatus
 import mayday.policy.SettingRepository
 import mayday.policy.SettingValue
+import mayday.oncall.OverrideRepository
+import mayday.oncall.Schedule
+import mayday.oncall.ScheduleOverride
+import mayday.oncall.ScheduleRepository
+import mayday.provisioning.DirectoryGroup
+import mayday.provisioning.GroupRepository
 import mayday.shared.Conflict
 import mayday.shared.JSON
 import mayday.shared.Page
@@ -131,7 +137,11 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
     private val runsC = Coll("runs", AgentRun.serializer(), journal)
     private val mcpC = Coll("mcp_servers", McpServerConfig.serializer(), journal)
     private val configC = Coll("config", JsonElement.serializer(), journal)
-    private val all = listOf(projectsC, teamsC, usersC, tokensC, settingsC, requestsC, incidentsC, timelineC, alertsC, agentsC, runsC, mcpC, configC)
+    private val schedulesC = Coll("schedules", Schedule.serializer(), journal)
+    private val overridesC = Coll("schedule_overrides", ScheduleOverride.serializer(), journal)
+    private val groupsC = Coll("directory_groups", DirectoryGroup.serializer(), journal)
+    private val all = listOf(projectsC, teamsC, usersC, tokensC, settingsC, requestsC, incidentsC, timelineC, alertsC, agentsC, runsC, mcpC, configC,
+        schedulesC, overridesC, groupsC)
 
     private val incidentOrder = ConcurrentSkipListMap<Long, String>(reverseOrder())
     private val counter = AtomicLong(0)
@@ -188,6 +198,9 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
         override suspend fun byExternalId(externalId: String) = usersByExternal[externalId]?.let { usersC.map[it] }
         override suspend fun count() = usersC.map.size.toLong()
         override suspend fun withAgentAdmin() = usersC.map.values.filter { it.allowAgentAdmin }
+        override suspend fun byTeam(teamId: String) = usersC.map.values.filter { teamId in it.teams }
+        override suspend fun withGroups(keys: Set<String>) = usersC.map.values.filter { u -> u.idpGroups.any { it in keys } || u.scimGroups.any { it in keys } }
+        override suspend fun byScimExternalId(externalId: String) = usersC.map.values.firstOrNull { it.scimExternalId == externalId }
         override suspend fun list(query: String?, cursor: String?, limit: Int): Page<User> {
             val q = query?.lowercase()?.trim().orEmpty()
             val seq = usersC.map.values.asSequence().sortedBy { it.email }
@@ -338,6 +351,38 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
         override suspend fun list() = mcpC.map.values.toList()
         override suspend fun save(server: McpServerConfig) = mcpC.put(server.id, server)
         override suspend fun delete(id: String) = mcpC.remove(id)
+    }
+
+    val schedules = object : ScheduleRepository {
+        override suspend fun get(id: String) = schedulesC.map[id]
+        override suspend fun byTeam(teamId: String) = schedulesC.map.values.filter { it.teamId == teamId }
+        override suspend fun list() = schedulesC.map.values.toList()
+        override suspend fun delete(id: String) = schedulesC.remove(id)
+        override suspend fun save(schedule: Schedule, expectedVersion: Long?) = synchronized(this) {
+            val cur = schedulesC.map[schedule.id]
+            if (expectedVersion == null && cur != null) throw Conflict("Schedule exists")
+            if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The schedule changed. Reload and try again.")
+            schedulesC.put(schedule.id, schedule)
+        }
+    }
+
+    val overrides = object : OverrideRepository {
+        override suspend fun get(id: String) = overridesC.map[id]
+        override suspend fun save(override: ScheduleOverride) = overridesC.put(override.id, override)
+        override suspend fun delete(id: String) = overridesC.remove(id)
+        override suspend fun overlapping(scheduleId: String, from: Instant, to: Instant) = overridesC.map.values
+            .filter { it.scheduleId == scheduleId && it.startsAt < to && it.endsAt > from }.sortedWith(compareBy({ it.createdAt }, { it.id }))
+        override suspend fun endingAfter(teamId: String, userId: String, after: Instant) =
+            overridesC.map.values.filter { it.teamId == teamId && it.userId == userId && it.endsAt > after }
+        override suspend fun deleteBySchedule(scheduleId: String) =
+            overridesC.map.values.filter { it.scheduleId == scheduleId }.forEach { overridesC.remove(it.id) }
+    }
+
+    val groups = object : GroupRepository {
+        override suspend fun get(id: String) = groupsC.map[id]
+        override suspend fun list() = groupsC.map.values.toList()
+        override suspend fun save(group: DirectoryGroup) = groupsC.put(group.id, group)
+        override suspend fun delete(id: String) = groupsC.remove(id)
     }
 
     val config = object : ConfigRepository {

@@ -62,7 +62,7 @@ class TestServerConfig {
     @Primary
     fun testPorts(llm: FakeLlm, dispatcher: RecordingDispatcher): Ports = Ports.memory(MemoryStore(null)).let {
         Ports(it.projects, it.teams, it.users, it.tokens, it.settings, it.changeRequests, it.incidents, it.timeline, it.alerts,
-            it.agents, it.runs, it.mcpServers, it.config, it.events, llm, dispatcher, close = it.close)
+            it.agents, it.runs, it.mcpServers, it.config, it.schedules, it.overrides, it.groups, it.events, llm, dispatcher, close = it.close)
     }
 }
 

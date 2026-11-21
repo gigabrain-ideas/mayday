@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router";
-import { BarChart3, Bell, LifeBuoy, LogOut, Menu, Moon, Settings, Siren, Sun, X } from "lucide-react";
+import { BarChart3, Bell, CalendarClock, LifeBuoy, LogOut, Menu, Moon, Settings, Siren, Sun, X } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { useLive } from "@/lib/hooks";
 import { rpc, type Page, type Alert } from "@/lib/api";
@@ -36,7 +36,7 @@ export function Layout({ children }: { children: ReactNode }) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
       if (e.key === "g") {
         const next = (ev: KeyboardEvent) => {
-          const map: Record<string, string> = { i: "/incidents", a: "/alerts", r: "/reports", s: "/settings" };
+          const map: Record<string, string> = { i: "/incidents", a: "/alerts", o: "/oncall", r: "/reports", s: "/settings" };
           if (map[ev.key]) nav(map[ev.key]);
           window.removeEventListener("keydown", next);
         };
@@ -50,6 +50,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const items = [
     { to: "/incidents", label: "Incidents", icon: Siren },
     { to: "/alerts", label: "Alerts", icon: Bell, count: firing },
+    { to: "/oncall", label: "On-call", icon: CalendarClock },
     { to: "/reports", label: "Reports", icon: BarChart3 },
     { to: "/settings", label: "Settings", icon: Settings },
   ];

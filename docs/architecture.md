@@ -29,6 +29,8 @@ flowchart LR
     POL[Policy]
     IDN[Identity and access]
     DIR[Directory]
+    ONC[On-call]
+    PRV[Provisioning]
     REP[Reporting]
   end
   TOOLS[Tools: use cases as tools]
@@ -47,6 +49,11 @@ flowchart LR
   INC --> DIR
   REP -- reads --> INC
   REP -- reads --> ALR
+  ONC --> DIR
+  IDN -- TeamMembershipListener --> ONC
+  IDN -- GroupMembershipSync --> PRV
+  PRV -- team links, team roles --> DIR
+  TOOLS --> ONC
 ```
 
 | Context | Package | Responsibility | Brief |
@@ -56,7 +63,9 @@ flowchart LR
 | Agents | `mayday.agents` | Agent configuration, runs, delegation, built-in agent, tool gateway, LLM port | [agents.md](domains/agents.md) |
 | Policy | `mayday.policy` | Scoped settings, enforcement, change requests | [policy.md](domains/policy.md) |
 | Identity and access | `mayday.identity` | Users, roles, tokens, principals, on-behalf-of | [identity.md](domains/identity.md) |
-| Directory | `mayday.directory` | Projects and teams | [directory.md](domains/directory.md) |
+| Directory | `mayday.directory` | Projects, teams, identity provider group links | [directory.md](domains/directory.md) |
+| On-call | `mayday.oncall` | Schedules, rotations, overrides, who is on call | [oncall.md](domains/oncall.md) |
+| Provisioning | `mayday.provisioning` | Teams from identity provider groups: groups claim and SCIM 2.0 | [provisioning.md](domains/provisioning.md) |
 | Reporting | `mayday.reporting` | Metrics over incidents and alerts | [reporting.md](domains/reporting.md) |
 | Tools | `mayday.tools` | Use cases as tools for MCP and the built-in agent | [mcp.md](domains/mcp.md) |
 | Web interface | `web/` | React and shadcn-style interface | [web.md](domains/web.md) |
@@ -70,7 +79,8 @@ flowchart TB
     GWEB[gRPC-Web bridge, port 8080<br/>adapters/grpc/GrpcWeb]
     EDGE[HTTP edges: sign-in, token exchange, alert intake<br/>adapters/http/Edges]
     MCPS[MCP server<br/>adapters/mcp/McpServer]
-    OIDC[OIDC login<br/>adapters/auth]
+    OIDC[OIDC login, groups claim<br/>adapters/auth]
+    SCIMA[SCIM 2.0<br/>adapters/scim]
   end
   GWEB -- in-process channel --> GRPC
   subgraph Application
@@ -88,6 +98,7 @@ flowchart TB
   EDGE --> SVC
   MCPS --> SVC
   OIDC --> SVC
+  SCIMA --> SVC
   SVC -- repositories --> MEM
   SVC -- repositories --> PG
   SVC -- LlmProvider --> LLM
@@ -98,7 +109,7 @@ flowchart TB
 
 | Port | Defined in | Adapters |
 |---|---|---|
-| `*Repository` (13 ports) | each context | `MemoryStore`, `PostgresStore` |
+| `*Repository` (16 ports) | each context | `MemoryStore`, `PostgresStore` |
 | `EventBus` | `shared` | `InProcessEventBus`, `PgEventBus` |
 | `LlmProvider`, `LlmProviderFactory` | `agents` | `LlmProviders` → `AnthropicProvider` (official SDK) or `OpenAiProvider` (Chat Completions); tests use `FakeLlm` |
 | `CredentialProvider`, `CredentialProviderFactory` | `agents` | `Credentials` (static key, OAuth 2.0 / workload identity, token file); see [gateway-identity.md](domains/gateway-identity.md) |
@@ -108,6 +119,8 @@ flowchart TB
 | `AgentIdentityLookup` | `identity` | `AgentService` |
 | `AlertAutomation` | `alerting` | `AgentService` |
 | `PolicyReader` | `policy` | `PolicyService` |
+| `TeamMembershipListener` | `identity` | `OnCallService` (a person who leaves a team leaves its rotations) |
+| `GroupMembershipSync` | `identity` | `GroupSync` (groups of a sign-in become team roles) |
 
 | Driving adapter | Port | Clients |
 |---|---|---|
@@ -115,6 +128,7 @@ flowchart TB
 | gRPC-Web bridge (`adapters/grpc/GrpcWeb.kt`) | 8080, `/mayday.v1.<Service>/<Method>` | The web interface. The bridge sends each call through an in-process channel to the same gRPC services, so interceptors and authentication are the same. No Envoy is necessary. |
 | HTTP edges (`adapters/http/Edges.kt`) | 8080 | Browser sign-in, RFC 8693 token exchange, alert intake for monitoring tools |
 | MCP server (`/mcp`) | 8080 | External agents |
+| SCIM 2.0 (`adapters/scim/ScimEndpoints.kt`) | 8080, `/scim/v2` | Identity providers (Entra ID, Okta, any SCIM client) |
 | Static files and operations (`adapters/http/Web.kt`, Actuator) | 8080 | Browsers, probes, Prometheus |
 
 `ProtoJson` converts between protobuf messages and the domain model through the JSON names. A proto field has the JSON name of the domain property (`team_ids` = `teamIds`). Thus one generic converter serves all services, and fields that are not in the proto (for example token hashes) never leave the server.
@@ -200,3 +214,4 @@ Targets: 50,000 to 100,000 concurrent users, 1,000 to 10,000 incidents and alert
 - Secrets at rest (LLM key, webhook secrets, MCP credentials) use AES-256-GCM with a key from `MAYDAY_SECRET_KEY`.
 - Webhooks are signed with HMAC-SHA256 over the timestamp and the body.
 - The built-in agent uses the same tools as external agents. RBAC applies to each call.
+- SCIM accepts only a bearer token with the SCIM scope of an administrator. Session cookies and agents have no access. Groups of a person never leave the server.

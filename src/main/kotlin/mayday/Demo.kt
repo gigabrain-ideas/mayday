@@ -45,7 +45,8 @@ object Demo {
             (p.users.byEmail(email) ?: User(Ids.new(), email, name, role, t, createdAt = now)).copy(orgRole = role, teams = t, name = name).also { p.users.save(it) }
         val admin = user("admin@example.com", "Alex Admin", OrgRole.ADMIN, mapOf(sre.id to TeamRole.ADMIN))
         val ana = user("ana@example.com", "Ana Responder", OrgRole.MEMBER, mapOf(checkout.id to TeamRole.ADMIN, billing.id to TeamRole.MEMBER))
-        user("sam@example.com", "Sam Oncall", OrgRole.MEMBER, mapOf(sre.id to TeamRole.MEMBER, identityTeam.id to TeamRole.MEMBER))
+        val sam = user("sam@example.com", "Sam Oncall", OrgRole.MEMBER, mapOf(sre.id to TeamRole.MEMBER, identityTeam.id to TeamRole.MEMBER, checkout.id to TeamRole.MEMBER))
+        val lee = user("lee@example.com", "Lee Backend", OrgRole.MEMBER, mapOf(checkout.id to TeamRole.MEMBER, sre.id to TeamRole.MEMBER))
         user("vic@example.com", "Vic Viewer", OrgRole.VIEWER, emptyMap())
         val actorAna = Actor(ActorKind.USER, ana.id, ana.name)
         val actorAdmin = Actor(ActorKind.USER, admin.id, admin.name)
@@ -56,6 +57,15 @@ object Demo {
         p.settings.save(SettingValue(Scope.PROJECT, payments.id, Keys.POSTMORTEM_MIN_SEVERITY, "SEV3", updatedBy = actorAdmin, updatedAt = now))
         p.settings.save(SettingValue(Scope.ORG, "org", Keys.MCP_WRITE, "true", updatedBy = actorAdmin, updatedAt = now))
         app.policy.invalidate()
+
+        val monday = now.atZone(java.time.ZoneOffset.UTC).toLocalDate().with(java.time.DayOfWeek.MONDAY).atTime(9, 0).toInstant(java.time.ZoneOffset.UTC)
+        fun rotation(team: mayday.directory.Team, name: String, unit: mayday.oncall.ShiftUnit, people: List<User>) = mayday.oncall.Schedule(
+            Ids.new(), team.id, name, "Europe/Berlin", monday, 1, unit, people.map { it.id }, createdAt = now, updatedAt = now)
+        val checkoutPrimary = rotation(checkout, "Primary", mayday.oncall.ShiftUnit.WEEKS, listOf(ana, sam, lee))
+        listOf(checkoutPrimary, rotation(checkout, "Secondary", mayday.oncall.ShiftUnit.WEEKS, listOf(lee, ana, sam)),
+            rotation(sre, "Primary", mayday.oncall.ShiftUnit.DAYS, listOf(sam, lee, admin))).forEach { p.schedules.save(it, null) }
+        p.overrides.save(mayday.oncall.ScheduleOverride(Ids.new(), checkoutPrimary.id, checkout.id, lee.id, now.plus(Duration.ofDays(2)),
+            now.plus(Duration.ofDays(4)), "Sam is at a conference", ana.id, now))
 
         val titles = listOf(
             "Checkout API returns HTTP 502 for card payments" to checkout,

@@ -10,8 +10,8 @@ Identity knows who makes a request and what that identity can do. It supports si
 
 | Element | Rules |
 |---|---|
-| `User` | Email (unique), name, `orgRole` (VIEWER, MEMBER, ADMIN), team roles (MEMBER, ADMIN), project admin set, external id from SSO, disabled flag, `allowAgentAdmin` (default false). |
-| `ApiToken` | `mdy_` + random secret. Mayday stores only the SHA-256 hash. Owner is a user or an agent. Scopes: READ, WRITE, ADMIN, ALERTS_INGEST. Optional expiry. Only administrators get the ADMIN scope. |
+| `User` | Email (unique), name, `orgRole` (VIEWER, MEMBER, ADMIN), team roles (MEMBER, ADMIN; ADMIN = team owner), project admin set, external id from SSO, disabled flag, `allowAgentAdmin` (default false), `idpGroups` (last groups claim), `scimGroups` (SCIM group keys), `scimExternalId`. Groups never leave the server. |
+| `ApiToken` | `mdy_` + random secret. Mayday stores only the SHA-256 hash. Owner is a user or an agent. Scopes: READ, WRITE, ADMIN, ALERTS_INGEST, SCIM. Optional expiry. Only administrators get the ADMIN and SCIM scopes. Token exchange never passes SCIM on. |
 | `Principal` | `actor` (who acts), `user` (whose RBAC applies), `agentRole`, `scopes`, optional `runId`. Delegated = actor is an agent and user is set. |
 | Delegated token | HS256 JWT: `typ=obo`, `sub`=user id, `act.sub`=`agent:<id>`, `run`, `scope`, `exp`. A run token has the scopes READ and WRITE only, never ADMIN or ALERTS_INGEST. A token with a `run` claim works only while that run is not finished. |
 | Session | Signed cookie, 12 hours by default. Stateless. |
@@ -37,6 +37,14 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 - Other organization changes, and saving `true` again, keep the opt-ins.
 - Run tokens (agent buttons) never have ADMIN. These settings change token exchange only.
 
+## Team members
+
+- `ListTeamMembers`: everyone with READ.
+- `SetTeamMember`: team owners (team admin, project admin, administrator) add, remove and promote. `UpdateUser` with `replace_teams` stays for administrators.
+- Identity provider groups win. When a team has member groups, adding or removing members by hand is a `conflict`. When it has owner groups, changing the owner role by hand is a `conflict`. Both rules apply to `UpdateUser` too.
+- Each removal (by hand or by group sync) calls the `TeamMembershipListener` port. On-call implements it: the person leaves the team's rotations.
+- `upsertSso` takes the groups of the sign-in and calls the `GroupMembershipSync` port. Provisioning implements it ([provisioning.md](provisioning.md)).
+
 ## Access rules (`Access`)
 
 - Read: READ scope.
@@ -47,6 +55,7 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 ## Positive use cases
 
 - An engineer signs in with the company OIDC provider. Mayday creates the user at the first login.
+- A team owner adds a new colleague to the team and makes a senior engineer a second owner.
 - An Alertmanager uses a token with only ALERTS_INGEST.
 - A coding agent exchanges its token and the engineer's token for a delegated token and acts as the engineer.
 
@@ -59,6 +68,8 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 - An agent uses a delegated token after its run is finished: `unauthenticated`.
 - An agent tries to create tokens for a user, or to start another agent: `forbidden`.
 - An administrator tries to remove their own admin role: `conflict`.
+- A team member adds someone to the team: `forbidden`. A team owner changes the members of another team: `forbidden`.
+- A team owner adds a member to a team that identity provider groups manage: `conflict`.
 - An administrator exchanges their token while `agents.exchange_admin` or their own `allowAgentAdmin` is false: the delegated token has no ADMIN scope.
 - An administrator turns on `allowAgentAdmin` while the organization does not allow it: `forbidden`.
 - A member turns on `allowAgentAdmin`: `forbidden`.
@@ -67,4 +78,4 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 
 ## Rebuild checklist
 
-Pass `IdentityTest`, `AgentAdminExchangeTest`, `AgentAdminOptInResetTest`, the agent admin part of `StoreContract`, `DelegationLimitsTest`, the credential, token and scope parts of `GrpcContractTest`, the sign-in and token-exchange parts of `HttpEdgesContractTest`, and the token part of `StoreContract`.
+Pass `IdentityTest`, `TeamMembersTest`, `AgentAdminExchangeTest`, `AgentAdminOptInResetTest`, the agent admin part of `StoreContract`, `DelegationLimitsTest`, the credential, token and scope parts of `GrpcContractTest`, the sign-in and token-exchange parts of `HttpEdgesContractTest`, and the token part of `StoreContract`.

@@ -15,14 +15,15 @@ gRPC reflection and the standard gRPC health service (`grpc.health.v1.Health`) a
 |---|---|---|
 | `identity.proto` | `AuthService` | `GetAuthConfig`, `GetMe`, `WhoAmI` |
 | `identity.proto` | `UserService` | `ListUsers`, `CreateUser`, `UpdateUser`, `ListTokens`, `IssueToken` (the secret is in this response only), `RevokeToken`, `SetAgentAdmin` (the caller's own `allow_agent_admin`; agents get `PERMISSION_DENIED`) |
-| `directory.proto` | `DirectoryService` | `ListProjects`, `CreateProject`, `UpdateProject`, `DeleteProject`, `ListTeams`, `CreateTeam`, `UpdateTeam`, `DeleteTeam` |
+| `directory.proto` | `DirectoryService` | `ListProjects`, `CreateProject`, `UpdateProject`, `DeleteProject`, `ListTeams`, `CreateTeam`, `UpdateTeam` (`replace_groups` sets `member_groups` and `owner_groups`, administrators), `DeleteTeam`, `ListTeamMembers`, `SetTeamMember` (team owners; role unspecified removes; `conflict` when identity provider groups manage the team) |
+| `oncall.proto` | `OnCallService` | `ListSchedules`, `GetSchedule`, `CreateSchedule`, `UpdateSchedule` (with `version`), `DeleteSchedule`, `ListOverrides`, `CreateOverride`, `DeleteOverride`, `ListShifts` (rotation with overrides, window at most 93 days), `GetOnCall`. See [oncall.md](domains/oncall.md) |
 | `incidents.proto` | `IncidentService` | `ListIncidents` (keyset: `cursor`, `next_cursor`), `DeclareIncident`, `GetIncident` (`ref` = key, number or id), `UpdateIncident` (with `version`), `ListTimeline`, `AddTimelineEntry`, `SavePostmortem`, `SaveResolution`, `SaveRunbook` |
 | `alerting.proto` | `AlertService` | `ListAlerts`, `IngestAlert`, `GetAlert`, `AcknowledgeAlert`, `ResolveAlert`, `AddAlertUpdate`, `LinkAlert` |
 | `reporting.proto` | `ReportService` | `GetReport` |
 | `policy.proto` | `PolicyService` | `GetSettings`, `SetSetting`, `ClearSetting`, `ListChangeRequests`, `RequestChange`, `DecideChange` |
 | `agents.proto` | `AgentService` | `ListAgents`, `ListEligibleAgents`, `GetAgent`, `CreateAgent`, `UpdateAgent`, `DeleteAgent`, `RotateAgentCredentials` (secrets in the response only), `GetLlm`, `UpdateLlm`, `ListMcpServers`, `SaveMcpServer`, `DeleteMcpServer` |
 | `agents.proto` | `AgentRunService` | `ListRuns`, `GetRun`, `StartRun`, `CancelRun`, `ClaimRuns`, `ReportProgress`, `CompleteRun` |
-| `events.proto` | `EventService` | `Subscribe` (server stream): `incident.*`, `alert.*`, `agent_run.updated`, `setting.changed`, and `ping` every 25 seconds |
+| `events.proto` | `EventService` | `Subscribe` (server stream): `incident.*`, `alert.*`, `agent_run.updated`, `setting.changed`, `oncall.changed`, and `ping` every 25 seconds |
 
 Conventions (`common.proto`):
 
@@ -41,7 +42,8 @@ gRPC and gRPC-Web read the credentials from the metadata (HTTP headers):
 | API token | `authorization: Bearer mdy_...` | Scripts, alert sources, MCP clients |
 | Agent token | `authorization: Bearer mdy_...` (owner = agent) | External agents |
 | Delegated token | `authorization: Bearer <JWT typ=obo>` | Agent on behalf of a person. From token exchange: the user's scopes without ADMIN, unless `agents.exchange_admin` and the user's `allowAgentAdmin` are on. |
-| SSO access token | `authorization: Bearer <IdP JWT>` | Agent with the person's own SSO token |
+| SSO access token | `authorization: Bearer <IdP JWT>` | Agent with the person's own SSO token. Its groups claim updates team membership like a sign-in. |
+| SCIM token | `Authorization: Bearer mdy_...` with the SCIM scope (administrators only) | `/scim/v2` only. See [provisioning.md](domains/provisioning.md) |
 
 A call without valid credentials gets `UNAUTHENTICATED`. `AuthService.GetAuthConfig` needs no credentials.
 
@@ -106,7 +108,8 @@ HTTP edges return the body `{"error": "<code>", "message": "<text for people>"}`
 
 | Method and path | Purpose |
 |---|---|
-| `GET /auth/login?redirect=`, `GET /auth/callback` | OIDC flow with PKCE. Sets the session cookie. |
+| `GET /auth/login?redirect=`, `GET /auth/callback` | OIDC flow with PKCE. Sets the session cookie. The groups claim updates team membership. |
+| `/scim/v2/Users`, `/scim/v2/Groups`, `/scim/v2/ServiceProviderConfig`, `/scim/v2/ResourceTypes`, `/scim/v2/Schemas` | SCIM 2.0 (RFC 7644) for identity providers. Errors use the SCIM error schema. See [provisioning.md](domains/provisioning.md) |
 | `POST /auth/dev-login` `{email, name?}`, `GET /auth/dev-login?email=&redirect=` | Development sign-in (`MAYDAY_DEV_LOGIN=true`) |
 | `POST /auth/logout` | Clears the session. Response: `{"logoutUrl": "..."}` |
 | `POST /oauth/token` | RFC 8693 token exchange (below) |

@@ -28,6 +28,10 @@ Mayday is one process: a Spring Boot jar (`build/libs/mayday.jar`). It needs Jav
 | `MAYDAY_OIDC_ISSUER`, `MAYDAY_OIDC_CLIENT_ID`, `MAYDAY_OIDC_CLIENT_SECRET` | – | Single sign-on. Redirect URI: `<public URL>/auth/callback` |
 | `MAYDAY_OIDC_SCOPES` | `openid email profile` | Requested scopes |
 | `MAYDAY_OIDC_AUDIENCES` | – | Extra audiences accepted on SSO access tokens (on-behalf-of) |
+| `MAYDAY_OIDC_GROUPS_CLAIM` | `groups` | Claim with the groups of the person. Dotted path for nested claims (`realm_access.roles`). Blank = no group sync from sign-in |
+| `MAYDAY_GROUPS_AUTO_CREATE` | false | Groups that no team links to create teams |
+| `MAYDAY_GROUPS_FILTER` | – | Regular expression; only matching groups create teams (for example `^oncall-`) |
+| `MAYDAY_GROUPS_OWNER_SUFFIX` | – | Group `<name><suffix>` is the owner group of the team of group `<name>` (for example `-owners`) |
 | `MAYDAY_ADMIN_EMAILS` | – | These users become administrators at first login. The first user is always an administrator. |
 | `ANTHROPIC_API_KEY` | – | Fallback for `MAYDAY_LLM_API_KEY` |
 | `MAYDAY_DEV_LOGIN` | false | Email sign-in without a password. Never in production. |

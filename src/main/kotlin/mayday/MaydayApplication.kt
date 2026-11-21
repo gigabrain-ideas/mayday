@@ -59,7 +59,11 @@ data class MaydayProperties(
     val agentConcurrency: Int = 16,
     val traceUrlTemplate: String = "",
     val telemetry: TelemetrySettings = TelemetrySettings(),
+    val groups: Groups = Groups(),
 ) {
+    /** Teams from identity provider groups (sign-in claims and SCIM). See docs/domains/provisioning.md. */
+    data class Groups(val autoCreate: Boolean = false, val filter: String = "", val ownerSuffix: String = "")
+
     data class Database(val url: String = "", val user: String = "", val password: String = "", val pool: Int = 20) {
         val jdbcUrl: String? get() = url.takeIf { it.isNotBlank() }?.let { if (it.startsWith("jdbc:")) it else "jdbc:$it" }
     }
@@ -70,6 +74,7 @@ data class MaydayProperties(
         val clientSecret: String = "",
         val scopes: String = "openid email profile",
         val audiences: String = "",
+        val groupsClaim: String = "groups",
     )
 
     /** Environment settings of the internal agent. Blank means "not set": the admin UI then decides. */
@@ -143,6 +148,7 @@ data class MaydayProperties(
         adminEmails = csv(adminEmails).map { it.lowercase() }.toSet(),
         llm = llm.environment(),
         agentConcurrency = agentConcurrency,
+        groups = mayday.provisioning.GroupSyncSettings(groups.autoCreate, groups.filter, groups.ownerSuffix),
     )
 
     companion object {
@@ -194,7 +200,7 @@ class Wiring {
     @Bean
     fun oidc(props: MaydayProperties): OidcClient? = props.oidc.issuer.takeIf { it.isNotBlank() }?.let {
         OidcClient(OidcSettings(it, props.oidc.clientId, props.oidc.clientSecret, props.oidc.scopes,
-            "${props.baseUrl}/auth/callback", MaydayProperties.csv(props.oidc.audiences).toSet()))
+            "${props.baseUrl}/auth/callback", MaydayProperties.csv(props.oidc.audiences).toSet(), props.oidc.groupsClaim))
     }
 
     @Bean

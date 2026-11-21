@@ -16,7 +16,8 @@ Mayday exposes its use cases as tools. External agents use them through the MCP 
 
 | Tool | Kind | Notes |
 |---|---|---|
-| `list_incidents`, `get_incident`, `list_alerts`, `get_alert`, `list_teams`, `get_settings` | read | Always available with READ scope |
+| `list_incidents`, `get_incident`, `list_alerts`, `get_alert`, `list_teams`, `get_settings`, `get_on_call` | read | Always available with READ scope |
+| `add_schedule_override` | write | Needs `mcp.write_enabled` for the team. Team members add only themselves, team owners add any team member ([oncall.md](oncall.md)) |
 | `create_incident`, `update_incident`, `add_timeline_entry`, `set_postmortem`, `save_runbook`, `save_resolution` | write | Needs WRITE, role MEMBER, and `mcp.write_enabled` for the incident teams |
 | `send_alert`, `acknowledge_alert`, `resolve_alert`, `add_alert_update` | write | Same as above, for the alert team |
 | `claim_agent_runs`, `report_agent_run` | agent | Only for agent identities (pull agents) |

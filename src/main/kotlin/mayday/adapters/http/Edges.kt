@@ -95,7 +95,7 @@ class AuthEndpoints(private val auth: Authenticator) {
         error?.let { throw Unauthenticated("The identity provider refused the login: $it") }
         if (state != flow.state) throw Unauthenticated("Invalid login state")
         val id = withContext(Dispatchers.IO) { client.exchange(code ?: throw Invalid("Missing code"), flow.verifier, flow.nonce) }
-        val user = auth.ssoUser(id.subject, id.email, id.name)
+        val user = auth.ssoUser(id.subject, id.email, id.name, id.groups)
         return redirect(flow.redirect, sessions.sessionCookie(user.id))
     }
 

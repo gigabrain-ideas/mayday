@@ -30,6 +30,13 @@ import mayday.incidents.TimelineRepository
 import mayday.policy.ChangeRequestRepository
 import mayday.policy.PolicyService
 import mayday.policy.SettingRepository
+import mayday.oncall.OnCallService
+import mayday.oncall.OverrideRepository
+import mayday.oncall.ScheduleRepository
+import mayday.provisioning.GroupRepository
+import mayday.provisioning.GroupSync
+import mayday.provisioning.GroupSyncSettings
+import mayday.provisioning.ProvisioningService
 import mayday.reporting.ReportService
 import mayday.shared.Clock
 import mayday.shared.EventBus
@@ -49,6 +56,7 @@ data class AppSettings(
     val adminEmails: Set<String> = emptySet(),
     val llm: LlmEnvironment = LlmEnvironment(),
     val agentConcurrency: Int = 16,
+    val groups: GroupSyncSettings = GroupSyncSettings(),
 )
 
 /** Every outbound port the application needs. Adapters provide one implementation each. */
@@ -66,6 +74,9 @@ class Ports(
     val runs: RunRepository,
     val mcpServers: McpServerRepository,
     val config: ConfigRepository,
+    val schedules: ScheduleRepository,
+    val overrides: OverrideRepository,
+    val groups: GroupRepository,
     val events: EventBus,
     val llm: LlmProviderFactory = LlmProviders,
     val dispatcher: AgentDispatcher = WebhookDispatcher(),
@@ -75,20 +86,22 @@ class Ports(
     val telemetry: Telemetry = Telemetry.noop,
 ) {
     fun with(telemetry: Telemetry = this.telemetry, llm: LlmProviderFactory = this.llm, dispatcher: AgentDispatcher = this.dispatcher, credentials: CredentialProviderFactory = this.credentials) = Ports(
-        projects, teams, users, tokens, settings, changeRequests, incidents, timeline, alerts, agents, runs, mcpServers, config, events,
-        llm, dispatcher, clock, close, credentials, telemetry,
+        projects, teams, users, tokens, settings, changeRequests, incidents, timeline, alerts, agents, runs, mcpServers, config,
+        schedules, overrides, groups, events, llm, dispatcher, clock, close, credentials, telemetry,
     )
 
     companion object {
         fun memory(store: MemoryStore, events: EventBus = InProcessEventBus()) = Ports(
             store.projects, store.teams, store.users, store.tokens, store.settings, store.changeRequests,
-            store.incidents, store.timeline, store.alerts, store.agents, store.runs, store.mcpServers, store.config, events,
+            store.incidents, store.timeline, store.alerts, store.agents, store.runs, store.mcpServers, store.config,
+            store.schedules, store.overrides, store.groups, events,
             close = { store.close() },
         )
 
         fun postgres(store: PostgresStore, events: EventBus) = Ports(
             store.projects, store.teams, store.users, store.tokens, store.settings, store.changeRequests,
-            store.incidents, store.timeline, store.alerts, store.agents, store.runs, store.mcpServers, store.config, events,
+            store.incidents, store.timeline, store.alerts, store.agents, store.runs, store.mcpServers, store.config,
+            store.schedules, store.overrides, store.groups, events,
             close = { (events as? AutoCloseable)?.close(); store.pool.close() },
         )
     }
@@ -111,12 +124,17 @@ class App(val settings: AppSettings, val ports: Ports) {
         ports.credentials, ports.telemetry,
     )
     val reports = ReportService(ports.incidents, ports.alerts, directory)
+    val onCall = OnCallService(ports.schedules, ports.overrides, ports.users, directory, ports.events, ports.clock)
+    val groupSync = GroupSync(ports.users, directory, settings.groups) { onCall }
+    val provisioning = ProvisioningService(ports.users, ports.groups, directory, groupSync, ports.clock, settings.adminEmails)
     val maydayTools: MaydayTools
     val mcp: McpServer
 
     init {
         identity = IdentityService(ports.users, ports.tokens, ports.teams, agents, signer, ports.clock, settings.adminEmails, policy)
-        maydayTools = MaydayTools(incidents, alerts, directory, policy, { identity }, { agents })
+        identity.membership = onCall
+        identity.groupSync = groupSync
+        maydayTools = MaydayTools(incidents, alerts, directory, policy, { identity }, { agents }, onCall)
         tools = CompositeCatalog(listOf(maydayTools, McpGateway(ports.mcpServers, box, { agents.gatewayAuth() }, ports.telemetry)))
         mcp = McpServer(maydayTools, VERSION, ports.telemetry)
         alerts.automation = agents

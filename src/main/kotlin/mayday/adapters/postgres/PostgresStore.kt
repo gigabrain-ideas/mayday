@@ -33,6 +33,12 @@ import mayday.policy.ChangeRequestRepository
 import mayday.policy.ChangeRequestStatus
 import mayday.policy.SettingRepository
 import mayday.policy.SettingValue
+import mayday.oncall.OverrideRepository
+import mayday.oncall.Schedule
+import mayday.oncall.ScheduleOverride
+import mayday.oncall.ScheduleRepository
+import mayday.provisioning.DirectoryGroup
+import mayday.provisioning.GroupRepository
 import mayday.shared.Conflict
 import mayday.shared.JSON
 import mayday.shared.Page
@@ -72,7 +78,7 @@ class PostgresStore(val pool: Pool) {
 
     private fun migrate() = pool.dataSource.connection.use { c ->
         c.createStatement().use { s ->
-            for (t in listOf("projects", "teams", "settings", "change_requests", "agents", "mcp_servers", "config")) {
+            for (t in listOf("projects", "teams", "settings", "change_requests", "agents", "mcp_servers", "config", "directory_groups")) {
                 s.execute("create table if not exists $t (id text primary key, doc jsonb not null)")
             }
             s.execute("create table if not exists users (id text primary key, email text unique not null, external_id text unique, doc jsonb not null)")
@@ -99,6 +105,17 @@ class PostgresStore(val pool: Pool) {
             s.execute("create index if not exists runs_subject on agent_runs (subject_id)")
             s.execute("create index if not exists runs_queue on agent_runs (agent_id, status, created_at)")
             s.execute("create index if not exists runs_recent on agent_runs (created_at desc)")
+            s.execute("create index if not exists users_teams on users using gin ((doc->'teams'))")
+            s.execute("create index if not exists users_idp_groups on users using gin ((doc->'idpGroups'))")
+            s.execute("create index if not exists users_scim_groups on users using gin ((doc->'scimGroups'))")
+            s.execute("create index if not exists users_scim_external on users ((doc->>'scimExternalId'))")
+            s.execute("create table if not exists schedules (id text primary key, team_id text not null, version bigint not null, doc jsonb not null)")
+            s.execute("create index if not exists schedules_team on schedules (team_id)")
+            s.execute("""create table if not exists schedule_overrides (
+                id text primary key, schedule_id text not null, team_id text not null, user_id text not null,
+                starts_at timestamptz not null, ends_at timestamptz not null, created_at timestamptz not null, doc jsonb not null)""")
+            s.execute("create index if not exists overrides_schedule on schedule_overrides (schedule_id, ends_at)")
+            s.execute("create index if not exists overrides_user on schedule_overrides (team_id, user_id, ends_at)")
         }
     }
 
@@ -176,6 +193,13 @@ class PostgresStore(val pool: Pool) {
         override suspend fun byExternalId(externalId: String) = query("select doc from users where external_id = ?", externalId) { dec(ser, it) }.firstOrNull()
         override suspend fun count() = query("select count(*) from users") { it.getLong(1) }.first()
         override suspend fun withAgentAdmin() = query("select doc from users where doc->>'allowAgentAdmin' = 'true'") { dec(ser, it) }
+        override suspend fun byTeam(teamId: String) = query("select doc from users where doc->'teams' ?? ?", teamId) { dec(ser, it) }
+        override suspend fun withGroups(keys: Set<String>) = if (keys.isEmpty()) emptyList() else {
+            val arr = keys.toTypedArray()
+            query("select doc from users where doc->'idpGroups' ??| ? or doc->'scimGroups' ??| ?", arr, arr) { dec(ser, it) }
+        }
+        override suspend fun byScimExternalId(externalId: String) =
+            query("select doc from users where doc->>'scimExternalId' = ? limit 1", externalId) { dec(ser, it) }.firstOrNull()
         override suspend fun list(query: String?, cursor: String?, limit: Int): Page<User> {
             val q = query?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { "%${it.replace("%", "")}%" }
             val rows = query(
@@ -375,6 +399,54 @@ class PostgresStore(val pool: Pool) {
         override suspend fun list() = mcpT.all()
         override suspend fun save(server: McpServerConfig) { mcpT.put(server.id, server) }
         override suspend fun delete(id: String) { mcpT.delete(id) }
+    }
+
+    val schedules = object : ScheduleRepository {
+        private val ser = Schedule.serializer()
+        override suspend fun get(id: String) = query("select doc from schedules where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun byTeam(teamId: String) = query("select doc from schedules where team_id = ?", teamId) { dec(ser, it) }
+        override suspend fun list() = query("select doc from schedules") { dec(ser, it) }
+        override suspend fun delete(id: String) { exec("delete from schedules where id = ?", id) }
+        override suspend fun save(schedule: Schedule, expectedVersion: Long?) {
+            val doc = JsonDoc(enc(ser, schedule))
+            if (expectedVersion == null) {
+                try {
+                    exec("insert into schedules (id, team_id, version, doc) values (?, ?, ?, ?)", schedule.id, schedule.teamId, schedule.version, doc)
+                } catch (e: java.sql.SQLException) {
+                    if (e.sqlState == "23505") throw Conflict("Schedule exists") else throw e
+                }
+            } else {
+                val n = exec("update schedules set version = ?, doc = ? where id = ? and version = ?", schedule.version, doc, schedule.id, expectedVersion)
+                if (n == 0) throw Conflict("The schedule changed. Reload and try again.")
+            }
+        }
+    }
+
+    val overrides = object : OverrideRepository {
+        private val ser = ScheduleOverride.serializer()
+        override suspend fun get(id: String) = query("select doc from schedule_overrides where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun save(override: ScheduleOverride) {
+            exec("""insert into schedule_overrides (id, schedule_id, team_id, user_id, starts_at, ends_at, created_at, doc) values (?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict (id) do update set starts_at = excluded.starts_at, ends_at = excluded.ends_at, doc = excluded.doc""",
+                override.id, override.scheduleId, override.teamId, override.userId, override.startsAt, override.endsAt, override.createdAt, JsonDoc(enc(ser, override)))
+        }
+        override suspend fun delete(id: String) { exec("delete from schedule_overrides where id = ?", id) }
+        override suspend fun overlapping(scheduleId: String, from: Instant, to: Instant) = query(
+            "select doc from schedule_overrides where schedule_id = ? and ends_at > ? and starts_at < ? order by created_at, id", scheduleId, from, to,
+        ) { dec(ser, it) }
+        override suspend fun endingAfter(teamId: String, userId: String, after: Instant) = query(
+            "select doc from schedule_overrides where team_id = ? and user_id = ? and ends_at > ?", teamId, userId, after,
+        ) { dec(ser, it) }
+        override suspend fun deleteBySchedule(scheduleId: String) { exec("delete from schedule_overrides where schedule_id = ?", scheduleId) }
+    }
+
+    private val groupsT = DocTable("directory_groups", DirectoryGroup.serializer())
+
+    val groups = object : GroupRepository {
+        override suspend fun get(id: String) = groupsT.get(id)
+        override suspend fun list() = groupsT.all()
+        override suspend fun save(group: DirectoryGroup) { groupsT.put(group.id, group) }
+        override suspend fun delete(id: String) { groupsT.delete(id) }
     }
 
     val config = object : ConfigRepository {

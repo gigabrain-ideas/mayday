@@ -53,6 +53,26 @@ variable "oidc_client_id" {
   type    = string
   default = ""
 }
+variable "oidc_groups_claim" {
+  type        = string
+  default     = "groups"
+  description = "Claim with the groups of the person. Empty turns group sync from sign-in off."
+}
+variable "groups_auto_create" {
+  type        = bool
+  default     = false
+  description = "Identity provider groups that no team links to create teams."
+}
+variable "groups_filter" {
+  type        = string
+  default     = ""
+  description = "Regular expression. Only matching groups create teams."
+}
+variable "groups_owner_suffix" {
+  type        = string
+  default     = ""
+  description = "Group <name><suffix> is the owner group of the team of group <name>."
+}
 variable "oidc_client_secret" {
   type      = string
   default   = ""

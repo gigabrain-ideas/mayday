@@ -26,6 +26,13 @@ oidc:
   clientSecret: ""            # or put it in existingSecret with key: oidcClientSecret
   scopes: "openid email profile"
   audiences: ""               # extra audiences accepted for on-behalf-of access tokens, comma separated
+  groupsClaim: "groups"       # claim with the groups of the person; dotted path for nested claims; "" turns sync from sign-in off
+
+# Teams from identity provider groups (groups claim and SCIM at /scim/v2). See docs/domains/provisioning.md.
+groups:
+  autoCreate: false
+  filter: ""                  # regular expression, for example ^oncall-
+  ownerSuffix: ""             # for example -owners
 
 adminEmails: ""               # comma separated; these users become administrators at first login
 anthropicApiKey: ""           # optional; can also be set in the web interface. Prefer llm.apiKeySecret.

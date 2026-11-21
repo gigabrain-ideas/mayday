@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Copy, KeyRound, Plus, Trash2, Users } from "lucide-react";
-import { items, rpc, type ApiToken, type IssuedToken, type OrgRole, type Page, type TeamRole, type TokenScope, type User } from "@/lib/api";
+import { Copy, KeyRound, Link2, Plus, Trash2, Users } from "lucide-react";
+import { items, rpc, type ApiToken, type IssuedToken, type OrgRole, type Page, type Team, type TeamRole, type TokenScope, type User } from "@/lib/api";
 import { useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -12,6 +12,7 @@ export function DirectoryPage() {
   const toast = useToast();
   const [team, setTeam] = useState({ name: "", projectId: "" });
   const [project, setProject] = useState("");
+  const [linking, setLinking] = useState<Team | null>(null);
   const run = (p: Promise<unknown>) => p.then(reloadDirectory).catch(toast.error);
   return (
     <div className="grid gap-5 xl:grid-cols-2">
@@ -48,7 +49,11 @@ export function DirectoryPage() {
         <div className="divide-y">
           {teams.map((t) => (
             <div key={t.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-              <div className="flex-1"><div>{t.name}</div><div className="text-[12px] text-muted-foreground">{t.slug}</div></div>
+              <div className="flex-1">
+                <div>{t.name}</div>
+                <div className="text-[12px] text-muted-foreground">{t.slug}{(t.memberGroups.length > 0 || t.ownerGroups.length > 0) && " · identity provider groups"}</div>
+              </div>
+              {isAdmin && <Button variant="ghost" size="sm" onClick={() => setLinking(t)}><Link2 /> Groups</Button>}
               {isAdmin ? (
                 <NativeSelect value={t.projectId ?? ""} onChange={(e) => run(rpc.directory.updateTeam({ id: t.id, name: t.name, description: t.description, projectId: e.target.value }))} className="w-44" aria-label="Project">
                   <option value="">No project</option>
@@ -60,7 +65,36 @@ export function DirectoryPage() {
           ))}
         </div>
       </Card>
+      <Dialog open={!!linking} onOpenChange={(o) => !o && setLinking(null)}>
+        {linking && <GroupLinks team={linking} onDone={() => { setLinking(null); reloadDirectory(); }} />}
+      </Dialog>
     </div>
+  );
+}
+
+function GroupLinks({ team, onDone }: { team: Team; onDone: () => void }) {
+  const toast = useToast();
+  const [members, setMembers] = useState(team.memberGroups.join(", "));
+  const [owners, setOwners] = useState(team.ownerGroups.join(", "));
+  const list = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+  return (
+    <DialogContent title={`Groups of ${team.name}`} description="Members of these identity provider groups (from the sign-in groups claim or SCIM) are the team members and owners. Linked groups lock manual changes.">
+      <form className="space-y-4" onSubmit={async (e) => {
+        e.preventDefault();
+        try {
+          await rpc.directory.updateTeam({ id: team.id, name: team.name, description: team.description, replaceGroups: true, memberGroups: list(members), ownerGroups: list(owners) });
+          onDone();
+        } catch (err) { toast.error(err); }
+      }}>
+        <Field label="Member groups" hint="Group ids or names, separated by commas. Entra ID sends group object ids by default.">
+          <Input value={members} onChange={(e) => setMembers(e.target.value)} placeholder="0b5e1c2a-…, oncall-payments" />
+        </Field>
+        <Field label="Owner groups" hint="Members of these groups are team owners. They are team members too.">
+          <Input value={owners} onChange={(e) => setOwners(e.target.value)} placeholder="oncall-payments-owners" />
+        </Field>
+        <Button type="submit" className="w-full">Save links</Button>
+      </form>
+    </DialogContent>
   );
 }
 
@@ -165,7 +199,7 @@ export function TokensPage() {
   const { data, reload } = useQuery(() => items(rpc.users.listTokens<Page<ApiToken>>()), []);
   const [form, setForm] = useState({ name: "", scopes: ["READ"] as TokenScope[], ttlDays: "90" });
   const [issued, setIssued] = useState<IssuedToken | null>(null);
-  const all: TokenScope[] = ["READ", "WRITE", "ALERTS_INGEST", ...(isAdmin ? ["ADMIN" as TokenScope] : [])];
+  const all: TokenScope[] = ["READ", "WRITE", "ALERTS_INGEST", ...(isAdmin ? ["ADMIN", "SCIM"] as TokenScope[] : [])];
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
       <Card>

@@ -35,6 +35,8 @@ import mayday.incidents.IncidentStatus
 import mayday.incidents.NewIncident
 import mayday.incidents.Postmortem
 import mayday.incidents.PostmortemStatus
+import mayday.oncall.OnCallService
+import mayday.oncall.OverrideInput
 import mayday.policy.Enforcement
 import mayday.policy.Keys
 import mayday.policy.PolicyService
@@ -84,6 +86,7 @@ class MaydayTools(
     private val policy: PolicyService,
     private val identity: () -> IdentityService,
     private val agents: () -> AgentService,
+    private val onCall: OnCallService,
 ) : ToolCatalog {
     private class Tool(val spec: ToolSpec, val handler: suspend (Principal, JsonObject, Gate) -> JsonElement)
 
@@ -145,6 +148,18 @@ class MaydayTools(
                 put("teams", JSON.encodeToJsonElement(directory.teams()))
                 put("projects", JSON.encodeToJsonElement(directory.projects()))
             }
+        },
+        Tool(ToolSpec("get_on_call", "Get who is on call now (or at a given time) for each schedule of the teams.",
+            S.obj(emptyList(), "teams" to S.arr("Team ids or slugs. Empty means all teams.", S.str("Team")), "at" to S.str("ISO-8601 time. Default: now")))) { p, a, _ ->
+            JSON.encodeToJsonElement(onCall.onCall(p, a.strList("teams").orEmpty(), a.instant("at")))
+        },
+        Tool(ToolSpec("add_schedule_override", "Put a person on call for a schedule for a period. Team members can add only themselves; team owners can add any team member.",
+            S.obj(listOf("schedule_id", "user_id", "starts_at", "ends_at"), "schedule_id" to S.str("Schedule id"), "user_id" to S.str("User id of the person who covers"),
+                "starts_at" to S.str("ISO-8601 start"), "ends_at" to S.str("ISO-8601 end"), "reason" to S.str("Why, for example 'Ana is sick'")), write = true)) { p, a, g ->
+            val schedule = onCall.schedule(p, a.req("schedule_id"))
+            g.write(listOf(schedule.teamId))
+            JSON.encodeToJsonElement(onCall.createOverride(p, OverrideInput(schedule.id, a.req("user_id"),
+                a.instant("starts_at") ?: throw Invalid("'starts_at' is required"), a.instant("ends_at") ?: throw Invalid("'ends_at' is required"), a.str("reason").orEmpty())))
         },
         Tool(ToolSpec("get_settings", "Get the effective settings of a team, or of the organization when no team is given.",
             S.obj(emptyList(), "team" to S.str("Team id or slug")))) { p, a, _ ->

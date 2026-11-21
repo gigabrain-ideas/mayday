@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+option java_outer_classname = "OnCallProto";
+
+enum ShiftUnit {
+  SHIFT_UNIT_UNSPECIFIED = 0;
+  SHIFT_UNIT_HOURS = 1;
+  SHIFT_UNIT_DAYS = 2;
+  SHIFT_UNIT_WEEKS = 3;
+}
+
+// A rotation of team members. Shift k starts at rotation_start + k * shift_length shift_unit, counted in time_zone.
+message Schedule {
+  string id = 1;
+  string team_id = 2;
+  string name = 3;
+  // IANA time zone, for example Europe/Berlin.
+  string time_zone = 4;
+  google.protobuf.Timestamp rotation_start = 5;
+  int32 shift_length = 6;
+  ShiftUnit shift_unit = 7;
+  // User ids in rotation order.
+  repeated string participants = 8;
+  string description = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  int64 version = 12;
+}
+
+message Schedules {
+  repeated Schedule items = 1;
+}
+
+message ListSchedulesRequest {
+  // Team id or slug. Unset lists the schedules of all teams.
+  optional string team_id = 1;
+}
+
+message SaveScheduleRequest {
+  // Empty on create.
+  string id = 1;
+  // On create only.
+  string team_id = 2;
+  string name = 3;
+  string time_zone = 4;
+  google.protobuf.Timestamp rotation_start = 5;
+  int32 shift_length = 6;
+  ShiftUnit shift_unit = 7;
+  repeated string participants = 8;
+  string description = 9;
+  // On update: the version you read. A different current version is a conflict.
+  optional int64 version = 10;
+}
+
+// user_id covers the schedule from starts_at (inclusive) to ends_at (exclusive). A later override wins.
+message ScheduleOverride {
+  string id = 1;
+  string schedule_id = 2;
+  string team_id = 3;
+  string user_id = 4;
+  google.protobuf.Timestamp starts_at = 5;
+  google.protobuf.Timestamp ends_at = 6;
+  string reason = 7;
+  string created_by = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message ScheduleOverrides {
+  repeated ScheduleOverride items = 1;
+}
+
+// Team owners add any team member. Team members add only themselves.
+message CreateOverrideRequest {
+  string schedule_id = 1;
+  string user_id = 2;
+  google.protobuf.Timestamp starts_at = 3;
+  google.protobuf.Timestamp ends_at = 4;
+  string reason = 5;
+}
+
+// At most 93 days.
+message WindowRequest {
+  string schedule_id = 1;
+  google.protobuf.Timestamp from = 2;
+  google.protobuf.Timestamp to = 3;
+}
+
+// One continuous period with one person on call. user_id is unset when nobody is on call.
+message Shift {
+  string schedule_id = 1;
+  optional string user_id = 2;
+  google.protobuf.Timestamp starts_at = 3;
+  google.protobuf.Timestamp ends_at = 4;
+  optional string override_id = 5;
+}
+
+message Shifts {
+  repeated Shift items = 1;
+}
+
+message GetOnCallRequest {
+  // Team ids or slugs. Empty means all teams.
+  repeated string team_ids = 1;
+  // Default: now.
+  optional google.protobuf.Timestamp at = 2;
+}
+
+message OnCall {
+  string schedule_id = 1;
+  string schedule_name = 2;
+  string team_id = 3;
+  optional string user_id = 4;
+  optional google.protobuf.Timestamp until = 5;
+  optional string override_id = 6;
+}
+
+message OnCalls {
+  repeated OnCall items = 1;
+}
+
+service OnCallService {
+  rpc ListSchedules(ListSchedulesRequest) returns (Schedules);
+  rpc GetSchedule(IdRequest) returns (Schedule);
+  // Team owners only.
+  rpc CreateSchedule(SaveScheduleRequest) returns (Schedule);
+  rpc UpdateSchedule(SaveScheduleRequest) returns (Schedule);
+  rpc DeleteSchedule(IdRequest) returns (google.protobuf.Empty);
+  rpc ListOverrides(WindowRequest) returns (ScheduleOverrides);
+  rpc CreateOverride(CreateOverrideRequest) returns (ScheduleOverride);
+  // Team owners and the person who covers.
+  rpc DeleteOverride(IdRequest) returns (google.protobuf.Empty);
+  // The final plan: rotation with overrides applied.
+  rpc ListShifts(WindowRequest) returns (Shifts);
+  rpc GetOnCall(GetOnCallRequest) returns (OnCalls);
+}

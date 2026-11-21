@@ -35,7 +35,7 @@ class StaticFiles(private val props: MaydayProperties) : WebFluxConfigurer {
 /** Security headers, and the single-page-app fallback: unknown GET paths without a file extension get index.html. */
 @Component
 class WebFilters(private val static: StaticFiles) : WebFilter {
-    private val reserved = listOf("/api/", "/auth/", "/oauth/", "/mcp", "/mayday.v1.", "/healthz", "/livez", "/readyz", "/metrics", "/grpc.")
+    private val reserved = listOf("/api/", "/auth/", "/oauth/", "/mcp", "/scim/", "/mayday.v1.", "/healthz", "/livez", "/readyz", "/metrics", "/grpc.")
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val path = exchange.request.path.pathWithinApplication().value()

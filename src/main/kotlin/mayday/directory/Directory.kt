@@ -25,7 +25,15 @@ data class Team(
     val projectId: String? = null,
     val description: String = "",
     val createdAt: Ts,
-)
+    /** Identity provider groups whose members are the team members. When set, the identity provider owns the membership. */
+    val memberGroups: Set<String> = emptySet(),
+    /** Identity provider groups whose members are the team owners. When set, the identity provider owns the owner role. */
+    val ownerGroups: Set<String> = emptySet(),
+) {
+    val membershipManaged: Boolean get() = memberGroups.isNotEmpty()
+    val ownersManaged: Boolean get() = ownerGroups.isNotEmpty()
+    val groups: Set<String> get() = memberGroups + ownerGroups
+}
 
 interface ProjectRepository {
     suspend fun get(id: String): Project?
@@ -78,13 +86,34 @@ class DirectoryService(
         projects.delete(p.id)
     }
 
-    suspend fun createTeam(name: String, slug: String?, projectId: String?, description: String = ""): Team {
+    suspend fun createTeam(
+        name: String, slug: String?, projectId: String?, description: String = "",
+        memberGroups: Set<String> = emptySet(), ownerGroups: Set<String> = emptySet(),
+    ): Team {
         val s = validSlug(slug ?: slugify(name))
         if (teams.bySlug(s) != null) throw Conflict("A team with slug '$s' exists")
         if (name.isBlank()) throw Invalid("Name is required")
         val pid = projectId?.let { project(it).id }
-        return Team(Ids.new(), s, name.trim(), pid, description, clock.now()).also { teams.save(it) }
+        return Team(Ids.new(), s, name.trim(), pid, description, clock.now(), clean(memberGroups), clean(ownerGroups)).also { teams.save(it) }
     }
+
+    /** A free slug made from [name]: "payments", then "payments-2", "payments-3" and so on. */
+    suspend fun freeSlug(name: String): String {
+        val base = slugify(name).take(58)
+        if (teams.bySlug(base) == null) return base
+        return (2..10_000).asSequence().map { "$base-$it" }.first { teams.bySlug(it) == null }
+    }
+
+    suspend fun teamsWithGroups(): List<Team> = teams.list().filter { it.groups.isNotEmpty() }
+
+    suspend fun setTeamGroups(id: String, memberGroups: Set<String>, ownerGroups: Set<String>): Team {
+        val t = team(id)
+        return t.copy(memberGroups = clean(memberGroups), ownerGroups = clean(ownerGroups)).also { teams.save(it) }
+    }
+
+    suspend fun renameTeam(id: String, name: String): Team = team(id).copy(name = name.trim()).also { teams.save(it) }
+
+    private fun clean(groups: Set<String>) = groups.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
     suspend fun updateTeam(id: String, name: String?, projectId: String?, description: String?): Team {
         val t = team(id)

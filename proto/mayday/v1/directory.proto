@@ -5,6 +5,7 @@ package mayday.v1;
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "mayday/v1/common.proto";
+import "mayday/v1/identity.proto";
 
 option java_multiple_files = true;
 option java_package = "mayday.api.v1";
@@ -28,6 +29,10 @@ message Team {
   optional string project_id = 4;
   string description = 5;
   google.protobuf.Timestamp created_at = 6;
+  // Identity provider groups whose members are the team members. When set, the identity provider owns the membership.
+  repeated string member_groups = 7;
+  // Identity provider groups whose members are the team owners. When set, the identity provider owns the owner role.
+  repeated string owner_groups = 8;
 }
 
 message Teams {
@@ -50,6 +55,31 @@ message SaveTeamRequest {
   // On update: unset keeps the project, empty removes it.
   optional string project_id = 4;
   string description = 5;
+  // Administrators: true sets member_groups and owner_groups (empty lists remove the links).
+  bool replace_groups = 6;
+  repeated string member_groups = 7;
+  repeated string owner_groups = 8;
+}
+
+message TeamMember {
+  string user_id = 1;
+  string name = 2;
+  string email = 3;
+  TeamRole role = 4;
+  // True when identity provider groups manage this team.
+  bool managed = 5;
+  bool disabled = 6;
+}
+
+message TeamMembers {
+  repeated TeamMember items = 1;
+}
+
+// Team owners. Role unspecified removes the member.
+message SetTeamMemberRequest {
+  string team_id = 1;
+  string user_id = 2;
+  TeamRole role = 3;
 }
 
 service DirectoryService {
@@ -61,4 +91,6 @@ service DirectoryService {
   rpc CreateTeam(SaveTeamRequest) returns (Team);
   rpc UpdateTeam(SaveTeamRequest) returns (Team);
   rpc DeleteTeam(IdRequest) returns (google.protobuf.Empty);
+  rpc ListTeamMembers(IdRequest) returns (TeamMembers);
+  rpc SetTeamMember(SetTeamMemberRequest) returns (google.protobuf.Empty);
 }

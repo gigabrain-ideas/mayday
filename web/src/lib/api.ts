@@ -9,6 +9,7 @@ import { DirectoryService } from "@/gen/mayday/v1/directory_pb";
 import { EventSchema, EventService } from "@/gen/mayday/v1/events_pb";
 import { AuthService, UserService } from "@/gen/mayday/v1/identity_pb";
 import { IncidentService } from "@/gen/mayday/v1/incidents_pb";
+import { OnCallService } from "@/gen/mayday/v1/oncall_pb";
 import { PolicyService } from "@/gen/mayday/v1/policy_pb";
 import { ReportService } from "@/gen/mayday/v1/reporting_pb";
 
@@ -20,7 +21,7 @@ export const OPEN_STATUSES: IncidentStatus[] = ["INVESTIGATING", "IDENTIFIED", "
 export type AlertStatus = "FIRING" | "ACKNOWLEDGED" | "RESOLVED";
 export type OrgRole = "VIEWER" | "MEMBER" | "ADMIN";
 export type TeamRole = "MEMBER" | "ADMIN";
-export type TokenScope = "READ" | "WRITE" | "ADMIN" | "ALERTS_INGEST";
+export type TokenScope = "READ" | "WRITE" | "ADMIN" | "ALERTS_INGEST" | "SCIM";
 export type AgentAction = "ANALYZE" | "REMEDIATE" | "PATCH" | "TIMELINE" | "POSTMORTEM" | "RUNBOOK";
 export const AGENT_ACTIONS: AgentAction[] = ["ANALYZE", "REMEDIATE", "PATCH", "TIMELINE", "POSTMORTEM", "RUNBOOK"];
 export const ACTION_LABEL: Record<AgentAction, string> = {
@@ -38,7 +39,18 @@ export type Enforcement = "NONE" | "MINIMUM" | "LOCKED";
 export interface Actor { kind: "USER" | "AGENT" | "SYSTEM"; id: string; name: string; onBehalfOf?: string }
 export interface Page<T> { items: T[]; nextCursor?: string }
 export interface Project { id: string; slug: string; name: string; description: string; createdAt: string }
-export interface Team { id: string; slug: string; name: string; projectId?: string; description: string; createdAt: string }
+export interface Team {
+  id: string; slug: string; name: string; projectId?: string; description: string; createdAt: string; memberGroups: string[]; ownerGroups: string[];
+}
+export interface TeamMember { userId: string; name: string; email: string; role: TeamRole; managed: boolean; disabled: boolean }
+export type ShiftUnit = "HOURS" | "DAYS" | "WEEKS";
+export interface Schedule {
+  id: string; teamId: string; name: string; timeZone: string; rotationStart: string; shiftLength: number; shiftUnit: ShiftUnit;
+  participants: string[]; description: string; createdAt: string; updatedAt: string; version: number;
+}
+export interface ScheduleOverride { id: string; scheduleId: string; teamId: string; userId: string; startsAt: string; endsAt: string; reason: string; createdBy: string; createdAt: string }
+export interface Shift { scheduleId: string; userId?: string; startsAt: string; endsAt: string; overrideId?: string }
+export interface OnCall { scheduleId: string; scheduleName: string; teamId: string; userId?: string; until?: string; overrideId?: string }
 export interface User {
   id: string; email: string; name: string; orgRole: OrgRole; teams: Record<string, TeamRole>;
   projectAdmin: string[]; externalId?: string; disabled: boolean; createdAt: string; allowAgentAdmin?: boolean;
@@ -247,6 +259,7 @@ export const rpc = {
   policy: service(PolicyService),
   agents: service(AgentService),
   agentRuns: service(AgentRunService),
+  oncall: service(OnCallService),
 };
 
 /** Link to the trace of a run in the tracing UI, or undefined when tracing or the link template is not configured. */

@@ -249,4 +249,77 @@ abstract class StoreContract {
         p.config.saveLlm(LlmConfig(model = "m", enabled = true))
         assertEquals("m", p.config.llm()!!.model)
     }
+
+    // ---- on-call ----
+
+    private fun schedule(team: String = "t1") = mayday.oncall.Schedule(Ids.new(), team, "Primary", "Europe/Berlin", now, 1, mayday.oncall.ShiftUnit.WEEKS,
+        listOf("u1", "u2"), createdAt = now, updatedAt = now)
+
+    @Test
+    fun `schedules round trip by team and enforce optimistic concurrency`() = suspendTest {
+        val s = schedule()
+        p.schedules.save(s, null)
+        p.schedules.save(schedule("t2"), null)
+        assertEquals(s, p.schedules.get(s.id))
+        assertEquals(listOf(s), p.schedules.byTeam("t1"))
+        assertEquals(2, p.schedules.list().size)
+        assertFailsWith<Conflict> { p.schedules.save(s, null) }
+        val v2 = s.copy(name = "Secondary", version = 2)
+        p.schedules.save(v2, 1)
+        assertFailsWith<Conflict> { p.schedules.save(s.copy(name = "stale", version = 2), 1) }
+        assertEquals("Secondary", p.schedules.get(s.id)!!.name)
+        p.schedules.delete(s.id)
+        assertNull(p.schedules.get(s.id))
+    }
+
+    @Test
+    fun `overrides are found by overlap in creation order and by person`() = suspendTest {
+        fun o(start: Long, end: Long, created: Long, user: String = "u1", schedule: String = "s1") = mayday.oncall.ScheduleOverride(Ids.new(), schedule, "t1", user,
+            now.plus(start, ChronoUnit.HOURS), now.plus(end, ChronoUnit.HOURS), "sick", "u9", now.plusSeconds(created))
+        val late = o(0, 10, 2); val early = o(5, 8, 1); val outside = o(20, 30, 0); val other = o(0, 10, 0, schedule = "s2"); val bob = o(0, 3, 3, user = "u2")
+        listOf(late, early, outside, other, bob).forEach { p.overrides.save(it) }
+        assertEquals(listOf(early, late, bob), p.overrides.overlapping("s1", now.plus(1, ChronoUnit.HOURS), now.plus(9, ChronoUnit.HOURS)))
+        assertEquals(listOf(early, late), p.overrides.overlapping("s1", now.plus(5, ChronoUnit.HOURS), now.plus(6, ChronoUnit.HOURS)))
+        assertTrue(p.overrides.overlapping("s1", now.plus(10, ChronoUnit.HOURS), now.plus(20, ChronoUnit.HOURS)).isEmpty(), "end and start are exclusive")
+        assertEquals(setOf(outside.id), p.overrides.endingAfter("t1", "u1", now.plus(12, ChronoUnit.HOURS)).map { it.id }.toSet())
+        p.overrides.save(late.copy(endsAt = now.plus(1, ChronoUnit.HOURS)))
+        assertEquals(now.plus(1, ChronoUnit.HOURS), p.overrides.get(late.id)!!.endsAt)
+        p.overrides.delete(early.id)
+        assertNull(p.overrides.get(early.id))
+        p.overrides.deleteBySchedule("s1")
+        assertNull(p.overrides.get(late.id))
+        assertNotNull(p.overrides.get(other.id))
+    }
+
+    // ---- teams and groups ----
+
+    @Test
+    fun `users are found by team, by group and by SCIM external id`() = suspendTest {
+        val a = User(Ids.new(), "a@example.com", "A", teams = mapOf("t1" to mayday.identity.TeamRole.ADMIN), idpGroups = setOf("g1"), createdAt = now)
+        val b = User(Ids.new(), "b@example.com", "B", teams = mapOf("t2" to mayday.identity.TeamRole.MEMBER), scimGroups = setOf("g2"), scimExternalId = "ext-b", createdAt = now)
+        val c = User(Ids.new(), "c@example.com", "C", createdAt = now)
+        listOf(a, b, c).forEach { p.users.save(it) }
+        assertEquals(listOf(a), p.users.byTeam("t1"))
+        assertEquals(setOf(a.id, b.id), p.users.withGroups(setOf("g1", "g2", "g3")).map { it.id }.toSet())
+        assertEquals(listOf(b), p.users.withGroups(setOf("g2")))
+        assertTrue(p.users.withGroups(emptySet()).isEmpty())
+        assertEquals(b, p.users.byScimExternalId("ext-b"))
+        assertNull(p.users.byScimExternalId("missing"))
+        p.users.save(a.copy(teams = emptyMap(), idpGroups = emptySet()))
+        assertTrue(p.users.byTeam("t1").isEmpty())
+        assertTrue(p.users.withGroups(setOf("g1")).isEmpty())
+    }
+
+    @Test
+    fun `teams keep their group links and directory groups round trip`() = suspendTest {
+        val t = Team(Ids.new(), "sre", "SRE", createdAt = now, memberGroups = setOf("g1"), ownerGroups = setOf("g1-owners"))
+        p.teams.save(t)
+        assertEquals(t, p.teams.get(t.id))
+        val g = mayday.provisioning.DirectoryGroup(Ids.new(), "SRE", "guid-1", now, now)
+        p.groups.save(g)
+        assertEquals(g, p.groups.get(g.id))
+        assertEquals(listOf(g), p.groups.list())
+        p.groups.delete(g.id)
+        assertNull(p.groups.get(g.id))
+    }
 }

@@ -42,6 +42,7 @@ class GrpcContractTest : ServerContract() {
     private val runs by lazy { AgentRunServiceGrpcKt.AgentRunServiceCoroutineStub(channel) }
     private val reports by lazy { ReportServiceGrpcKt.ReportServiceCoroutineStub(channel) }
     private val events by lazy { EventServiceGrpcKt.EventServiceCoroutineStub(channel) }
+    private val oncall by lazy { OnCallServiceGrpcKt.OnCallServiceCoroutineStub(channel) }
 
     private fun unique() = UUID.randomUUID().toString().take(8)
 
@@ -294,6 +295,93 @@ class GrpcContractTest : ServerContract() {
     }
 
     // ---- directory, users and tokens ----
+
+    // ---- on-call ----
+
+    private fun ts(i: java.time.Instant) = com.google.protobuf.Timestamp.newBuilder().setSeconds(i.epochSecond).setNanos(i.nano).build()
+
+    private suspend fun newSchedule(): Schedule = oncall.createSchedule(SaveScheduleRequest.newBuilder().setTeamId("checkout").setName("Primary ${unique()}")
+        .setTimeZone("Europe/Berlin").setRotationStart(ts(java.time.Instant.now().minus(Duration.ofDays(1)))).setShiftLength(1)
+        .setShiftUnit(ShiftUnit.SHIFT_UNIT_WEEKS).addParticipants(userOf("lead").id).addParticipants(userOf("member").id).build(), auth("lead"))
+
+    @Test
+    fun `team owners manage schedules and members read who is on call`() = suspendTest {
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") {
+            oncall.createSchedule(SaveScheduleRequest.newBuilder().setTeamId("checkout").setName("x").setRotationStart(ts(java.time.Instant.now())).build(), auth("member"))
+        }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") {
+            oncall.createSchedule(SaveScheduleRequest.newBuilder().setTeamId("checkout").setName("x").setTimeZone("Nowhere/Land").setRotationStart(ts(java.time.Instant.now())).build(), auth("lead"))
+        }
+        val s = newSchedule()
+        assertEquals(ShiftUnit.SHIFT_UNIT_WEEKS, s.shiftUnit)
+        assertTrue(oncall.listSchedules(ListSchedulesRequest.newBuilder().setTeamId("checkout").build(), auth("viewer")).itemsList.any { it.id == s.id })
+        val now = oncall.getOnCall(GetOnCallRequest.newBuilder().addTeamIds("checkout").build(), auth("viewer")).itemsList.single { it.scheduleId == s.id }
+        assertEquals(userOf("lead").id, now.userId)
+        assertTrue(now.hasUntil())
+        val updated = oncall.updateSchedule(s.toBuilder().let { SaveScheduleRequest.newBuilder().setId(s.id).setName("Renamed").setTimeZone(s.timeZone)
+            .setRotationStart(s.rotationStart).setShiftLength(s.shiftLength).setShiftUnit(s.shiftUnit).addAllParticipants(s.participantsList).setVersion(s.version).build() }, auth("lead"))
+        assertEquals("Renamed", updated.name)
+        assertStatus(Status.Code.ABORTED, "conflict") {
+            oncall.updateSchedule(SaveScheduleRequest.newBuilder().setId(s.id).setName("stale").setRotationStart(s.rotationStart).setVersion(s.version).build(), auth("lead"))
+        }
+        oncall.deleteSchedule(id(s.id), auth("lead"))
+        assertStatus(Status.Code.NOT_FOUND, "not_found") { oncall.getSchedule(id(s.id), auth("viewer")) }
+    }
+
+    @Test
+    fun `members add themselves as override, owners add anyone from the team`() = suspendTest {
+        val s = newSchedule()
+        val start = java.time.Instant.now()
+        fun override(user: String, hours: Long = 48) = CreateOverrideRequest.newBuilder().setScheduleId(s.id).setUserId(userOf(user).id)
+            .setStartsAt(ts(start)).setEndsAt(ts(start.plus(Duration.ofHours(hours)))).setReason("Out sick").build()
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { oncall.createOverride(override("lead"), auth("member")) }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { oncall.createOverride(override("viewer"), auth("lead")) }
+        val mine = oncall.createOverride(override("member"), auth("member"))
+        val onCall = oncall.getOnCall(GetOnCallRequest.newBuilder().addTeamIds("checkout").build(), auth("viewer")).itemsList.single { it.scheduleId == s.id }
+        assertEquals(userOf("member").id, onCall.userId)
+        assertEquals(mine.id, onCall.overrideId)
+        val window = WindowRequest.newBuilder().setScheduleId(s.id).setFrom(ts(start)).setTo(ts(start.plus(Duration.ofDays(14)))).build()
+        val shifts = oncall.listShifts(window, auth("viewer")).itemsList
+        assertEquals(mine.id, shifts.first().overrideId)
+        assertTrue(shifts.any { !it.hasOverrideId() })
+        assertEquals(listOf(mine.id), oncall.listOverrides(window, auth("viewer")).itemsList.map { it.id })
+        val byLead = oncall.createOverride(override("member", 1), auth("lead"))
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { oncall.deleteOverride(id(byLead.id), auth("viewer")) }
+        oncall.deleteOverride(id(byLead.id), auth("member"))
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") {
+            oncall.listShifts(window.toBuilder().setTo(ts(start.plus(Duration.ofDays(100)))).build(), auth("viewer"))
+        }
+        oncall.deleteSchedule(id(s.id), auth("lead"))
+    }
+
+    @Test
+    fun `team owners manage the members of their team`() = suspendTest {
+        val viewer = userOf("viewer").id
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") {
+            directory.setTeamMember(SetTeamMemberRequest.newBuilder().setTeamId("checkout").setUserId(viewer).setRole(TeamRole.TEAM_ROLE_MEMBER).build(), auth("member"))
+        }
+        directory.setTeamMember(SetTeamMemberRequest.newBuilder().setTeamId("checkout").setUserId(viewer).setRole(TeamRole.TEAM_ROLE_MEMBER).build(), auth("lead"))
+        val members = directory.listTeamMembers(id("checkout"), auth("viewer")).itemsList
+        assertEquals(TeamRole.TEAM_ROLE_MEMBER, members.single { it.userId == viewer }.role)
+        assertFalse(members.single { it.userId == viewer }.managed)
+        directory.setTeamMember(SetTeamMemberRequest.newBuilder().setTeamId("checkout").setUserId(viewer).build(), auth("lead"))
+        assertTrue(directory.listTeamMembers(id("checkout"), auth("viewer")).itemsList.none { it.userId == viewer })
+    }
+
+    @Test
+    fun `administrators link identity provider groups to a team and the links lock the membership`() = suspendTest {
+        val name = "Linked ${unique()}"
+        val t = directory.createTeam(SaveTeamRequest.newBuilder().setName(name).setReplaceGroups(true).addMemberGroups("grp-${unique()}").build(), auth("admin"))
+        assertEquals(1, t.memberGroupsCount)
+        assertStatus(Status.Code.ABORTED, "conflict") {
+            directory.setTeamMember(SetTeamMemberRequest.newBuilder().setTeamId(t.id).setUserId(userOf("viewer").id).setRole(TeamRole.TEAM_ROLE_MEMBER).build(), auth("admin"))
+        }
+        val unlinked = directory.updateTeam(SaveTeamRequest.newBuilder().setId(t.id).setName(name).setReplaceGroups(true).build(), auth("admin"))
+        assertEquals(0, unlinked.memberGroupsCount)
+        val kept = directory.updateTeam(SaveTeamRequest.newBuilder().setId(t.id).setName(name).build(), auth("admin"))
+        assertEquals(0, kept.memberGroupsCount)
+        directory.deleteTeam(id(t.id), auth("admin"))
+    }
 
     @Test
     fun `only admins change the directory`() = suspendTest {

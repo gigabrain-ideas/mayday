@@ -62,12 +62,16 @@ spec:
             - { name: MAYDAY_OIDC_CLIENT_ID, value: {{ .Values.oidc.clientId | quote }} }
             - { name: MAYDAY_OIDC_SCOPES, value: {{ .Values.oidc.scopes | quote }} }
             - { name: MAYDAY_OIDC_AUDIENCES, value: {{ .Values.oidc.audiences | quote }} }
+            - { name: MAYDAY_OIDC_GROUPS_CLAIM, value: {{ .Values.oidc.groupsClaim | default "groups" | quote }} }
             - name: MAYDAY_OIDC_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: {{ include "mayday.secretName" . }}, key: oidcClientSecret, optional: true } }
             {{- end }}
             - name: ANTHROPIC_API_KEY
               valueFrom: { secretKeyRef: { name: {{ include "mayday.secretName" . }}, key: anthropicApiKey, optional: true } }
             - { name: MAYDAY_ADMIN_EMAILS, value: {{ .Values.adminEmails | quote }} }
+            - { name: MAYDAY_GROUPS_AUTO_CREATE, value: {{ .Values.groups.autoCreate | default false | quote }} }
+            - { name: MAYDAY_GROUPS_FILTER, value: {{ .Values.groups.filter | default "" | quote }} }
+            - { name: MAYDAY_GROUPS_OWNER_SUFFIX, value: {{ .Values.groups.ownerSuffix | default "" | quote }} }
             - { name: MAYDAY_DEV_LOGIN, value: {{ .Values.devLogin | quote }} }
             - { name: MAYDAY_DEMO, value: {{ .Values.demo | quote }} }
             {{- $l := .Values.llm }}

@@ -30,20 +30,22 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 | `/incidents` | Open or all, filters by severity and team, search, keyset "load more", "Declare incident" |
 | `/incidents/:key` | Status, severity and teams; tabs Timeline, Resolution, Postmortem, Runbook, Agent runs; agent buttons; details with editable times; linked alerts |
 | `/alerts`, `/alerts/:id` | Alert list and detail with acknowledge, resolve, updates, link to incident, agent buttons |
+| `/oncall?team=<slug>` | Who is on call now for each schedule; for one team: schedules with a 14-day plan (overrides in yellow, nobody on call in red), overrides (add, remove), members (team owners add, remove and promote; locked when identity provider groups manage the team). Team members can add only themselves as override. |
 | `/reports` | Period presets and custom range, multi-select teams and severities, stat tiles, chart, team table, longest incidents |
-| `/settings/*` | Policies (scoped, enforcement, request change), change requests, agents, LLM provider, MCP (server info and tool gateway), teams and projects, users, API tokens |
+| `/settings/*` | Policies (scoped, enforcement, request change), change requests, agents, LLM provider, MCP (server info and tool gateway), teams and projects (administrators link identity provider groups), users, API tokens (administrators can add the SCIM scope) |
 
 ## Behavior
 
 - Live updates: one `EventService.Subscribe` stream per browser tab. It reconnects when the stream ends. Pages reload only the data an event concerns. `ping` events keep the connection open.
 - Voice: a microphone button on each long text field uses the Web Speech API. Stylus input (for example Apple Pencil Scribble) works in all text fields.
-- Keyboard: `g i`, `g a`, `g r`, `g s` go to incidents, alerts, reports, settings. `Ctrl/⌘ + Enter` posts a timeline update.
+- Keyboard: `g i`, `g a`, `g o`, `g r`, `g s` go to incidents, alerts, on-call, reports, settings. `Ctrl/⌘ + Enter` posts a timeline update.
 - Viewers see no write controls.
 
 ## Positive use cases
 
 - During an incident, the commander keeps the incident page open. Agent findings and teammates' notes appear without reload.
 - A team admin opens Settings → Policies, sees a lock on a setting and sends a change request.
+- A member is sick. A colleague opens On-call, selects the team and adds themselves as override until Friday. The "now" card shows the colleague and an Override badge on all open browsers.
 
 ## Negative use cases
 

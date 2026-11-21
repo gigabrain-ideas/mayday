@@ -36,9 +36,15 @@ data class OidcSettings(
     val scopes: String,
     val redirectUri: String,
     val audiences: Set<String>,
+    /** Claim with the group list. A dotted path reads a nested claim, for example "realm_access.roles". Blank turns group sync off. */
+    val groupsClaim: String = "groups",
 )
 
-data class OidcIdentity(val subject: String, val email: String, val name: String)
+/**
+ * [groups] is null when group sync is off or the token moved the claim to a distributed source (group overage): then the groups are unknown.
+ * A missing claim means no groups, because Entra ID and Keycloak leave the claim out for a user without groups.
+ */
+data class OidcIdentity(val subject: String, val email: String, val name: String, val groups: Set<String>? = null)
 
 /** OpenID Connect relying party: authorization code flow with PKCE, ID token and access token validation. */
 class OidcClient(private val s: OidcSettings) {
@@ -103,7 +109,7 @@ class OidcClient(private val s: OidcSettings) {
         val email = (c["email"] ?: c["preferred_username"] ?: c["upn"])?.jsonPrimitive?.content
             ?: throw Unauthenticated("Token has no email claim")
         val name = c["name"]?.jsonPrimitive?.content ?: email
-        return OidcIdentity("${s.issuer}|$sub", email, name)
+        return OidcIdentity("${s.issuer}|$sub", email, name, groups(c, s.groupsClaim))
     }
 
     private fun verify(jwt: String, audiences: Set<String>): JsonObject {
@@ -162,6 +168,24 @@ class OidcClient(private val s: OidcSettings) {
                 }
             }.getOrNull()
         }.toMap()
+    }
+
+    companion object {
+        /** OpenID Connect Core 5.6.2: a claim listed in _claim_names is not in the token. Then the group list is unknown, not empty. */
+        fun groups(c: JsonObject, path: String): Set<String>? {
+            val p = path.trim()
+            if (p.isEmpty()) return null
+            val first = p.substringBefore('.')
+            if ((c["_claim_names"] as? JsonObject)?.containsKey(first) == true) return null
+            var node: kotlinx.serialization.json.JsonElement? = c
+            for (part in p.split('.')) node = (node as? JsonObject)?.get(part)
+            return when (val v = node) {
+                is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.content?.trim()?.takeIf { s -> s.isNotEmpty() } }.toSet()
+                is JsonPrimitive -> if (v.isString) v.content.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }.toSet() else null
+                null -> emptySet()
+                else -> null
+            }
+        }
     }
 
     private fun big(o: JsonObject, k: String) = BigInteger(1, Base64.getUrlDecoder().decode(o[k]!!.jsonPrimitive.content))

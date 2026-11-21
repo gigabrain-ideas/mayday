@@ -142,16 +142,66 @@ class DirectoryGrpc(private val auth: Authenticator, private val app: App) : Dir
     override suspend fun createTeam(request: SaveTeamRequest): Team {
         admin()
         val project = if (request.hasProjectId()) request.projectId.orNull() else null
-        return directory.createTeam(request.name, if (request.hasSlug()) request.slug else null, project, request.description).into(Team.newBuilder()).build()
+        val created = directory.createTeam(request.name, if (request.hasSlug()) request.slug else null, project, request.description)
+        val team = if (request.replaceGroups) linkGroups(created.id, request) else created
+        return team.into(Team.newBuilder()).build()
     }
 
     override suspend fun updateTeam(request: SaveTeamRequest): Team {
         admin()
         val project = if (request.hasProjectId()) request.projectId else null
-        return directory.updateTeam(request.id, request.name, project, request.description).into(Team.newBuilder()).build()
+        val updated = directory.updateTeam(request.id, request.name, project, request.description)
+        val team = if (request.replaceGroups) linkGroups(updated.id, request) else updated
+        return team.into(Team.newBuilder()).build()
     }
 
+    private suspend fun linkGroups(id: String, request: SaveTeamRequest) =
+        app.provisioning.linkTeam(auth.caller(), id, request.memberGroupsList.toSet(), request.ownerGroupsList.toSet())
+
     override suspend fun deleteTeam(request: IdRequest): Empty = EMPTY.also { admin(); directory.deleteTeam(request.id) }
+
+    override suspend fun listTeamMembers(request: IdRequest): TeamMembers =
+        app.identity.teamMembers(auth.caller(), request.id).itemsInto(TeamMembers.newBuilder()).build()
+
+    override suspend fun setTeamMember(request: SetTeamMemberRequest): Empty = EMPTY.also {
+        app.identity.setTeamMember(auth.caller(), request.teamId, request.userId, request.role.toDomain<DTeamRole>())
+    }
+}
+
+@Service
+class OnCallGrpc(private val auth: Authenticator, private val app: App) : OnCallServiceGrpcKt.OnCallServiceCoroutineImplBase() {
+    private val onCall get() = app.onCall
+
+    override suspend fun listSchedules(request: ListSchedulesRequest): Schedules =
+        onCall.schedules(auth.caller(), if (request.hasTeamId()) request.teamId.orNull() else null).itemsInto(Schedules.newBuilder()).build()
+
+    override suspend fun getSchedule(request: IdRequest): Schedule = onCall.schedule(auth.caller(), request.id).into(Schedule.newBuilder()).build()
+
+    override suspend fun createSchedule(request: SaveScheduleRequest): Schedule =
+        onCall.create(auth.caller(), request.decode<mayday.oncall.ScheduleInput>()).into(Schedule.newBuilder()).build()
+
+    override suspend fun updateSchedule(request: SaveScheduleRequest): Schedule = onCall.update(
+        auth.caller(), request.id, request.decode<mayday.oncall.ScheduleInput>(), if (request.hasVersion()) request.version else null,
+    ).into(Schedule.newBuilder()).build()
+
+    override suspend fun deleteSchedule(request: IdRequest): Empty = EMPTY.also { onCall.delete(auth.caller(), request.id) }
+
+    override suspend fun listOverrides(request: WindowRequest): ScheduleOverrides =
+        onCall.overrides(auth.caller(), request.scheduleId, from(request), to(request)).itemsInto(ScheduleOverrides.newBuilder()).build()
+
+    override suspend fun createOverride(request: CreateOverrideRequest): ScheduleOverride =
+        onCall.createOverride(auth.caller(), request.decode<mayday.oncall.OverrideInput>()).into(ScheduleOverride.newBuilder()).build()
+
+    override suspend fun deleteOverride(request: IdRequest): Empty = EMPTY.also { onCall.deleteOverride(auth.caller(), request.id) }
+
+    override suspend fun listShifts(request: WindowRequest): Shifts =
+        onCall.shifts(auth.caller(), request.scheduleId, from(request), to(request)).itemsInto(Shifts.newBuilder()).build()
+
+    override suspend fun getOnCall(request: GetOnCallRequest): OnCalls =
+        onCall.onCall(auth.caller(), request.teamIdsList, request.at.instant(request.hasAt())).itemsInto(OnCalls.newBuilder()).build()
+
+    private fun from(r: WindowRequest) = r.from.instant(r.hasFrom()) ?: throw Invalid("'from' is required")
+    private fun to(r: WindowRequest) = r.to.instant(r.hasTo()) ?: throw Invalid("'to' is required")
 }
 
 @Service
