@@ -209,6 +209,8 @@ class TracingServerConfig {
         "mayday.data-dir=none",
         "mayday.secret-key=tracing-test-secret",
         "spring.grpc.server.port=0",
+        "server.address=127.0.0.1",
+        "spring.grpc.server.address=127.0.0.1",
         "spring.grpc.server.inprocess.name=tracing-test",
         "management.opentelemetry.tracing.export.schedule-delay=10ms",
     ],

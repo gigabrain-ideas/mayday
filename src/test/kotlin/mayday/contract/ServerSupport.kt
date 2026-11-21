@@ -39,7 +39,9 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertFailsWith
 
 /** Captures the port of the network gRPC server (the in-process server reports no port). */
@@ -76,6 +78,8 @@ class TestServerConfig {
         "mayday.secret-key=contract-test-secret",
         "mayday.admin-emails=admin@example.com",
         "spring.grpc.server.port=0",
+        "server.address=127.0.0.1",
+        "spring.grpc.server.address=127.0.0.1",
     ],
 )
 @Import(TestServerConfig::class)
@@ -87,7 +91,7 @@ abstract class ServerContract {
     @Autowired protected lateinit var dispatcher: RecordingDispatcher
     @Autowired private lateinit var grpcPort: GrpcPort
 
-    protected val http: HttpClient = HttpClient.newHttpClient()
+    protected val http: HttpClient = HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(5)).build()
     protected val base get() = "http://127.0.0.1:$httpPort"
     protected lateinit var team: Team
     protected lateinit var other: Team
@@ -95,6 +99,16 @@ abstract class ServerContract {
     private val tokens = ConcurrentHashMap<String, String>()
 
     protected val channel: ManagedChannel by lazy { ManagedChannelBuilder.forAddress("127.0.0.1", grpcPort.port).usePlaintext().build() }
+
+    /** The clients connect to 127.0.0.1. If another server could bind the same loopback port, it would receive their calls. */
+    @Test
+    fun `no other loopback listener can take the ports of the test servers`() {
+        for (port in listOf(httpPort, grpcPort.port)) {
+            val shadow = runCatching { com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", port), 0) }.getOrNull()
+            shadow?.stop(0)
+            assertNull(shadow, "another server could bind 127.0.0.1:$port next to the test server")
+        }
+    }
 
     @BeforeEach
     fun seed() = runBlocking {
@@ -138,7 +152,7 @@ abstract class ServerContract {
     }
 
     protected fun send(method: String, path: String, body: String? = null, headers: Map<String, String> = emptyMap(), contentType: String = "application/json"): HttpResponse<String> {
-        val b = HttpRequest.newBuilder(URI(base + path)).method(method, body?.let { HttpRequest.BodyPublishers.ofString(it) } ?: HttpRequest.BodyPublishers.noBody())
+        val b = HttpRequest.newBuilder(URI(base + path)).timeout(java.time.Duration.ofSeconds(30)).method(method, body?.let { HttpRequest.BodyPublishers.ofString(it) } ?: HttpRequest.BodyPublishers.noBody())
         if (body != null) b.header("Content-Type", contentType)
         headers.forEach { (k, v) -> b.header(k, v) }
         return http.send(b.build(), HttpResponse.BodyHandlers.ofString())
