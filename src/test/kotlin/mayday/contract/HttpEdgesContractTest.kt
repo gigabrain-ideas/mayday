@@ -14,6 +14,8 @@ import mayday.agents.Delivery
 import mayday.alerting.AlertFilter
 import mayday.alerting.AlertStatus
 import mayday.api.v1.AuthServiceGrpcKt
+import mayday.api.v1.SetAgentAdminRequest
+import mayday.api.v1.UserServiceGrpcKt
 import mayday.identity.TokenScope
 import mayday.incidents.NewIncident
 import mayday.policy.Enforcement
@@ -122,6 +124,35 @@ class HttpEdgesContractTest : ServerContract() {
         val swapped = "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=$user&actor_token=$user"
         assertError(send("POST", "/oauth/token", swapped, contentType = "application/x-www-form-urlencoded"), 403, "forbidden")
         assertError(send("POST", "/oauth/token", "{}"), 415, "invalid")
+    }
+
+    @Test
+    fun `token exchange keeps the admin scope only with the organization and the user setting`() = suspendTest {
+        val creds = app.agents.create(principal("admin"), AgentInput("Admin exchanger ${unique()}", delivery = Delivery.PULL, actions = setOf(AgentAction.ANALYZE)))
+        val adminToken = token("admin")
+        fun exchange(): String {
+            val form = "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=$adminToken&actor_token=${creds.token!!.secret}"
+            val r = send("POST", "/oauth/token", form, contentType = "application/x-www-form-urlencoded")
+            assertEquals(200, r.statusCode(), r.body())
+            return json(r).jsonObject["access_token"]!!.jsonPrimitive.content
+        }
+        val authStub = AuthServiceGrpcKt.AuthServiceCoroutineStub(channel)
+        val userStub = UserServiceGrpcKt.UserServiceCoroutineStub(channel)
+        val optIn = SetAgentAdminRequest.newBuilder().setAllow(true).build()
+        try {
+            assertFalse("ADMIN" in authStub.whoAmI(Empty.getDefaultInstance(), bearer(exchange())).scopes)
+            assertStatus(io.grpc.Status.Code.PERMISSION_DENIED, "forbidden") { userStub.setAgentAdmin(optIn, bearer(adminToken)) }
+
+            app.policy.set(principal("admin"), Scope.ORG, "org", Keys.AGENT_EXCHANGE_ADMIN, "true", Enforcement.NONE)
+            assertTrue(authStub.getMe(Empty.getDefaultInstance(), bearer(adminToken)).agentAdminOrgAllowed)
+            val delegated = exchange()
+            assertStatus(io.grpc.Status.Code.PERMISSION_DENIED, "forbidden") { userStub.setAgentAdmin(optIn, bearer(delegated)) }
+            assertTrue(userStub.setAgentAdmin(optIn, bearer(adminToken)).allowAgentAdmin)
+            assertTrue("ADMIN" in authStub.whoAmI(Empty.getDefaultInstance(), bearer(exchange())).scopes)
+        } finally {
+            userStub.setAgentAdmin(SetAgentAdminRequest.newBuilder().setAllow(false).build(), bearer(adminToken))
+            app.policy.set(principal("admin"), Scope.ORG, "org", Keys.AGENT_EXCHANGE_ADMIN, "false", Enforcement.NONE)
+        }
     }
 
     // ---- MCP ----

@@ -187,6 +187,7 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
         override suspend fun byEmail(email: String) = usersByEmail[email.lowercase()]?.let { usersC.map[it] }
         override suspend fun byExternalId(externalId: String) = usersByExternal[externalId]?.let { usersC.map[it] }
         override suspend fun count() = usersC.map.size.toLong()
+        override suspend fun withAgentAdmin() = usersC.map.values.filter { it.allowAgentAdmin }
         override suspend fun list(query: String?, cursor: String?, limit: Int): Page<User> {
             val q = query?.lowercase()?.trim().orEmpty()
             val seq = usersC.map.values.asSequence().sortedBy { it.email }

@@ -82,3 +82,108 @@ class AlertIngestScopeTest {
         assertFailsWith<Forbidden> { f.app.alerts.ingest(p, AlertSignal("Fake SEV1", Severity.SEV1, "sre")) }
     }
 }
+
+/** Token exchange keeps the admin scope only when the organization allows it and the administrator turned it on for themselves. */
+class AgentAdminExchangeTest {
+    private val f = Fixture()
+    private val identity = f.app.identity
+
+    private suspend fun agent() = identity.authenticate(
+        f.app.agents.create(f.admin, AgentInput("Bot", delivery = mayday.agents.Delivery.PULL, actions = setOf(AgentAction.ANALYZE))).token!!.secret)
+
+    private suspend fun exchangedScopes(user: mayday.identity.User) =
+        identity.authenticate(identity.exchange(identity.principalForUser(user), agent(), java.time.Duration.ofMinutes(5))).scopes
+
+    private suspend fun orgAllows(allow: Boolean) = f.app.policy.set(f.admin, Scope.ORG, "org", Keys.AGENT_EXCHANGE_ADMIN, allow.toString(), Enforcement.NONE)
+
+    private suspend fun fresh(u: mayday.identity.User) = identity.user(u.id)
+
+    @Test
+    fun `by default the exchanged token of an administrator has no admin scope`() = suspendTest {
+        val scopes = exchangedScopes(f.adminUser)
+        assertFalse(TokenScope.ADMIN in scopes)
+        assertTrue(TokenScope.WRITE in scopes)
+    }
+
+    @Test
+    fun `an administrator cannot opt in while the organization does not allow it`() = suspendTest {
+        assertFailsWith<Forbidden> { identity.setAgentAdmin(f.admin, true) }
+        assertFalse(fresh(f.adminUser).allowAgentAdmin)
+    }
+
+    @Test
+    fun `the organization setting alone does not pass the admin scope`() = suspendTest {
+        orgAllows(true)
+        assertFalse(TokenScope.ADMIN in exchangedScopes(f.adminUser))
+    }
+
+    @Test
+    fun `with both settings on the exchanged token keeps the admin scope`() = suspendTest {
+        orgAllows(true)
+        identity.setAgentAdmin(f.admin, true)
+        assertTrue(TokenScope.ADMIN in exchangedScopes(fresh(f.adminUser)))
+    }
+
+    @Test
+    fun `turning the organization setting off wins over the user setting at once`() = suspendTest {
+        orgAllows(true)
+        identity.setAgentAdmin(f.admin, true)
+        orgAllows(false)
+        assertFalse(TokenScope.ADMIN in exchangedScopes(fresh(f.adminUser)))
+    }
+
+    @Test
+    fun `members cannot opt in and anyone can opt out`() = suspendTest {
+        orgAllows(true)
+        assertFailsWith<Forbidden> { identity.setAgentAdmin(f.member, true) }
+        assertFalse(identity.setAgentAdmin(f.member, false).allowAgentAdmin)
+    }
+
+    @Test
+    fun `an agent cannot change the setting on behalf of the user`() = suspendTest {
+        orgAllows(true)
+        val obo = identity.authenticate(identity.exchange(f.admin, agent(), java.time.Duration.ofMinutes(5)))
+        assertTrue(obo.isDelegated)
+        assertFailsWith<Forbidden> { identity.setAgentAdmin(obo, true) }
+        assertFalse(fresh(f.adminUser).allowAgentAdmin)
+    }
+}
+
+/** When the organization stops allowing admin rights through token exchange, every opt-in ends. */
+class AgentAdminOptInResetTest {
+    private val f = Fixture()
+    private val identity = f.app.identity
+
+    private suspend fun org(value: String?) =
+        if (value == null) f.app.policy.clear(f.admin, Scope.ORG, "org", Keys.AGENT_EXCHANGE_ADMIN)
+        else { f.app.policy.set(f.admin, Scope.ORG, "org", Keys.AGENT_EXCHANGE_ADMIN, value, Enforcement.NONE); Unit }
+
+    private suspend fun optedIn() = identity.user(f.adminUser.id).allowAgentAdmin
+
+    @Test
+    fun `turning the organization setting off clears the opt-in and it stays off when allowed again`() = suspendTest {
+        org("true")
+        identity.setAgentAdmin(f.admin, true)
+        org("false")
+        assertFalse(optedIn())
+        org("true")
+        assertFalse(optedIn(), "the administrator must opt in again")
+    }
+
+    @Test
+    fun `removing the organization value also clears the opt-in`() = suspendTest {
+        org("true")
+        identity.setAgentAdmin(f.admin, true)
+        org(null)
+        assertFalse(optedIn())
+    }
+
+    @Test
+    fun `other organization changes and a repeated allow keep the opt-in`() = suspendTest {
+        org("true")
+        identity.setAgentAdmin(f.admin, true)
+        f.app.policy.set(f.admin, Scope.ORG, "org", Keys.MCP_WRITE, "true", Enforcement.NONE)
+        org("true")
+        assertTrue(optedIn())
+    }
+}

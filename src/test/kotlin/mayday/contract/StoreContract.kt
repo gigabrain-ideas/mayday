@@ -168,6 +168,16 @@ abstract class StoreContract {
     }
 
     @Test
+    fun `users with the agent admin opt-in are found`() = suspendTest {
+        val on = User(Ids.new(), "on@example.com", "On", createdAt = now, allowAgentAdmin = true)
+        p.users.save(on)
+        p.users.save(User(Ids.new(), "off@example.com", "Off", createdAt = now))
+        assertEquals(listOf(on), p.users.withAgentAdmin())
+        p.users.save(on.copy(allowAgentAdmin = false))
+        assertTrue(p.users.withAgentAdmin().isEmpty())
+    }
+
+    @Test
     fun `users list pages by email`() = suspendTest {
         listOf("c", "a", "d", "b").forEach { p.users.save(User(Ids.new(), "$it@example.com", it.uppercase(), createdAt = now)) }
         val pg = p.users.list(null, null, 3)

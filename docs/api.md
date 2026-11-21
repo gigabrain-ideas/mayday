@@ -14,7 +14,7 @@ gRPC reflection and the standard gRPC health service (`grpc.health.v1.Health`) a
 | Proto file | Service | Methods |
 |---|---|---|
 | `identity.proto` | `AuthService` | `GetAuthConfig`, `GetMe`, `WhoAmI` |
-| `identity.proto` | `UserService` | `ListUsers`, `CreateUser`, `UpdateUser`, `ListTokens`, `IssueToken` (the secret is in this response only), `RevokeToken` |
+| `identity.proto` | `UserService` | `ListUsers`, `CreateUser`, `UpdateUser`, `ListTokens`, `IssueToken` (the secret is in this response only), `RevokeToken`, `SetAgentAdmin` (the caller's own `allow_agent_admin`; agents get `PERMISSION_DENIED`) |
 | `directory.proto` | `DirectoryService` | `ListProjects`, `CreateProject`, `UpdateProject`, `DeleteProject`, `ListTeams`, `CreateTeam`, `UpdateTeam`, `DeleteTeam` |
 | `incidents.proto` | `IncidentService` | `ListIncidents` (keyset: `cursor`, `next_cursor`), `DeclareIncident`, `GetIncident` (`ref` = key, number or id), `UpdateIncident` (with `version`), `ListTimeline`, `AddTimelineEntry`, `SavePostmortem`, `SaveResolution`, `SaveRunbook` |
 | `alerting.proto` | `AlertService` | `ListAlerts`, `IngestAlert`, `GetAlert`, `AcknowledgeAlert`, `ResolveAlert`, `AddAlertUpdate`, `LinkAlert` |
@@ -40,7 +40,7 @@ gRPC and gRPC-Web read the credentials from the metadata (HTTP headers):
 | Session | Cookie `mayday_session` | Browser (gRPC-Web). Native gRPC accepts it too. |
 | API token | `authorization: Bearer mdy_...` | Scripts, alert sources, MCP clients |
 | Agent token | `authorization: Bearer mdy_...` (owner = agent) | External agents |
-| Delegated token | `authorization: Bearer <JWT typ=obo>` | Agent on behalf of a person |
+| Delegated token | `authorization: Bearer <JWT typ=obo>` | Agent on behalf of a person. From token exchange: the user's scopes without ADMIN, unless `agents.exchange_admin` and the user's `allowAgentAdmin` are on. |
 | SSO access token | `authorization: Bearer <IdP JWT>` | Agent with the person's own SSO token |
 
 A call without valid credentials gets `UNAUTHENTICATED`. `AuthService.GetAuthConfig` needs no credentials.

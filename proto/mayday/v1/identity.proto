@@ -46,6 +46,8 @@ message User {
   optional string external_id = 7;
   bool disabled = 8;
   google.protobuf.Timestamp created_at = 9;
+  // The user lets agents keep the admin scope in token exchange. Works only when the organization allows it.
+  bool allow_agent_admin = 10;
 }
 
 message UserPage {
@@ -87,6 +89,8 @@ message Me {
   bool agent_ready = 4;
   // Link to a trace in the tracing UI. "{traceId}" is the placeholder. Empty when not configured.
   string trace_url_template = 5;
+  // The organization setting agents.exchange_admin.
+  bool agent_admin_org_allowed = 6;
 }
 
 message WhoAmIResponse {
@@ -121,6 +125,10 @@ message UpdateUserRequest {
   optional bool disabled = 8;
 }
 
+message SetAgentAdminRequest {
+  bool allow = 1;
+}
+
 message IssueTokenRequest {
   string name = 1;
   repeated TokenScope scopes = 2;
@@ -141,4 +149,6 @@ service UserService {
   rpc ListTokens(google.protobuf.Empty) returns (ApiTokens);
   rpc IssueToken(IssueTokenRequest) returns (IssuedToken);
   rpc RevokeToken(IdRequest) returns (google.protobuf.Empty);
+  // Changes allow_agent_admin of the caller. Agents cannot call it.
+  rpc SetAgentAdmin(SetAgentAdminRequest) returns (User);
 }

@@ -115,11 +115,12 @@ class App(val settings: AppSettings, val ports: Ports) {
     val mcp: McpServer
 
     init {
-        identity = IdentityService(ports.users, ports.tokens, ports.teams, agents, signer, ports.clock, settings.adminEmails)
+        identity = IdentityService(ports.users, ports.tokens, ports.teams, agents, signer, ports.clock, settings.adminEmails, policy)
         maydayTools = MaydayTools(incidents, alerts, directory, policy, { identity }, { agents })
         tools = CompositeCatalog(listOf(maydayTools, McpGateway(ports.mcpServers, box, { agents.gatewayAuth() }, ports.telemetry)))
         mcp = McpServer(maydayTools, VERSION, ports.telemetry)
         alerts.automation = agents
+        policy.listener = identity
         ports.events.subscribe { if (it.type == "setting.changed") policy.invalidate() }
     }
 

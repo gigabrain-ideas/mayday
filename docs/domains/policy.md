@@ -30,7 +30,12 @@ Policy holds the configurable rules: postmortem obligations, alert behavior, age
 | `agents.patch_requires_approval` | true | true |
 | `timeline.auto_populate` | true | none |
 | `mcp.write_enabled` | false | false |
+| `agents.exchange_admin` | false (organization only). Turning it off clears every user's opt-in, see [identity.md](identity.md). | false |
 | `incident.key_prefix` | INC (organization only) | none |
+
+## Ports
+
+- `OrgSettingListener`: called after an organization-level value is set, removed or approved through a change request, on the instance that made the change. Identity implements it.
 
 ## Permissions
 
@@ -51,6 +56,7 @@ Policy holds the configurable rules: postmortem obligations, alert behavior, age
 - A member tries to change a team setting: `forbidden`.
 - A value out of range or of the wrong type: `invalid`.
 - `incident.key_prefix` at team level: `invalid`.
+- `agents.exchange_admin` at project or team level: `invalid`.
 
 ## Rebuild checklist
 

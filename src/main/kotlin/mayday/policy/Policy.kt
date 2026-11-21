@@ -52,6 +52,7 @@ object Keys {
     const val AGENT_PATCH_APPROVAL = "agents.patch_requires_approval"
     const val TIMELINE_AUTO = "timeline.auto_populate"
     const val MCP_WRITE = "mcp.write_enabled"
+    const val AGENT_EXCHANGE_ADMIN = "agents.exchange_admin"
     const val INCIDENT_PREFIX = "incident.key_prefix"
 }
 
@@ -89,6 +90,9 @@ object SettingCatalog {
         SettingDef(Keys.MCP_WRITE, "MCP write access",
             "External agents can change incidents and alerts through the MCP server. Read access is always on.",
             SettingType.BOOL, "false", all3, Strictness.FALSE),
+        SettingDef(Keys.AGENT_EXCHANGE_ADMIN, "Admin rights through token exchange",
+            "Administrators can allow agents to keep their admin scope when the agent exchanges their token (RFC 8693). Each administrator must also turn it on for themselves.",
+            SettingType.BOOL, "false", setOf(Scope.ORG), Strictness.FALSE),
         SettingDef(Keys.INCIDENT_PREFIX, "Incident key prefix",
             "The prefix of incident identifiers, for example INC in INC-42.",
             SettingType.STRING, "INC", setOf(Scope.ORG), Strictness.NONE),
@@ -158,6 +162,11 @@ data class EffectiveSetting(
 class SettingLocked(message: String) : DomainException("locked", message)
 
 /** Read model that other bounded contexts use. */
+/** Port for contexts that react when an organization-level setting changes on this instance. */
+interface OrgSettingListener {
+    suspend fun orgSettingChanged(key: String)
+}
+
 interface PolicyReader {
     suspend fun effective(teamIds: List<String>): Map<String, String>
     suspend fun bool(key: String, teamIds: List<String>) = effective(teamIds)[key] == "true"
@@ -175,6 +184,7 @@ class PolicyService(
     private val clock: Clock,
 ) : PolicyReader {
     @Volatile private var cache: Map<String, SettingValue>? = null
+    @Volatile var listener: OrgSettingListener = object : OrgSettingListener { override suspend fun orgSettingChanged(key: String) = Unit }
 
     private suspend fun index(): Map<String, SettingValue> = cache ?: settings.all().associateBy { it.id }.also { cache = it }
 
@@ -241,6 +251,7 @@ class PolicyService(
         settings.save(sv)
         invalidate()
         events.publish(DomainEvent("setting.changed", sv.id, clock.now(), data = mapOf("key" to key)))
+        if (scope == Scope.ORG) listener.orgSettingChanged(key)
         return sv
     }
 
@@ -253,6 +264,7 @@ class PolicyService(
         settings.delete(existing.id)
         invalidate()
         events.publish(DomainEvent("setting.changed", existing.id, clock.now(), data = mapOf("key" to key)))
+        if (scope == Scope.ORG) listener.orgSettingChanged(key)
     }
 
     suspend fun requestChange(by: Principal, scope: Scope, scopeId: String, key: String, proposed: String, reason: String): ChangeRequest {
@@ -275,6 +287,7 @@ class PolicyService(
         if (approve) {
             settings.save(SettingValue(cr.scope, cr.scopeId, cr.key, cr.proposedValue, Enforcement.NONE, exception = true, updatedBy = by.actor, updatedAt = clock.now()))
             invalidate()
+            if (cr.scope == Scope.ORG) listener.orgSettingChanged(cr.key)
         }
         val decided = cr.copy(
             status = if (approve) ChangeRequestStatus.APPROVED else ChangeRequestStatus.REJECTED,

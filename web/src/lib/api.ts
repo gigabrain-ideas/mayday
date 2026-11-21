@@ -41,9 +41,9 @@ export interface Project { id: string; slug: string; name: string; description: 
 export interface Team { id: string; slug: string; name: string; projectId?: string; description: string; createdAt: string }
 export interface User {
   id: string; email: string; name: string; orgRole: OrgRole; teams: Record<string, TeamRole>;
-  projectAdmin: string[]; externalId?: string; disabled: boolean; createdAt: string;
+  projectAdmin: string[]; externalId?: string; disabled: boolean; createdAt: string; allowAgentAdmin?: boolean;
 }
-export interface Me { user: User; actorKind: string; scopes: TokenScope[]; agentReady: boolean; traceUrlTemplate?: string }
+export interface Me { user: User; actorKind: string; scopes: TokenScope[]; agentReady: boolean; traceUrlTemplate?: string; agentAdminOrgAllowed?: boolean }
 export interface ActionItem { text: string; owner: string; done: boolean }
 export interface Postmortem {
   status: "DRAFT" | "IN_REVIEW" | "PUBLISHED"; summary: string; impact: string; rootCause: string; detection: string;

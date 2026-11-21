@@ -7,6 +7,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import mayday.directory.TeamRepository
+import mayday.policy.Keys
+import mayday.policy.OrgSettingListener
+import mayday.policy.PolicyReader
 import mayday.shared.Actor
 import mayday.shared.ActorKind
 import mayday.shared.Clock
@@ -42,6 +45,8 @@ data class User(
     val externalId: String? = null,
     val disabled: Boolean = false,
     val createdAt: Ts,
+    /** The user lets agents keep the admin scope in token exchange. Works only when the organization allows it. */
+    val allowAgentAdmin: Boolean = false,
 )
 
 @Serializable
@@ -67,6 +72,7 @@ interface UserRepository {
     suspend fun list(query: String?, cursor: String?, limit: Int): Page<User>
     suspend fun count(): Long
     suspend fun save(user: User)
+    suspend fun withAgentAdmin(): List<User>
 }
 
 interface TokenRepository {
@@ -155,7 +161,8 @@ class IdentityService(
     private val signer: TokenSigner,
     private val clock: Clock,
     private val bootstrapAdmins: Set<String>,
-) {
+    private val policy: PolicyReader,
+) : OrgSettingListener {
     suspend fun user(id: String) = users.get(id) ?: throw NotFound("User")
     suspend fun list(query: String?, cursor: String?, limit: Int) = users.list(query, cursor, limit.coerceIn(1, 500))
 
@@ -294,7 +301,30 @@ class IdentityService(
         if (subject.isAgent) throw Forbidden("The subject token must belong to a user")
         if (!actor.isAgent || actor.isDelegated) throw Forbidden("The actor token must belong to an agent")
         val agent = agents.find(actor.actor.id) ?: throw Forbidden("Unknown agent")
-        return delegate(user, agent, null, ttl, subject.scopes)
+        val scopes = if (agentAdminAllowed(user)) subject.scopes else subject.scopes - TokenScope.ADMIN
+        return delegate(user, agent, null, ttl, scopes)
+    }
+
+    suspend fun agentAdminOrgAllowed() = policy.bool(Keys.AGENT_EXCHANGE_ADMIN, emptyList())
+
+    /** When the organization stops allowing it, every opt-in ends. Administrators must opt in again after it is allowed again. */
+    override suspend fun orgSettingChanged(key: String) {
+        if (key != Keys.AGENT_EXCHANGE_ADMIN || agentAdminOrgAllowed()) return
+        users.withAgentAdmin().forEach { users.save(it.copy(allowAgentAdmin = false)) }
+    }
+
+    private suspend fun agentAdminAllowed(user: User) = user.allowAgentAdmin && agentAdminOrgAllowed()
+
+    /** Only the person, in their own session or token, changes this. Agents never do, also not on behalf of the person. */
+    suspend fun setAgentAdmin(by: Principal, allow: Boolean): User {
+        val self = by.user ?: throw Forbidden("Only users have this setting")
+        if (by.isAgent) throw Forbidden("Agents cannot change this setting")
+        val u = user(self.id)
+        if (allow) {
+            if (!Access.isAdmin(by)) throw Forbidden("Only administrators can let agents keep the admin scope")
+            if (!agentAdminOrgAllowed()) throw Forbidden("The organization does not allow admin rights through token exchange")
+        }
+        return u.copy(allowAgentAdmin = allow).also { users.save(it) }
     }
 
     private suspend fun authenticateDelegated(token: String): Principal? {

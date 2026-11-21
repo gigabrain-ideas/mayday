@@ -5,7 +5,7 @@ import { useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { ago, titleCase } from "@/lib/utils";
-import { Badge, Button, Card, CardHeader, Dialog, DialogContent, Empty, Field, Input, NativeSelect, Spinner, Table, Td, Th } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Dialog, DialogContent, Empty, Field, Input, NativeSelect, Spinner, Switch, Table, Td, Th } from "@/components/ui";
 
 export function DirectoryPage() {
   const { teams, projects, isAdmin, reloadDirectory } = useSession();
@@ -215,6 +215,35 @@ export function TokensPage() {
           {issued && <SecretOnce label="New token" value={issued.secret} />}
         </form>
       </Card>
+      {isAdmin && <AgentAdminCard />}
     </div>
+  );
+}
+
+function AgentAdminCard() {
+  const { me, reloadMe } = useSession();
+  const toast = useToast();
+  const orgAllowed = !!me.agentAdminOrgAllowed;
+  const on = !!me.user.allowAgentAdmin;
+  return (
+    <Card className="p-4 xl:col-span-2">
+      <div className="flex items-start gap-4">
+        <div className="flex-1 space-y-1">
+          <div className="eyebrow">Agents and your admin rights</div>
+          <p>When this is on and an agent exchanges your token, the agent keeps your admin scope. It can then change settings, users and roles as you.</p>
+          <p className="text-[12px] text-muted-foreground">
+            {orgAllowed
+              ? on ? "On. Turn it off when you do not need it." : "Off. Agents get read and write access only."
+              : "The organization does not allow it. An administrator can change this in Policies (Admin rights through token exchange). When the organization turns it off, everyone must opt in again."}
+          </p>
+        </div>
+        <Switch
+          aria-label="Let agents keep my admin scope"
+          checked={on}
+          disabled={!orgAllowed && !on}
+          onCheckedChange={(allow) => rpc.users.setAgentAdmin({ allow }).then(reloadMe).catch(toast.error)}
+        />
+      </div>
+    </Card>
   );
 }

@@ -175,6 +175,7 @@ class PostgresStore(val pool: Pool) {
         override suspend fun byEmail(email: String) = query("select doc from users where email = ?", email.lowercase()) { dec(ser, it) }.firstOrNull()
         override suspend fun byExternalId(externalId: String) = query("select doc from users where external_id = ?", externalId) { dec(ser, it) }.firstOrNull()
         override suspend fun count() = query("select count(*) from users") { it.getLong(1) }.first()
+        override suspend fun withAgentAdmin() = query("select doc from users where doc->>'allowAgentAdmin' = 'true'") { dec(ser, it) }
         override suspend fun list(query: String?, cursor: String?, limit: Int): Page<User> {
             val q = query?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { "%${it.replace("%", "")}%" }
             val rows = query(

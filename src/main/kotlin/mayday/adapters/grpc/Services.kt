@@ -47,7 +47,7 @@ private fun Int.orDefault(d: Int) = takeIf { it > 0 } ?: d
 private fun Timestamp.instant(present: Boolean): Instant? = if (present) ProtoJson.instant(this) else null
 private fun String.orNull() = takeIf { it.isNotBlank() }
 
-@Serializable private data class MeView(val user: mayday.identity.User, val actorKind: String, val scopes: Set<DTokenScope>, val agentReady: Boolean, val traceUrlTemplate: String)
+@Serializable private data class MeView(val user: mayday.identity.User, val actorKind: String, val scopes: Set<DTokenScope>, val agentReady: Boolean, val traceUrlTemplate: String, val agentAdminOrgAllowed: Boolean)
 @Serializable private data class SettingsViewData(
     val schema: List<mayday.policy.SettingDef>,
     val effective: List<mayday.policy.EffectiveSetting>,
@@ -62,7 +62,7 @@ class AuthGrpc(private val auth: Authenticator, private val app: App, private va
     override suspend fun getMe(request: Empty): Me {
         val p = auth.caller()
         val u = p.user ?: throw Forbidden("Agent identities have no profile; use WhoAmI")
-        return MeView(u, p.actor.kind.name, p.scopes, app.agents.internalReady(), props.traceUrlTemplate.trim()).into(Me.newBuilder()).build()
+        return MeView(u, p.actor.kind.name, p.scopes, app.agents.internalReady(), props.traceUrlTemplate.trim(), app.identity.agentAdminOrgAllowed()).into(Me.newBuilder()).build()
     }
 
     override suspend fun whoAmI(request: Empty): WhoAmIResponse {
@@ -107,6 +107,9 @@ class UserGrpc(private val auth: Authenticator, private val app: App) : UserServ
     }
 
     override suspend fun revokeToken(request: IdRequest): Empty = EMPTY.also { identity.revokeToken(auth.caller(), request.id) }
+
+    override suspend fun setAgentAdmin(request: SetAgentAdminRequest): User =
+        identity.setAgentAdmin(auth.caller(), request.allow).into(User.newBuilder()).build()
 }
 
 @Service
