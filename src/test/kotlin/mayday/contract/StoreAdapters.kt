@@ -7,7 +7,7 @@ import mayday.adapters.postgres.Pool
 import mayday.adapters.postgres.PostgresStore
 import mayday.shared.Ids
 import mayday.shared.InProcessEventBus
-import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.testcontainers.postgresql.PostgreSQLContainer
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -33,18 +33,30 @@ class JournaledMemoryStoreContractTest : StoreContract() {
     }
 }
 
-/** Runs only when MAYDAY_TEST_DATABASE_URL points to a disposable PostgreSQL database. */
+/** Uses MAYDAY_TEST_DATABASE_URL when set, else one disposable PostgreSQL container per test run. Each test gets its own schema. */
 class PostgresStoreContractTest : StoreContract() {
     override fun newPorts(): Ports {
-        val url = System.getenv("MAYDAY_TEST_DATABASE_URL")
-        assumeTrue(!url.isNullOrBlank(), "MAYDAY_TEST_DATABASE_URL is not set")
-        val jdbc = if (url!!.startsWith("jdbc:")) url else "jdbc:$url"
+        val db = TestDatabase.instance
         val schema = "t_" + Ids.new().take(12)
-        val admin = Pool.of(jdbc, System.getenv("MAYDAY_TEST_DATABASE_USER"), System.getenv("MAYDAY_TEST_DATABASE_PASSWORD"), 1)
-        admin.dataSource.connection.use { c -> c.createStatement().use { it.execute("create schema $schema") } }
-        admin.close()
-        val sep = if (jdbc.contains('?')) "&" else "?"
-        val pool = Pool.of("$jdbc${sep}currentSchema=$schema", System.getenv("MAYDAY_TEST_DATABASE_USER"), System.getenv("MAYDAY_TEST_DATABASE_PASSWORD"), 8)
-        return Ports.postgres(PostgresStore(pool), InProcessEventBus())
+        Pool.of(db.jdbc, db.user, db.password, 1).use { admin ->
+            admin.dataSource.connection.use { c -> c.createStatement().use { it.execute("create schema $schema") } }
+        }
+        val sep = if (db.jdbc.contains('?')) "&" else "?"
+        return Ports.postgres(PostgresStore(Pool.of("${db.jdbc}${sep}currentSchema=$schema", db.user, db.password, 8)), InProcessEventBus())
+    }
+}
+
+class TestDatabase private constructor(val jdbc: String, val user: String?, val password: String?) {
+    companion object {
+        val instance: TestDatabase by lazy {
+            val url = System.getenv("MAYDAY_TEST_DATABASE_URL")
+            if (!url.isNullOrBlank()) {
+                TestDatabase(if (url.startsWith("jdbc:")) url else "jdbc:$url",
+                    System.getenv("MAYDAY_TEST_DATABASE_USER"), System.getenv("MAYDAY_TEST_DATABASE_PASSWORD"))
+            } else {
+                val c = PostgreSQLContainer(System.getenv("MAYDAY_TEST_POSTGRES_IMAGE") ?: "postgres:18-alpine").apply { start() }
+                TestDatabase(c.jdbcUrl, c.username, c.password)
+            }
+        }
     }
 }

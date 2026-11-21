@@ -32,6 +32,7 @@ import mayday.shared.Ids
 import mayday.shared.Severity
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -51,6 +52,9 @@ abstract class StoreContract {
 
     @BeforeTest
     fun setUp() { p = newPorts() }
+
+    @AfterTest
+    fun tearDown() = p.close()
 
     private fun incident(number: Long, status: IncidentStatus = IncidentStatus.INVESTIGATING, sev: Severity = Severity.SEV2,
                          teams: List<String> = listOf("t1"), title: String = "Incident $number", at: Instant = now) =

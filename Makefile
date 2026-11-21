@@ -28,7 +28,7 @@ test:
 ifdef HAVE_JAVA
 	$(GRADLE) test
 else
-	$(GRADLE_DOCKER) test
+	docker run --rm -v "$(CURDIR)":/src -v mayday-gradle:/home/gradle/.gradle -v /var/run/docker.sock:/var/run/docker.sock -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal --add-host=host.docker.internal:host-gateway -w /src gradle:9-jdk25 gradle --no-daemon test
 endif
 
 run: build

@@ -58,6 +58,8 @@ Needs Java 21+ and Node.js 22+ (or Docker, which the Makefile uses when they are
 make demo
 ```
 
+`make test` also needs Docker: the PostgreSQL contract tests start a disposable database with Testcontainers.
+
 ```bash
 make test
 ```

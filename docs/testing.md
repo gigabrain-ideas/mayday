@@ -48,17 +48,14 @@ Test doubles (`TestSupport.kt`): `FakeLlm` (scripted tool calls and answers) and
 make test
 ```
 
-PostgreSQL contract (any disposable database; each test uses its own schema):
+`make test` needs a running Docker engine. `PostgresStoreContractTest` starts one disposable PostgreSQL container per test run with [Testcontainers](https://java.testcontainers.org/). Each test uses its own schema and closes its pool. The container stops when the run ends.
 
-```bash
-docker run -d --name mayday-pg -p 5432:5432 -e POSTGRES_PASSWORD=pw postgres:18-alpine
-```
+| Variable | Effect |
+|---|---|
+| `MAYDAY_TEST_DATABASE_URL`, `MAYDAY_TEST_DATABASE_USER`, `MAYDAY_TEST_DATABASE_PASSWORD` | Use this disposable database. No container starts. |
+| `MAYDAY_TEST_POSTGRES_IMAGE` | Container image (default `postgres:18-alpine`, same as `compose.yaml`) |
 
-```bash
-MAYDAY_TEST_DATABASE_URL=postgresql://localhost:5432/postgres MAYDAY_TEST_DATABASE_USER=postgres MAYDAY_TEST_DATABASE_PASSWORD=pw ./gradlew test
-```
-
-Without `MAYDAY_TEST_DATABASE_URL`, the PostgreSQL contract is skipped.
+Without Docker and without `MAYDAY_TEST_DATABASE_URL`, `PostgresStoreContractTest` fails. The contract is not optional.
 
 ## A new adapter
 
