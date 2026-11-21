@@ -160,7 +160,7 @@ The receiver must:
 
 1. Check the signature with a constant-time compare, and refuse timestamps older than 5 minutes.
 2. Answer 2xx quickly. Mayday makes up to three attempts on network errors, 429 and 5xx.
-3. Use `delegatedToken` (when present) for MCP and gRPC calls. Otherwise use its own agent token.
+3. Use `delegatedToken` (when present) for MCP and gRPC calls. Otherwise use its own agent token. The delegated token has the scopes `read` and `write` and stops working when the run is finished.
 4. Report with the MCP tool `report_agent_run`, or with `AgentRunService.ReportProgress` and `AgentRunService.CompleteRun` `{id, success, output, error}`.
 
 ## Pull agents

@@ -184,6 +184,8 @@ class AgentService(
     override suspend fun find(agentId: String): AgentIdentity? =
         agents.get(agentId)?.let { AgentIdentity(it.id, it.name, it.role, it.enabled) }
 
+    override suspend fun runActive(runId: String): Boolean = runs.get(runId)?.status?.terminal == false
+
     suspend fun ensureInternalAgent() {
         if (agents.get(INTERNAL_AGENT_ID) != null) return
         val now = clock.now()
@@ -724,14 +726,14 @@ class AgentService(
     private suspend fun principalFor(agent: AgentConfig, run: AgentRun): Principal {
         val user = run.onBehalfOf?.let { runCatching { identity().user(it) }.getOrNull() }
         val actor = Actor(ActorKind.AGENT, agent.id, agent.name, onBehalfOf = user?.id)
-        val scopes = if (user != null) Principal.ALL else scopesFor(agent.role)
+        val scopes = if (user != null) Principal.DELEGATED else scopesFor(agent.role)
         return Principal(actor, user, agent.role, scopes, run.id)
     }
 
     private suspend fun delegatedToken(agent: AgentConfig, run: AgentRun): String? {
         val userId = run.onBehalfOf ?: return null
         val user = runCatching { identity().user(userId) }.getOrNull() ?: return null
-        return identity().delegate(user, AgentIdentity(agent.id, agent.name, agent.role, agent.enabled), run.id, delegationTtl, Principal.ALL)
+        return identity().delegate(user, AgentIdentity(agent.id, agent.name, agent.role, agent.enabled), run.id, delegationTtl, Principal.DELEGATED)
     }
 
     private suspend fun finish(runId: String, status: RunStatus, output: String, error: String): AgentRun {

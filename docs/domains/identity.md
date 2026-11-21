@@ -13,7 +13,7 @@ Identity knows who makes a request and what that identity can do. It supports si
 | `User` | Email (unique), name, `orgRole` (VIEWER, MEMBER, ADMIN), team roles (MEMBER, ADMIN), project admin set, external id from SSO, disabled flag. |
 | `ApiToken` | `mdy_` + random secret. Mayday stores only the SHA-256 hash. Owner is a user or an agent. Scopes: READ, WRITE, ADMIN, ALERTS_INGEST. Optional expiry. Only administrators get the ADMIN scope. |
 | `Principal` | `actor` (who acts), `user` (whose RBAC applies), `agentRole`, `scopes`, optional `runId`. Delegated = actor is an agent and user is set. |
-| Delegated token | HS256 JWT: `typ=obo`, `sub`=user id, `act.sub`=`agent:<id>`, `run`, `scope`, `exp`. |
+| Delegated token | HS256 JWT: `typ=obo`, `sub`=user id, `act.sub`=`agent:<id>`, `run`, `scope`, `exp`. A run token has the scopes READ and WRITE only, never ADMIN or ALERTS_INGEST. A token with a `run` claim works only while that run is not finished. |
 | Session | Signed cookie, 12 hours by default. Stateless. |
 
 ## Authentication paths
@@ -45,6 +45,8 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 - A revoked or expired token: `unauthenticated`.
 - A token with the wrong signature or from another issuer: `unauthenticated`.
 - A disabled user: `forbidden`.
+- An administrator starts a run. The agent tries an admin action with the delegated token: `forbidden` (the token has no ADMIN scope).
+- An agent uses a delegated token after its run is finished: `unauthenticated`.
 - An agent tries to create tokens for a user, or to start another agent: `forbidden`.
 - An administrator tries to remove their own admin role: `conflict`.
 

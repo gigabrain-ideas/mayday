@@ -82,6 +82,9 @@ data class AgentIdentity(val id: String, val name: String, val role: OrgRole, va
 
 interface AgentIdentityLookup {
     suspend fun find(agentId: String): AgentIdentity?
+
+    /** True while the run exists and has not finished. A delegated token bound to a run works only then. */
+    suspend fun runActive(runId: String): Boolean
 }
 
 /**
@@ -103,6 +106,9 @@ data class Principal(
 
     companion object {
         val ALL = TokenScope.entries.toSet()
+
+        /** Scopes of a delegated run token: the agent can read and write as the user, never administer. */
+        val DELEGATED = setOf(TokenScope.READ, TokenScope.WRITE)
         val system = Principal(Actor.system, null, OrgRole.ADMIN, ALL)
     }
 }
@@ -303,6 +309,7 @@ class IdentityService(
         val scopes = claims["scope"]?.jsonPrimitive?.content.orEmpty().split(' ')
             .mapNotNull { s -> TokenScope.entries.firstOrNull { it.name.equals(s, true) } }.toSet()
         val run = (claims["run"] as? JsonPrimitive)?.content
+        if (run != null && !agents.runActive(run)) throw Unauthenticated("The run of this token is finished")
         return Principal(Actor(ActorKind.AGENT, agent.id, agent.name, onBehalfOf = user.id), user, agent.role, scopes, run)
     }
 }

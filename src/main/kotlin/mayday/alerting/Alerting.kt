@@ -120,10 +120,18 @@ class AlertService(
             }
         }
 
+    /** A token with only ALERTS_INGEST sends alerts for the teams of its owner. Agent tokens and administrators are not limited. */
+    private fun requireIngestTeam(by: Principal, teamId: String, projectId: String?) {
+        val u = by.user ?: return
+        if (u.orgRole == mayday.identity.OrgRole.ADMIN || u.teams.containsKey(teamId) || (projectId != null && projectId in u.projectAdmin)) return
+        throw Forbidden("This token can send alerts only for the teams of its owner")
+    }
+
     private suspend fun ingest(by: Principal, signal: AlertSignal, span: SpanScope): IngestResult {
         if (!by.has(TokenScope.ALERTS_INGEST) && !by.has(TokenScope.WRITE)) throw Forbidden("The token cannot send alerts")
         if (signal.title.isBlank()) throw Invalid("Alert title is required")
         val team = directory.team(signal.team)
+        if (!by.has(TokenScope.WRITE)) requireIngestTeam(by, team.id, team.projectId)
         val now = clock.now()
         val fp = signal.fingerprint?.takeIf { it.isNotBlank() } ?: fingerprint(signal.source, signal.title, team.id, signal.labels)
         val window = Duration.ofMinutes(policy.int(Keys.ALERT_DEDUP_MINUTES, listOf(team.id)).toLong())

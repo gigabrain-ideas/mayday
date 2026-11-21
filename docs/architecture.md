@@ -192,7 +192,8 @@ Targets: 50,000 to 100,000 concurrent users, 1,000 to 10,000 incidents and alert
 
 ## Security
 
-- Authentication: OIDC with PKCE, JWT validation with JWKS (RS256, ES256), API tokens (stored as SHA-256), delegated tokens (HS256).
+- Authentication: OIDC with PKCE, JWT validation with JWKS (RS256, ES256), API tokens (stored as SHA-256), delegated tokens (HS256; run tokens have READ and WRITE only and stop when the run is finished).
+- Prompt injection: the built-in agent gets alert and incident data as untrusted JSON in `<subject_data>`, apart from the task text.
 - gRPC authentication: metadata `authorization: Bearer <token>`, or the session cookie for gRPC-Web. One interceptor reads the credentials. Each service resolves the principal and applies RBAC.
 - CSRF: gRPC-Web requests need the content type `application/grpc-web+proto`. A cross-site page cannot send it without a CORS preflight, and Mayday allows no cross-origin requests. Cookie sessions on the HTTP edges need the `X-Requested-With: mayday` header for changes.
 - Native gRPC is plaintext h2c by default. Use TLS at the ingress, or set `spring.grpc.server.ssl.*`.

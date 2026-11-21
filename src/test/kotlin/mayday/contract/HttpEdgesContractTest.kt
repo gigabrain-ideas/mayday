@@ -200,7 +200,7 @@ class HttpEdgesContractTest : ServerContract() {
 
     @Test
     fun `alertmanager webhooks map labels, severity and status`() = suspendTest {
-        val h = bearerHeader(scoped("member", TokenScope.ALERTS_INGEST))
+        val h = bearerHeader(scoped("admin", TokenScope.ALERTS_INGEST))
         val fp = "am-${unique()}"
         val firing = """{"alerts":[{"status":"firing","fingerprint":"$fp","generatorURL":"http://prom/graph","labels":{"alertname":"HighErrors","severity":"critical","team":"checkout"},"annotations":{"summary":"5xx above 5%","description":"Checkout errors"}},
             {"status":"firing","fingerprint":"$fp-2","labels":{"alertname":"Slow","severity":"warning"}}]}"""

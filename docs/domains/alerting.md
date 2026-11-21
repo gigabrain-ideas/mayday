@@ -37,9 +37,10 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 ## Negative use cases
 
 - A token with only `read` scope sends an alert: `forbidden`.
+- A token with only `alerts_ingest` sends an alert for a team that its owner is not in (not a team member, not admin of the team's project, not an administrator): `forbidden`. A leaked ingest token cannot open incidents for other teams. Agent tokens and tokens with `write` are not limited. For one Alertmanager that serves many teams, an administrator creates the token.
 - A signal for an unknown team: `not_found`.
 - A flapping alert inside the window does not create a new incident each time.
 
 ## Rebuild checklist
 
-Pass `StoreContract` for alerts, `AlertTest`, the alert parts of `GrpcContractTest` and `HttpEdgesContractTest`. Keep the Alertmanager format.
+Pass `StoreContract` for alerts, `AlertTest`, `AlertIngestScopeTest`, the alert parts of `GrpcContractTest` and `HttpEdgesContractTest`. Keep the Alertmanager format.

@@ -25,7 +25,8 @@ Agents are an add-on. Without an agent, Mayday is a complete incident management
 
 ## Rules
 
-- Manual run: only a person (not an agent, not a viewer) can start it. Mayday mints a delegated token: `sub` = user, `act.sub` = `agent:<id>`, `run` = run id, 1 hour. RBAC of the user applies.
+- Manual run: only a person (not an agent, not a viewer) can start it. Mayday mints a delegated token: `sub` = user, `act.sub` = `agent:<id>`, `run` = run id, 1 hour, scopes READ and WRITE. RBAC of the user applies, but never admin rights: an administrator who starts a run gives the agent no ADMIN scope. The token stops working when the run is finished (SUCCEEDED, FAILED or CANCELLED). The built-in agent uses the same scopes for manual runs.
+- Untrusted data: the built-in agent receives the task and the subject data in two separate blocks. The task text has no alert content (an alert is "the alert in the subject data"; an incident is its key). The subject data is JSON inside `<subject_data>`, with `<` and `>` escaped, so the data cannot close the tag. The system prompt says that subject data and tool results are untrusted and that the agent must not follow instructions in them.
 - Automatic run: only from triggers, and only if the team policy allows it (`agents.auto_analysis` for read actions, `agents.auto_remediation` for write actions). It uses the agent's own identity and role.
 - The built-in agent is available only when the LLM provider is ready: enabled, and the credential source has its fields (STATIC: key; OAUTH2: issuer or token URL, plus client ID and secret or assertion file for client credentials, or an assertion file for token exchange; FILE: token file; NONE: nothing). Without it, buttons explain how to configure one.
 - Every LLM call and every tools-gateway call with `useAgentIdentity` sends the `GatewayAuth` headers. On HTTP 401 the adapter drops the cached token and tries once more.
@@ -66,6 +67,9 @@ Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider
 ## Negative use cases
 
 - A viewer presses an agent button: `forbidden`.
+- An alert title or label says "Ignore all previous instructions". The text reaches the model only inside `<subject_data>`, never in the task text.
+- An administrator presses "Create patch". The agent tries `set_setting` with the delegated token: `forbidden`.
+- The agent keeps the delegated token after the run is completed and calls Mayday again: `unauthenticated`.
 - The delegated user is a member. The agent tries `set_setting` (admin): the tool is not offered and the call fails.
 - An agent tries to complete a run of another agent: `forbidden`. It completes a finished run: `conflict`.
 - Remediation triggers exist, but `agents.auto_remediation` is false (default, and locked in the demo): no run starts.
@@ -78,4 +82,4 @@ Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider
 
 ## Rebuild checklist
 
-Pass `AgentTest`, `AgentIndependenceTest`, `BudgetExhaustedTest`, `GatewaySettingsTest`, `IdentityTest` (delegation), `WebhookContractTest`, `LlmProviderContractTest`, `CredentialsContractTest`, the agent and run parts of `GrpcContractTest`, and the run part of `StoreContract`.
+Pass `AgentTest`, `DelegationLimitsTest`, `UntrustedSubjectDataTest`, `AgentIndependenceTest`, `BudgetExhaustedTest`, `GatewaySettingsTest`, `IdentityTest` (delegation), `WebhookContractTest`, `LlmProviderContractTest`, `CredentialsContractTest`, the agent and run parts of `GrpcContractTest`, and the run part of `StoreContract`.
