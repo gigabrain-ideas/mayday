@@ -36,7 +36,7 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 
 ## Positive use cases
 
-- An engineer signs in with Entra ID. Mayday creates the user at the first login.
+- An engineer signs in with the company OIDC provider. Mayday creates the user at the first login.
 - An Alertmanager uses a token with only ALERTS_INGEST.
 - A coding agent exchanges its token and the engineer's token for a delegated token and acts as the engineer.
 

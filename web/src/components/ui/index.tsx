@@ -40,7 +40,7 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
   <input
     ref={ref}
     className={cn(
-      "h-9 w-full rounded-lg border border-input bg-card px-3 text-[13px] placeholder:text-muted-foreground/70 disabled:opacity-50",
+      "h-9 w-full rounded-lg border border-input bg-card px-3 text-[13px] placeholder:text-muted-foreground/70 disabled:opacity-50 read-only:opacity-50 read-only:cursor-default",
       className,
     )}
     {...props}

@@ -1,7 +1,8 @@
 package mayday
 
 import mayday.adapters.dispatch.WebhookDispatcher
-import mayday.adapters.llm.AnthropicFactory
+import mayday.adapters.credentials.Credentials
+import mayday.adapters.llm.LlmProviders
 import mayday.adapters.mcp.McpGateway
 import mayday.adapters.mcp.McpServer
 import mayday.adapters.memory.MemoryStore
@@ -10,6 +11,8 @@ import mayday.agents.AgentDispatcher
 import mayday.agents.AgentRepository
 import mayday.agents.AgentService
 import mayday.agents.ConfigRepository
+import mayday.agents.CredentialProviderFactory
+import mayday.agents.LlmEnvironment
 import mayday.agents.LlmProviderFactory
 import mayday.agents.McpServerRepository
 import mayday.agents.RunRepository
@@ -32,6 +35,7 @@ import mayday.shared.Clock
 import mayday.shared.EventBus
 import mayday.shared.InProcessEventBus
 import mayday.shared.SecretBox
+import mayday.shared.Telemetry
 import mayday.shared.TokenSigner
 import mayday.tools.CompositeCatalog
 import mayday.tools.MaydayTools
@@ -43,7 +47,7 @@ data class AppSettings(
     val publicUrl: String = "http://localhost:8080",
     val secretKey: String = "",
     val adminEmails: Set<String> = emptySet(),
-    val anthropicApiKey: String? = null,
+    val llm: LlmEnvironment = LlmEnvironment(),
     val agentConcurrency: Int = 16,
 )
 
@@ -63,11 +67,18 @@ class Ports(
     val mcpServers: McpServerRepository,
     val config: ConfigRepository,
     val events: EventBus,
-    val llm: LlmProviderFactory = AnthropicFactory,
+    val llm: LlmProviderFactory = LlmProviders,
     val dispatcher: AgentDispatcher = WebhookDispatcher(),
     val clock: Clock = Clock.system,
     val close: () -> Unit = {},
+    val credentials: CredentialProviderFactory = Credentials(),
+    val telemetry: Telemetry = Telemetry.noop,
 ) {
+    fun with(telemetry: Telemetry = this.telemetry, llm: LlmProviderFactory = this.llm, dispatcher: AgentDispatcher = this.dispatcher, credentials: CredentialProviderFactory = this.credentials) = Ports(
+        projects, teams, users, tokens, settings, changeRequests, incidents, timeline, alerts, agents, runs, mcpServers, config, events,
+        llm, dispatcher, clock, close, credentials, telemetry,
+    )
+
     companion object {
         fun memory(store: MemoryStore, events: EventBus = InProcessEventBus()) = Ports(
             store.projects, store.teams, store.users, store.tokens, store.settings, store.changeRequests,
@@ -90,13 +101,14 @@ class App(val settings: AppSettings, val ports: Ports) {
     val box = SecretBox(key)
     val directory = DirectoryService(ports.projects, ports.teams, ports.clock)
     val policy = PolicyService(ports.settings, ports.changeRequests, directory, ports.events, ports.clock)
-    val incidents = IncidentService(ports.incidents, ports.timeline, directory, policy, ports.events, ports.clock)
-    val alerts = AlertService(ports.alerts, incidents, directory, policy, ports.events, ports.clock)
+    val incidents = IncidentService(ports.incidents, ports.timeline, directory, policy, ports.events, ports.clock, ports.telemetry)
+    val alerts = AlertService(ports.alerts, incidents, directory, policy, ports.events, ports.clock, ports.telemetry)
     lateinit var identity: IdentityService
     lateinit var tools: CompositeCatalog
     val agents: AgentService = AgentService(
         ports.agents, ports.runs, ports.mcpServers, ports.config, incidents, alerts, { identity }, policy, box,
-        ports.llm, ports.dispatcher, { tools }, ports.events, ports.clock, settings.publicUrl, settings.anthropicApiKey, settings.agentConcurrency,
+        ports.llm, ports.dispatcher, { tools }, ports.events, ports.clock, settings.publicUrl, settings.llm, settings.agentConcurrency,
+        ports.credentials, ports.telemetry,
     )
     val reports = ReportService(ports.incidents, ports.alerts, directory)
     val maydayTools: MaydayTools
@@ -105,8 +117,8 @@ class App(val settings: AppSettings, val ports: Ports) {
     init {
         identity = IdentityService(ports.users, ports.tokens, ports.teams, agents, signer, ports.clock, settings.adminEmails)
         maydayTools = MaydayTools(incidents, alerts, directory, policy, { identity }, { agents })
-        tools = CompositeCatalog(listOf(maydayTools, McpGateway(ports.mcpServers, box)))
-        mcp = McpServer(maydayTools, VERSION)
+        tools = CompositeCatalog(listOf(maydayTools, McpGateway(ports.mcpServers, box, { agents.gatewayAuth() }, ports.telemetry)))
+        mcp = McpServer(maydayTools, VERSION, ports.telemetry)
         alerts.automation = agents
         ports.events.subscribe { if (it.type == "setting.changed") policy.invalidate() }
     }

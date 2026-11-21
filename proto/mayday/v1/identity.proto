@@ -85,6 +85,8 @@ message Me {
   string actor_kind = 2;
   repeated TokenScope scopes = 3;
   bool agent_ready = 4;
+  // Link to a trace in the tracing UI. "{traceId}" is the placeholder. Empty when not configured.
+  string trace_url_template = 5;
 }
 
 message WhoAmIResponse {

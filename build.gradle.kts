@@ -34,9 +34,12 @@ dependencies {
     implementation("com.zaxxer:HikariCP")
     implementation("org.postgresql:postgresql")
     implementation("com.anthropic:anthropic-java:3.3.0")
+    implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
+    implementation("io.opentelemetry:opentelemetry-extension-kotlin")
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("io.opentelemetry:opentelemetry-sdk-testing")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

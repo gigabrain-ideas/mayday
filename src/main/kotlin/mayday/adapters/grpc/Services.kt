@@ -47,7 +47,7 @@ private fun Int.orDefault(d: Int) = takeIf { it > 0 } ?: d
 private fun Timestamp.instant(present: Boolean): Instant? = if (present) ProtoJson.instant(this) else null
 private fun String.orNull() = takeIf { it.isNotBlank() }
 
-@Serializable private data class MeView(val user: mayday.identity.User, val actorKind: String, val scopes: Set<DTokenScope>, val agentReady: Boolean)
+@Serializable private data class MeView(val user: mayday.identity.User, val actorKind: String, val scopes: Set<DTokenScope>, val agentReady: Boolean, val traceUrlTemplate: String)
 @Serializable private data class SettingsViewData(
     val schema: List<mayday.policy.SettingDef>,
     val effective: List<mayday.policy.EffectiveSetting>,
@@ -55,14 +55,14 @@ private fun String.orNull() = takeIf { it.isNotBlank() }
 )
 
 @Service
-class AuthGrpc(private val auth: Authenticator, private val app: App) : AuthServiceGrpcKt.AuthServiceCoroutineImplBase() {
+class AuthGrpc(private val auth: Authenticator, private val app: App, private val props: MaydayProperties) : AuthServiceGrpcKt.AuthServiceCoroutineImplBase() {
     override suspend fun getAuthConfig(request: Empty): AuthConfig =
         AuthConfig.newBuilder().setSso(auth.oidc != null).setDevLogin(auth.devLogin).setSsoName("Single sign-on").build()
 
     override suspend fun getMe(request: Empty): Me {
         val p = auth.caller()
         val u = p.user ?: throw Forbidden("Agent identities have no profile; use WhoAmI")
-        return MeView(u, p.actor.kind.name, p.scopes, app.agents.internalReady()).into(Me.newBuilder()).build()
+        return MeView(u, p.actor.kind.name, p.scopes, app.agents.internalReady(), props.traceUrlTemplate.trim()).into(Me.newBuilder()).build()
     }
 
     override suspend fun whoAmI(request: Empty): WhoAmIResponse {
@@ -327,7 +327,13 @@ class AgentGrpc(private val auth: Authenticator, private val app: App) : AgentSe
 
     override suspend fun getLlm(request: Empty): LlmView = agents.llm(auth.caller()).into(LlmView.newBuilder()).build()
 
-    override suspend fun updateLlm(request: LlmInput): LlmView = agents.updateLlm(auth.caller(), request.decode()).into(LlmView.newBuilder()).build()
+    override suspend fun updateLlm(request: LlmInput): LlmView {
+        val input = request.decode<mayday.agents.LlmInput>().copy(
+            headers = request.headersMap.takeIf { request.replaceHeaders },
+            tokenParams = request.tokenParamsMap.takeIf { request.replaceTokenParams },
+        )
+        return agents.updateLlm(auth.caller(), input).into(LlmView.newBuilder()).build()
+    }
 
     override suspend fun listMcpServers(request: Empty): McpServerViews = agents.mcpServers(auth.caller()).itemsInto(McpServerViews.newBuilder()).build()
 

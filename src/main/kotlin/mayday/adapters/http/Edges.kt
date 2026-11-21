@@ -231,6 +231,7 @@ class HttpErrors {
             401 -> "unauthenticated"
             403 -> "forbidden"
             503 -> "unavailable"
+            429 -> "resource_exhausted"
             in 400..499 -> "invalid"
             else -> "internal"
         }
@@ -251,6 +252,7 @@ class HttpErrors {
             "conflict" -> HttpStatus.CONFLICT
             "unauthenticated" -> HttpStatus.UNAUTHORIZED
             "unavailable" -> HttpStatus.SERVICE_UNAVAILABLE
+            "resource_exhausted" -> HttpStatus.TOO_MANY_REQUESTS
             else -> HttpStatus.BAD_REQUEST
         }
     }

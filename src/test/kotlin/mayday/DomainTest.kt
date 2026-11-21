@@ -1,5 +1,7 @@
 package mayday
 
+import kotlinx.coroutines.delay
+
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import mayday.agents.AgentAction
@@ -317,11 +319,14 @@ class AgentTest {
         val creds = f.app.agents.create(f.admin, AgentInput("Auto", delivery = Delivery.PULL, actions = setOf(AgentAction.ANALYZE, AgentAction.REMEDIATE),
             triggers = listOf(AgentTrigger(minSeverity = Severity.SEV3, action = AgentAction.ANALYZE), AgentTrigger(minSeverity = Severity.SEV3, action = AgentAction.REMEDIATE))))
         f.app.alerts.ingest(f.member, AlertSignal("Errors", Severity.SEV2, "checkout"))
+        eventually { f.app.agents.recentRuns(f.viewer, 10).any { it.agentId == creds.agent.id } }
+        delay(100)
         val runs = f.app.agents.recentRuns(f.viewer, 10).filter { it.agentId == creds.agent.id }
         assertEquals(listOf(AgentAction.ANALYZE), runs.map { it.action }, "remediation is off by default")
         assertNull(runs.single().onBehalfOf)
         f.app.policy.set(f.admin, Scope.ORG, "org", Keys.AGENT_AUTO_ANALYSIS, "false", Enforcement.NONE)
         f.app.alerts.ingest(f.member, AlertSignal("Other errors", Severity.SEV2, "checkout"))
+        delay(200)
         assertEquals(1, f.app.agents.recentRuns(f.viewer, 10).count { it.agentId == creds.agent.id })
     }
 

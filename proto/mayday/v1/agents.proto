@@ -136,6 +136,8 @@ message AgentRun {
   google.protobuf.Timestamp created_at = 15;
   google.protobuf.Timestamp started_at = 16;
   google.protobuf.Timestamp finished_at = 17;
+  // OpenTelemetry trace of the run. Empty when tracing is off.
+  string trace_id = 18;
 }
 
 message AgentRuns {
@@ -184,7 +186,40 @@ message CompleteRunRequest {
   string error = 4;
 }
 
+// API_KEY sends the credential as x-api-key (Anthropic style). BEARER sends Authorization: Bearer (OpenAI style).
+enum AuthStyle {
+  AUTH_STYLE_UNSPECIFIED = 0;
+  AUTH_STYLE_API_KEY = 1;
+  AUTH_STYLE_BEARER = 2;
+}
+
+// NONE: no auth header. STATIC: fixed API key. OAUTH2: short-lived token from any OAuth 2.0 token endpoint
+// (client secret, or a workload identity assertion file). FILE: token that another process writes.
+enum CredentialMode {
+  CREDENTIAL_MODE_UNSPECIFIED = 0;
+  CREDENTIAL_MODE_NONE = 1;
+  CREDENTIAL_MODE_STATIC = 2;
+  CREDENTIAL_MODE_OAUTH2 = 3;
+  CREDENTIAL_MODE_FILE = 4;
+}
+
+// CLIENT_CREDENTIALS (RFC 6749): client secret, or the assertion file as JWT client assertion (RFC 7523).
+// TOKEN_EXCHANGE (RFC 8693): the assertion file is the subject token.
+enum GrantType {
+  GRANT_TYPE_UNSPECIFIED = 0;
+  GRANT_TYPE_CLIENT_CREDENTIALS = 1;
+  GRANT_TYPE_TOKEN_EXCHANGE = 2;
+}
+
+// How the client secret goes to the token endpoint. BASIC: HTTP Basic (client_secret_basic). POST: form fields (client_secret_post).
+enum ClientAuth {
+  CLIENT_AUTH_UNSPECIFIED = 0;
+  CLIENT_AUTH_BASIC = 1;
+  CLIENT_AUTH_POST = 2;
+}
+
 message LlmView {
+  // "anthropic" or "openai" (the API protocol of base_url).
   string provider = 1;
   string model = 2;
   string base_url = 3;
@@ -192,15 +227,59 @@ message LlmView {
   bool enabled = 5;
   bool has_api_key = 6;
   bool ready = 7;
+  AuthStyle auth_style = 8;
+  CredentialMode credential = 9;
+  string token_url = 10;
+  string client_id = 11;
+  bool has_client_secret = 12;
+  string assertion_file = 13;
+  string token_file = 14;
+  string scope = 15;
+  reserved 16, 17;
+  reserved "agent_id_header", "agent_id";
+  // Custom headers on every gateway call, for example an agent registry id (x-company-agent-id).
+  map<string, string> headers = 18;
+  // LlmView field names (camelCase) that the environment sets. They cannot be changed through UpdateLlm.
+  repeated string managed_fields = 19;
+  // Set after the gateway answered HTTP 429. The agent makes no LLM call before this time.
+  google.protobuf.Timestamp paused_until = 20;
+  string pause_reason = 21;
+  // OIDC issuer. Without token_url, Mayday reads the token endpoint from the issuer metadata.
+  string issuer = 22;
+  GrantType grant = 23;
+  ClientAuth client_auth = 24;
+  // Extra token request fields, for example audience or resource.
+  map<string, string> token_params = 25;
 }
 
-// Unset fields keep their value. An empty api_key removes the stored key.
+// Unset fields keep their value. An empty api_key or client_secret removes the stored secret.
+// Setting a managed field fails with INVALID_ARGUMENT.
 message LlmInput {
   optional string model = 1;
   optional string api_key = 2;
   optional string base_url = 3;
   optional string effort = 4;
   optional bool enabled = 5;
+  optional string provider = 6;
+  optional AuthStyle auth_style = 7;
+  optional CredentialMode credential = 8;
+  optional string token_url = 9;
+  optional string client_id = 10;
+  optional string client_secret = 11;
+  optional string assertion_file = 12;
+  optional string token_file = 13;
+  optional string scope = 14;
+  reserved 15, 16;
+  reserved "agent_id_header", "agent_id";
+  // Replaces all fixed headers when replace_headers is true.
+  map<string, string> headers = 17;
+  bool replace_headers = 18;
+  optional string issuer = 19;
+  optional GrantType grant = 20;
+  optional ClientAuth client_auth = 21;
+  // Replaces all token parameters when replace_token_params is true. Reserved OAuth fields fail with INVALID_ARGUMENT.
+  map<string, string> token_params = 22;
+  bool replace_token_params = 23;
 }
 
 message McpServerView {
@@ -211,6 +290,10 @@ message McpServerView {
   bool has_credential = 5;
   repeated string tool_allowlist = 6;
   bool enabled = 7;
+  // Send the identity headers of the LLM settings (token and custom headers) instead of header_name and credential.
+  bool use_agent_identity = 8;
+  reserved 9;
+  reserved "scope";
 }
 
 message McpServerViews {
@@ -227,6 +310,9 @@ message SaveMcpServerRequest {
   optional string credential = 5;
   repeated string tool_allowlist = 6;
   bool enabled = 7;
+  bool use_agent_identity = 8;
+  reserved 9;
+  reserved "scope";
 }
 
 service AgentService {

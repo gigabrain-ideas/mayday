@@ -83,6 +83,7 @@ data class AgentRun(
     val createdAt: Ts,
     val startedAt: Ts? = null,
     val finishedAt: Ts? = null,
+    val traceId: String = "",
     val version: Long = 1,
 )
 
@@ -96,6 +97,8 @@ data class McpServerConfig(
     val toolAllowlist: List<String> = emptyList(),
     val enabled: Boolean = true,
     val createdAt: Ts,
+    /** Send the identity headers of the LLM settings (token and custom headers) instead of the static credential. */
+    val useAgentIdentity: Boolean = false,
 )
 
 @Serializable
@@ -106,7 +109,24 @@ data class LlmConfig(
     val baseUrl: String = "",
     val effort: String = "high",
     val enabled: Boolean = false,
-)
+    /** Null: the provider default (anthropic = API_KEY, openai = BEARER). */
+    val authStyle: AuthStyle? = null,
+    val credential: CredentialMode = CredentialMode.STATIC,
+    val tokenUrl: String = "",
+    val issuer: String = "",
+    val grant: OAuthGrant = OAuthGrant.CLIENT_CREDENTIALS,
+    val clientAuth: ClientAuth = ClientAuth.BASIC,
+    val clientId: String = "",
+    val clientSecretSealed: String = "",
+    val assertionFile: String = "",
+    val tokenFile: String = "",
+    val scope: String = "",
+    val tokenParams: Map<String, String> = emptyMap(),
+    val headers: Map<String, String> = emptyMap(),
+) {
+    val api: LlmApi get() = LlmApi.of(provider)
+    val effectiveAuthStyle: AuthStyle get() = authStyle ?: if (api == LlmApi.OPENAI) AuthStyle.BEARER else AuthStyle.API_KEY
+}
 
 interface AgentRepository {
     suspend fun get(id: String): AgentConfig?
@@ -169,14 +189,21 @@ data class LlmRequest(
 
 enum class StopReason { END, TOOL_USE, MAX_TOKENS, REFUSAL, OTHER }
 
-data class LlmResponse(val message: LlmMessage, val stopReason: StopReason)
+data class LlmUsage(val inputTokens: Long = 0, val outputTokens: Long = 0)
 
+/** [model] is the model that answered, when the provider reports it. */
+data class LlmResponse(val message: LlmMessage, val stopReason: StopReason, val usage: LlmUsage = LlmUsage(), val model: String = "")
+
+/**
+ * Provider contract: send [GatewayAuth.headers] on every call; on HTTP 401 call [GatewayAuth.invalidate] and retry once;
+ * on HTTP 429 throw [BudgetExhausted] and never retry; other failures throw [GatewayError].
+ */
 interface LlmProvider {
     suspend fun complete(request: LlmRequest): LlmResponse
 }
 
 fun interface LlmProviderFactory {
-    fun create(config: LlmConfig, apiKey: String): LlmProvider
+    fun create(config: LlmConfig, auth: GatewayAuth): LlmProvider
 }
 
 // ---- Tools port ----

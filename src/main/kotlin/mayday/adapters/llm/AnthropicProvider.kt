@@ -1,8 +1,13 @@
 package mayday.adapters.llm
 
+import com.anthropic.backends.Backend
 import com.anthropic.client.AnthropicClient
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.core.JsonValue
+import com.anthropic.core.opentelemetry.OpenTelemetryOptions
+import com.anthropic.errors.AnthropicIoException
+import com.anthropic.errors.AnthropicRetryableException
+import com.anthropic.errors.AnthropicServiceException
 import com.anthropic.models.messages.ContentBlockParam
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageCreateParams
@@ -10,6 +15,7 @@ import com.anthropic.models.messages.OutputConfig
 import com.anthropic.models.messages.TextBlockParam
 import com.anthropic.models.messages.Tool
 import com.anthropic.models.messages.ToolResultBlockParam
+import kotlinx.coroutines.future.await
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -18,40 +24,83 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
+import mayday.agents.GatewayAuth
 import mayday.agents.LlmBlock
 import mayday.agents.LlmConfig
 import mayday.agents.LlmMessage
 import mayday.agents.LlmProvider
-import mayday.agents.LlmProviderFactory
 import mayday.agents.LlmRequest
 import mayday.agents.LlmResponse
 import mayday.agents.LlmRole
+import mayday.agents.LlmUsage
 import mayday.agents.StopReason
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import mayday.agents.statedCooldown
+import mayday.shared.Telemetry
+import java.io.IOException
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 
 /** Models that accept server-side refusal fallbacks. */
 private val FALLBACK_MODELS = setOf("claude-fable-5-2", "claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5")
 
-object AnthropicFactory : LlmProviderFactory {
+private const val ANTHROPIC_URL = "https://api.anthropic.com"
+
+/**
+ * SDK backend that adds no credential. The [GatewayAuth] headers go on each request instead,
+ * so a rotated token needs no new client and exactly one auth header goes out.
+ */
+private class GatewayBackend(private val url: String) : Backend {
+    override fun baseUrl() = url
+    override fun close() = Unit
+}
+
+/** One SDK client per base URL. SDK tracing is off: InternalAgent opens the `chat` span and the provider propagates its context. */
+internal object AnthropicClients {
     private val clients = ConcurrentHashMap<String, AnthropicClient>()
 
-    override fun create(config: LlmConfig, apiKey: String): LlmProvider {
-        val client = clients.computeIfAbsent("${config.baseUrl}|${apiKey.hashCode()}") {
-            val b = AnthropicOkHttpClient.builder().apiKey(apiKey).timeout(Duration.ofMinutes(10)).maxRetries(2)
-            if (config.baseUrl.isNotBlank()) b.baseUrl(config.baseUrl)
-            b.build()
-        }
-        return AnthropicProvider(client, config)
+    fun forBaseUrl(baseUrl: String): AnthropicClient = clients.computeIfAbsent(baseUrl.trim().trimEnd('/').ifEmpty { ANTHROPIC_URL }) { url ->
+        AnthropicOkHttpClient.builder()
+            .backend(GatewayBackend(url))
+            .timeout(Duration.ofMinutes(10))
+            .maxRetries(0)
+            .openTelemetry(OpenTelemetryOptions.builder().propagation(false).traces(false).build())
+            .build()
     }
 }
 
-class AnthropicProvider(private val client: AnthropicClient, private val config: LlmConfig) : LlmProvider {
-    override suspend fun complete(request: LlmRequest): LlmResponse = withContext(Dispatchers.IO) { completeBlocking(request) }
+class AnthropicProvider internal constructor(
+    private val client: AnthropicClient,
+    private val config: LlmConfig,
+    auth: GatewayAuth,
+    telemetry: Telemetry,
+    retry: RetryPolicy,
+) : LlmProvider {
+    private val caller = GatewayCaller(auth, telemetry, retry)
 
-    private fun completeBlocking(request: LlmRequest): LlmResponse {
+    override suspend fun complete(request: LlmRequest): LlmResponse {
+        val params = params(request)
+        val resp = caller.call { headers ->
+            val b = params.toBuilder()
+            headers.forEach { (k, v) -> b.replaceAdditionalHeaders(k, v) }
+            try {
+                client.async().messages().create(b.build()).await()
+            } catch (e: AnthropicServiceException) {
+                val h = e.headers()
+                val body = runCatching { com.anthropic.core.jsonMapper().writeValueAsString(e.body()) }.getOrDefault("")
+                val cooldown = statedCooldown({ name -> h.names().filter { it.equals(name, true) }.flatMap { h.values(it) } }, body)
+                throw HttpFailure(e.statusCode(), cooldown, errorDetail(body))
+            } catch (e: AnthropicIoException) {
+                throw ioFailure(e.cause ?: e)
+            } catch (e: AnthropicRetryableException) {
+                throw ioFailure(e.cause ?: e)
+            } catch (e: IOException) {
+                throw ioFailure(e)
+            }
+        }
+        return toResponse(resp)
+    }
+
+    private fun params(request: LlmRequest): MessageCreateParams {
         val b = MessageCreateParams.builder()
             .model(config.model)
             .maxTokens(request.maxTokens)
@@ -81,7 +130,10 @@ class AnthropicProvider(private val client: AnthropicClient, private val config:
                 else -> b.addUserMessageOfContentBlockParams(m.blocks.map(::toParam))
             }
         }
-        val resp = client.messages().create(b.build())
+        return b.build()
+    }
+
+    private fun toResponse(resp: Message): LlmResponse {
         val blocks = resp.content().mapNotNull { block ->
             block.text().map<LlmBlock> { LlmBlock.Text(it.text()) }.orElse(null)
                 ?: block.toolUse().map<LlmBlock> {
@@ -95,7 +147,9 @@ class AnthropicProvider(private val client: AnthropicClient, private val config:
             "refusal" -> StopReason.REFUSAL
             else -> StopReason.OTHER
         }
-        return LlmResponse(LlmMessage(LlmRole.ASSISTANT, blocks, resp), stop)
+        val u = resp.usage()
+        val input = u.inputTokens() + u.cacheReadInputTokens().orElse(0L) + u.cacheCreationInputTokens().orElse(0L)
+        return LlmResponse(LlmMessage(LlmRole.ASSISTANT, blocks, resp), stop, LlmUsage(input, u.outputTokens()), resp.model().asString())
     }
 
     private fun toParam(block: LlmBlock): ContentBlockParam = when (block) {

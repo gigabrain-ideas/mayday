@@ -43,11 +43,16 @@ suspend fun eventually(timeoutMs: Long = 5000, message: String = "condition not 
 class FakeLlm : LlmProvider, LlmProviderFactory {
     val requests = CopyOnWriteArrayList<LlmRequest>()
     val script = ArrayDeque<(LlmRequest) -> LlmResponse>()
+    val auths = CopyOnWriteArrayList<mayday.agents.GatewayAuth>()
 
-    override fun create(config: mayday.agents.LlmConfig, apiKey: String) = this
+    /** When set, every call waits for it, like a slow or hanging gateway. */
+    @Volatile var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+    override fun create(config: mayday.agents.LlmConfig, auth: mayday.agents.GatewayAuth) = this.also { auths += auth }
 
     override suspend fun complete(request: LlmRequest): LlmResponse {
         requests += request
+        gate?.await()
         val next = synchronized(script) { script.removeFirstOrNull() } ?: return text("done")
         return next(request)
     }
@@ -57,6 +62,8 @@ class FakeLlm : LlmProvider, LlmProviderFactory {
     }
 
     fun answer(t: String) = synchronized(script) { script.addLast { text(t) } }
+
+    fun fail(e: Exception) = synchronized(script) { script.addLast { throw e } }
 
     private fun text(t: String) = LlmResponse(LlmMessage(LlmRole.ASSISTANT, listOf(LlmBlock.Text(t))), StopReason.END)
 }
@@ -71,18 +78,15 @@ class RecordingDispatcher : AgentDispatcher {
     }
 }
 
-class Fixture {
+class Fixture(llmEnv: mayday.agents.LlmEnvironment = mayday.agents.LlmEnvironment(), extraTools: List<mayday.agents.ToolCatalog> = emptyList()) {
     val llm = FakeLlm()
     val dispatcher = RecordingDispatcher()
     val events = InProcessEventBus()
     val store = MemoryStore(null)
     val app = App(
-        AppSettings(secretKey = "test-secret", publicUrl = "http://mayday.test"),
-        Ports.memory(store, events).let {
-            Ports(it.projects, it.teams, it.users, it.tokens, it.settings, it.changeRequests, it.incidents, it.timeline, it.alerts,
-                it.agents, it.runs, it.mcpServers, it.config, events, llm, dispatcher)
-        },
-    )
+        AppSettings(secretKey = "test-secret", publicUrl = "http://mayday.test", llm = llmEnv),
+        Ports.memory(store, events).with(llm = llm, dispatcher = dispatcher),
+    ).also { a -> if (extraTools.isNotEmpty()) a.tools = mayday.tools.CompositeCatalog(listOf(a.tools) + extraTools) }
     val project = runBlocking { app.start(); app.directory.createProject("Payments", "payments") }
     val team = runBlocking { app.directory.createTeam("Checkout", "checkout", project.id) }
     val other = runBlocking { app.directory.createTeam("SRE", "sre", null) }

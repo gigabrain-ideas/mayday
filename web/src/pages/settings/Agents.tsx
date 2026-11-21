@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { Bot, Plug, Plus, RotateCw, Trash2 } from "lucide-react";
+import { Bot, Plug, Plus, RotateCw, Trash2, TriangleAlert } from "lucide-react";
 import {
-  ACTION_LABEL, AGENT_ACTIONS, items, rpc, SEVERITIES, type AgentAction, type AgentConfig, type AgentCredentials, type AgentRun, type AgentTrigger, type LlmView,
-  type McpServerView, type OrgRole, type Page,
+  ACTION_LABEL, AGENT_ACTIONS, items, rpc, SEVERITIES, type AgentAction, type AgentConfig, type AgentCredentials, type AgentRun, type AgentTrigger,
+  type AuthStyle, type ClientAuth, type CredentialMode, type GrantType, type LlmInput, type LlmProvider, type LlmView, type McpServerView, type OrgRole, type Page,
 } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
-import { ago, titleCase } from "@/lib/utils";
+import { ago, dateTime, titleCase } from "@/lib/utils";
 import { Badge, Button, Card, CardHeader, Dialog, DialogContent, Empty, Field, Input, MultiSelect, NativeSelect, Spinner, Switch, Table, Td, Textarea, Th } from "@/components/ui";
-import { RunStatusBadge } from "@/components/common";
+import { RunStatusBadge, RunTrace } from "@/components/common";
 import { SecretOnce } from "./Directory";
 
 type Draft = Omit<AgentConfig, "id" | "secretSealed" | "createdAt" | "updatedAt">;
@@ -78,13 +78,13 @@ export function AgentsPage() {
         <CardHeader title="Recent runs" />
         {!runs.data?.length ? <Empty title="No runs yet" /> : (
           <Table>
-            <thead><tr><Th>Agent</Th><Th>Action</Th><Th>Subject</Th><Th>Status</Th><Th>Trigger</Th><Th>Started</Th></tr></thead>
+            <thead><tr><Th>Agent</Th><Th>Action</Th><Th>Subject</Th><Th>Status</Th><Th>Trigger</Th><Th>Started</Th><Th>Trace</Th></tr></thead>
             <tbody>
               {runs.data.map((r) => (
                 <tr key={r.id}>
                   <Td>{r.agentName}</Td><Td>{ACTION_LABEL[r.action]}</Td>
                   <Td><a className="hover:underline" href={r.subjectKind === "INCIDENT" ? `/incidents/${r.subjectLabel}` : `/alerts/${r.subjectId}`}>{r.subjectLabel}</a></Td>
-                  <Td><RunStatusBadge status={r.status} /></Td><Td className="text-muted-foreground">{r.trigger.toLowerCase()}</Td><Td className="text-muted-foreground">{ago(r.createdAt)}</Td>
+                  <Td><RunStatusBadge status={r.status} /></Td><Td className="text-muted-foreground">{r.trigger.toLowerCase()}</Td><Td className="text-muted-foreground">{ago(r.createdAt)}</Td><Td><RunTrace traceId={r.traceId} /></Td>
                 </tr>
               ))}
             </tbody>
@@ -183,49 +183,241 @@ function AgentForm({ draft, isNew, onChange, onSave }: { draft: Draft; isNew: bo
   );
 }
 
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const PROVIDER_LABEL: Record<LlmProvider, string> = { anthropic: "Anthropic", openai: "OpenAI-compatible" };
+const defaultAuthStyle = (p: LlmProvider): AuthStyle => (p === "openai" ? "BEARER" : "API_KEY");
+const EDITABLE = [
+  "provider", "model", "baseUrl", "effort", "enabled", "authStyle", "credential", "tokenUrl", "issuer", "grant", "clientAuth", "clientId",
+  "assertionFile", "tokenFile", "scope",
+] as const;
+type HeaderRow = { name: string; value: string };
+const rowsOf = (h: Record<string, string>): HeaderRow[] => Object.entries(h).map(([name, value]) => ({ name, value }));
+const mapOf = (rows: HeaderRow[]) => Object.fromEntries(rows.filter((r) => r.name.trim()).map((r) => [r.name.trim(), r.value]));
+
+/** Editable name/value rows, for custom headers and token parameters. */
+function PairRows({ rows, onChange, locked, namePlaceholder, valuePlaceholder, addLabel }: {
+  rows: HeaderRow[]; onChange: (r: HeaderRow[]) => void; locked: boolean; namePlaceholder: string; valuePlaceholder?: string; addLabel: string;
+}) {
+  return (
+    <div className="space-y-2">
+      {rows.map((r, i) => (
+        <div key={i} className="flex gap-2">
+          <Input aria-label="Name" value={r.name} readOnly={locked} placeholder={namePlaceholder}
+            onChange={(e) => onChange(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+          <Input aria-label="Value" value={r.value} readOnly={locked} placeholder={valuePlaceholder}
+            onChange={(e) => onChange(rows.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+          {!locked && <Button type="button" variant="ghost" size="icon" aria-label="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))}><Trash2 /></Button>}
+        </div>
+      ))}
+      {!locked && <Button type="button" variant="ghost" size="sm" onClick={() => onChange([...rows, { name: "", value: "" }])}><Plus /> {addLabel}</Button>}
+    </div>
+  );
+}
+
 export function LlmPage() {
   const toast = useToast();
   const { reloadMe } = useSession();
   const { data, setData } = useQuery(() => rpc.agents.getLlm<LlmView>(), []);
-  const [key, setKey] = useState("");
   if (!data) return <div className="flex justify-center p-10"><Spinner /></div>;
-  const save = async (body: { model: string; effort: string; baseUrl: string; enabled: boolean; apiKey?: string }) => {
-    try { setData(await rpc.agents.updateLlm<LlmView>(body)); reloadMe(); toast.show("LLM provider saved.", "success"); } catch (e) { toast.error(e); }
-  };
   return (
-    <Card className="max-w-2xl p-5">
-      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save({ model: data.model, effort: data.effort, baseUrl: data.baseUrl, enabled: data.enabled, apiKey: key || undefined }); setKey(""); }}>
+    <LlmForm key={JSON.stringify(data)} view={data} onSaved={(v) => { setData(v); reloadMe(); toast.show("LLM provider saved.", "success"); }} onError={toast.error} />
+  );
+}
+
+function LlmForm({ view, onSaved, onError }: { view: LlmView; onSaved: (v: LlmView) => void; onError: (e: unknown) => void }) {
+  const [draft, setDraft] = useState<LlmView>({
+    ...view, authStyle: view.authStyle ?? defaultAuthStyle(view.provider), credential: view.credential ?? "STATIC",
+    grant: view.grant ?? "CLIENT_CREDENTIALS", clientAuth: view.clientAuth ?? "BASIC",
+  });
+  const [apiKey, setApiKey] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [rows, setRows] = useState<HeaderRow[]>(rowsOf(view.headers));
+  const [headersDirty, setHeadersDirty] = useState(false);
+  const [params, setParams] = useState<HeaderRow[]>(rowsOf(view.tokenParams ?? {}));
+  const [paramsDirty, setParamsDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const managed = (f: string) => view.managedFields.includes(f);
+  const lockHint = (f: string, hint?: string) => (managed(f) ? "Set by the environment" : hint);
+  const set = <K extends keyof LlmView>(k: K, v: LlmView[K]) => setDraft((d) => ({ ...d, [k]: v }));
+  const paused = view.pausedUntil && new Date(view.pausedUntil).getTime() > Date.now() ? view.pausedUntil : undefined;
+
+  const submit = async (extra: LlmInput = {}) => {
+    const input: LlmInput = { ...extra };
+    const target = input as Record<string, unknown>;
+    for (const k of EDITABLE) if (!managed(k) && draft[k] !== view[k]) target[k] = draft[k];
+    if (apiKey && !managed("apiKey")) input.apiKey = apiKey;
+    if (clientSecret && !managed("clientSecret")) input.clientSecret = clientSecret;
+    if (headersDirty && !managed("headers")) {
+      input.headers = mapOf(rows);
+      input.replaceHeaders = true;
+    }
+    if (paramsDirty && !managed("tokenParams")) {
+      input.tokenParams = mapOf(params);
+      input.replaceTokenParams = true;
+    }
+    setBusy(true);
+    try { onSaved(await rpc.agents.updateLlm<LlmView>(input)); } catch (e) { onError(e); } finally { setBusy(false); }
+  };
+
+  const setProvider = (p: LlmProvider) => setDraft((d) => ({
+    ...d, provider: p, authStyle: !managed("authStyle") && d.authStyle === defaultAuthStyle(d.provider) ? defaultAuthStyle(p) : d.authStyle,
+  }));
+  const editRows = (next: HeaderRow[]) => { setRows(next); setHeadersDirty(true); };
+  const editParams = (next: HeaderRow[]) => { setParams(next); setParamsDirty(true); };
+  const exchange = draft.grant === "TOKEN_EXCHANGE";
+  const hasSecret = view.hasClientSecret || clientSecret !== "";
+  const secretHint = (f: "apiKey" | "clientSecret", isSet: boolean, unset: string) =>
+    managed(f) ? "Set by the environment" : isSet ? "A value is set. Enter a new one to replace it." : unset;
+  const removeSecret = (f: "apiKey" | "clientSecret") => submit({ [f]: "" });
+
+  return (
+    <Card className="max-w-3xl p-5">
+      <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <div className="flex items-center gap-2">
-          <span className="font-medium">Anthropic</span>
-          {data.ready ? <Badge tone="success">Ready</Badge> : <Badge tone="warning">Not ready</Badge>}
+          <span className="font-medium">{PROVIDER_LABEL[view.provider] ?? view.provider}</span>
+          {view.ready ? <Badge tone="success">Ready</Badge> : <Badge tone="warning">Not ready</Badge>}
+          {paused && <Badge tone="warning">Paused</Badge>}
         </div>
-        <p className="text-muted-foreground">The built-in agent uses this provider to analyze alerts, keep timelines complete, and draft postmortems and runbooks. Mayday stores the key encrypted.</p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Model"><Input value={data.model} onChange={(e) => setData({ ...data, model: e.target.value })} /></Field>
-          <Field label="Effort">
-            <NativeSelect value={data.effort} onChange={(e) => setData({ ...data, effort: e.target.value })}>
-              {["low", "medium", "high", "xhigh", "max"].map((x) => <option key={x}>{x}</option>)}
-            </NativeSelect>
+        {paused && (
+          <div role="status" className="flex gap-3 rounded-lg border border-warning/50 bg-warning-soft p-3">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p>The AI gateway budget of the agent is used up. The agent is paused until {dateTime(paused)}. Save these settings to resume it now.</p>
+              {view.pauseReason && <p className="mt-1 text-[12px] text-muted-foreground">{view.pauseReason}</p>}
+            </div>
+          </div>
+        )}
+        <p className="text-muted-foreground">
+          The built-in agent uses this provider to analyze alerts, keep timelines complete, and draft postmortems and runbooks. Mayday stores secrets
+          encrypted and never shows them again. Incidents and alerts work without a provider.
+        </p>
+
+        <section className="space-y-3">
+          <div className="eyebrow">Provider</div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="API" hint={lockHint("provider", "The protocol of the base URL.")}>
+              <NativeSelect value={draft.provider} disabled={managed("provider")} onChange={(e) => setProvider(e.target.value as LlmProvider)}>
+                <option value="anthropic">Anthropic</option><option value="openai">OpenAI-compatible</option>
+              </NativeSelect>
+            </Field>
+            <Field label="Model" hint={lockHint("model")}>
+              <Input value={draft.model} readOnly={managed("model")} onChange={(e) => set("model", e.target.value)} />
+            </Field>
+            <Field label="Base URL (optional)" hint={lockHint("baseUrl", "For an AI gateway or proxy in your network.")}>
+              <Input value={draft.baseUrl} readOnly={managed("baseUrl")} onChange={(e) => set("baseUrl", e.target.value)}
+                placeholder={draft.provider === "openai" ? "https://ai-gateway.example.com/v1" : "https://api.anthropic.com"} />
+            </Field>
+            <Field label="Effort" hint={lockHint("effort")}>
+              <NativeSelect value={draft.effort} disabled={managed("effort")} onChange={(e) => set("effort", e.target.value)}>
+                {EFFORTS.map((x) => <option key={x}>{x}</option>)}
+              </NativeSelect>
+            </Field>
+          </div>
+        </section>
+
+        <section className="space-y-3 border-t pt-4">
+          <div className="eyebrow">Authentication</div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Credential source" hint={lockHint("credential")}>
+              <NativeSelect value={draft.credential} disabled={managed("credential")} onChange={(e) => set("credential", e.target.value as CredentialMode)}>
+                <option value="NONE">None</option>
+                <option value="STATIC">Static API key</option>
+                <option value="OAUTH2">OAuth 2.0 token (workload identity)</option>
+                <option value="FILE">Token file</option>
+              </NativeSelect>
+            </Field>
+            {draft.credential !== "NONE" && (
+              <Field label="Auth header" hint={lockHint("authStyle", `The default for ${PROVIDER_LABEL[draft.provider]} is ${defaultAuthStyle(draft.provider) === "BEARER" ? "Authorization: Bearer" : "x-api-key"}.`)}>
+                <NativeSelect value={draft.authStyle} disabled={managed("authStyle")} onChange={(e) => set("authStyle", e.target.value as AuthStyle)}>
+                  <option value="API_KEY">x-api-key</option><option value="BEARER">Authorization: Bearer</option>
+                </NativeSelect>
+              </Field>
+            )}
+          </div>
+          {draft.credential === "STATIC" && (
+            <Field label="API key" hint={secretHint("apiKey", view.hasApiKey, "Or set MAYDAY_LLM_API_KEY on the server.")}>
+              <div className="flex gap-2">
+                <Input type="password" value={apiKey} readOnly={managed("apiKey")} onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={view.hasApiKey ? "••••••••" : "sk-..."} autoComplete="off" />
+                {view.hasApiKey && !managed("apiKey") && <Button type="button" variant="ghost" onClick={() => removeSecret("apiKey")}>Remove</Button>}
+              </div>
+            </Field>
+          )}
+          {draft.credential === "OAUTH2" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Grant" hint={lockHint("grant", exchange ? "RFC 8693. The token file is the subject token." : "RFC 6749. Client secret or a workload identity token as client assertion.")}>
+                <NativeSelect value={draft.grant} disabled={managed("grant")} onChange={(e) => set("grant", e.target.value as GrantType)}>
+                  <option value="CLIENT_CREDENTIALS">Client credentials</option><option value="TOKEN_EXCHANGE">Token exchange</option>
+                </NativeSelect>
+              </Field>
+              <Field label="Issuer" hint={lockHint("issuer", "Mayday reads the token endpoint from the issuer metadata.")}>
+                <Input value={draft.issuer} readOnly={managed("issuer")} onChange={(e) => set("issuer", e.target.value)} placeholder="https://idp.example.com" />
+              </Field>
+              <Field label="Token URL (optional)" hint={lockHint("tokenUrl", "Set it when the issuer publishes no metadata.")}>
+                <Input value={draft.tokenUrl} readOnly={managed("tokenUrl")} onChange={(e) => set("tokenUrl", e.target.value)} placeholder="https://idp.example.com/oauth2/token" />
+              </Field>
+              <Field label={exchange ? "Client ID (optional)" : "Client ID"} hint={lockHint("clientId")}>
+                <Input value={draft.clientId} readOnly={managed("clientId")} onChange={(e) => set("clientId", e.target.value)} />
+              </Field>
+              <Field label="Client secret" hint={secretHint("clientSecret", view.hasClientSecret, exchange ? "Optional." : "Leave empty to use a workload identity token.")}>
+                <div className="flex gap-2">
+                  <Input type="password" value={clientSecret} readOnly={managed("clientSecret")} onChange={(e) => setClientSecret(e.target.value)}
+                    placeholder={view.hasClientSecret ? "••••••••" : ""} autoComplete="off" />
+                  {view.hasClientSecret && !managed("clientSecret") && <Button type="button" variant="ghost" onClick={() => removeSecret("clientSecret")}>Remove</Button>}
+                </div>
+              </Field>
+              {hasSecret && (
+                <Field label="Client authentication" hint={lockHint("clientAuth")}>
+                  <NativeSelect value={draft.clientAuth} disabled={managed("clientAuth")} onChange={(e) => set("clientAuth", e.target.value as ClientAuth)}>
+                    <option value="BASIC">HTTP Basic (client_secret_basic)</option><option value="POST">Form fields (client_secret_post)</option>
+                  </NativeSelect>
+                </Field>
+              )}
+              <Field label="Workload identity token file" hint={lockHint("assertionFile", "A token that the platform writes and rotates, for example a projected Kubernetes service account token.")}>
+                <Input value={draft.assertionFile} readOnly={managed("assertionFile")} onChange={(e) => set("assertionFile", e.target.value)}
+                  placeholder="/var/run/secrets/mayday/workload-identity/token" />
+              </Field>
+              <Field label="Scope (optional)" hint={lockHint("scope")}>
+                <Input value={draft.scope} readOnly={managed("scope")} onChange={(e) => set("scope", e.target.value)} placeholder="ai-gateway.invoke" />
+              </Field>
+              <Field label="Token parameters (optional)" hint={lockHint("tokenParams", "Extra fields of the token request, for example audience or resource.")} className="sm:col-span-2">
+                <PairRows rows={params} onChange={editParams} locked={managed("tokenParams")} namePlaceholder="audience" valuePlaceholder="https://ai-gateway.example.com" addLabel="Add parameter" />
+              </Field>
+            </div>
+          )}
+          {draft.credential === "FILE" && (
+            <Field label="Token file" hint={lockHint("tokenFile", "Another process writes and refreshes the token in this file. Mayday reads it before each call.")}>
+              <Input value={draft.tokenFile} readOnly={managed("tokenFile")} onChange={(e) => set("tokenFile", e.target.value)} placeholder="/var/run/gateway/token" />
+            </Field>
+          )}
+        </section>
+
+        <section className="space-y-3 border-t pt-4">
+          <div className="eyebrow">Custom headers</div>
+          <Field label="Headers (optional)" hint={lockHint("headers", "Sent with every call to the provider and to MCP servers that use the agent identity, for example the agent ID from your agent registry.")}>
+            <PairRows rows={rows} onChange={editRows} locked={managed("headers")} namePlaceholder="x-company-agent-id" addLabel="Add header" />
           </Field>
-        </div>
-        <Field label="API key" hint={data.hasApiKey ? "A key is set. Enter a new one to replace it." : "Or set ANTHROPIC_API_KEY on the server."}>
-          <Input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={data.hasApiKey ? "••••••••" : "sk-ant-..."} autoComplete="off" />
-        </Field>
-        <Field label="Base URL (optional)" hint="For a gateway or proxy in your network."><Input value={data.baseUrl} onChange={(e) => setData({ ...data, baseUrl: e.target.value })} placeholder="https://api.anthropic.com" /></Field>
+        </section>
+
         <div className="flex items-center justify-between border-t pt-4">
-          <label className="flex items-center gap-2"><Switch checked={data.enabled} onCheckedChange={(c) => setData({ ...data, enabled: c })} /> Enabled</label>
-          <Button type="submit">Save</Button>
+          <label className="flex items-center gap-2">
+            <Switch checked={draft.enabled} disabled={managed("enabled")} onCheckedChange={(c) => set("enabled", c)} /> Enabled
+            {managed("enabled") && <span className="text-[11px] text-muted-foreground">Set by the environment</span>}
+          </label>
+          <Button type="submit" disabled={busy}>{busy && <Spinner />} Save</Button>
         </div>
       </form>
     </Card>
   );
 }
 
+const blankMcp = { name: "", url: "", headerName: "Authorization", credential: "", toolAllowlist: "", useAgentIdentity: false };
+
 export function McpPage() {
   const { isAdmin } = useSession();
   const toast = useToast();
   const { data, reload } = useQuery(() => items(rpc.agents.listMcpServers<Page<McpServerView>>()), []);
-  const [form, setForm] = useState({ name: "", url: "", headerName: "Authorization", credential: "", toolAllowlist: "" });
+  const [form, setForm] = useState(blankMcp);
   const origin = window.location.origin;
   return (
     <div className="grid gap-5 xl:grid-cols-2">
@@ -254,7 +446,14 @@ export function McpPage() {
           {data?.map((s) => (
             <div key={s.id} className="flex items-center gap-3 px-4 py-3">
               <Plug className="size-4" />
-              <div className="min-w-0 flex-1"><div>{s.name} {!s.enabled && <Badge tone="warning">Disabled</Badge>}</div><div className="truncate text-[12px] text-muted-foreground">{s.url}{s.toolAllowlist.length ? ` · ${s.toolAllowlist.length} tools allowed` : " · all tools"}</div></div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  {s.name} {!s.enabled && <Badge tone="warning">Disabled</Badge>} {s.useAgentIdentity && <Badge tone="outline">Agent identity</Badge>}
+                </div>
+                <div className="truncate text-[12px] text-muted-foreground">
+                  {s.url}{s.toolAllowlist.length ? ` · ${s.toolAllowlist.length} tools allowed` : " · all tools"}
+                </div>
+              </div>
               {isAdmin && <Button size="icon" variant="ghost" aria-label="Remove" onClick={() => toast.undoable(`${s.name} will be removed.`, () => rpc.agents.deleteMcpServer({ id: s.id }).then(reload))}><Trash2 /></Button>}
             </div>
           ))}
@@ -264,17 +463,32 @@ export function McpPage() {
           <form className="space-y-3 border-t p-4" onSubmit={async (e) => {
             e.preventDefault();
             try {
-              await rpc.agents.saveMcpServer({ ...form, credential: form.credential || undefined, toolAllowlist: form.toolAllowlist.split(",").map((x) => x.trim()).filter(Boolean) });
-              setForm({ name: "", url: "", headerName: "Authorization", credential: "", toolAllowlist: "" });
+              await rpc.agents.saveMcpServer({
+                name: form.name, url: form.url, useAgentIdentity: form.useAgentIdentity, enabled: true,
+                headerName: form.useAgentIdentity ? "" : form.headerName, credential: !form.useAgentIdentity && form.credential ? form.credential : undefined,
+                toolAllowlist: form.toolAllowlist.split(",").map((x) => x.trim()).filter(Boolean),
+              });
+              setForm(blankMcp);
               reload();
             } catch (err) { toast.error(err); }
           }}>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="Grafana" /></Field>
               <Field label="URL"><Input type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} required placeholder="https://mcp.internal/grafana" /></Field>
-              <Field label="Auth header"><Input value={form.headerName} onChange={(e) => setForm({ ...form, headerName: e.target.value })} /></Field>
-              <Field label="Credential"><Input type="password" value={form.credential} onChange={(e) => setForm({ ...form, credential: e.target.value })} placeholder="Bearer ..." autoComplete="off" /></Field>
             </div>
+            <label className="flex items-start gap-2">
+              <Switch checked={form.useAgentIdentity} onCheckedChange={(c) => setForm({ ...form, useAgentIdentity: c })} />
+              <span>
+                Use agent identity
+                <span className="block text-[11px] text-muted-foreground">Sends the token and custom headers of the LLM provider settings, for example to the tools gateway of your cloud.</span>
+              </span>
+            </label>
+            {!form.useAgentIdentity && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Auth header"><Input value={form.headerName} onChange={(e) => setForm({ ...form, headerName: e.target.value })} /></Field>
+                <Field label="Credential"><Input type="password" value={form.credential} onChange={(e) => setForm({ ...form, credential: e.target.value })} placeholder="Bearer ..." autoComplete="off" /></Field>
+              </div>
+            )}
             <Field label="Allowed tools (optional)" hint="Comma separated. Empty allows all tools."><Input value={form.toolAllowlist} onChange={(e) => setForm({ ...form, toolAllowlist: e.target.value })} /></Field>
             <Button type="submit" variant="outline"><Plus /> Add MCP server</Button>
           </form>

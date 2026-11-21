@@ -4,12 +4,16 @@ import kotlinx.serialization.json.JsonObject
 import mayday.identity.Principal
 import mayday.shared.Clock
 import mayday.shared.JSON
+import mayday.shared.SpanKind
+import mayday.shared.Telemetry
 
 /** Agent loop of the built-in agent. It uses only provider-neutral ports. */
 class InternalAgent(
     private val llm: LlmProvider,
     private val catalog: ToolCatalog,
     private val clock: Clock,
+    private val telemetry: Telemetry = Telemetry.noop,
+    private val model: String = "",
     private val maxTurns: Int = 24,
 ) {
     suspend fun run(agent: AgentConfig, run: AgentRun, principal: Principal, subject: JsonObject): String {
@@ -18,17 +22,13 @@ class InternalAgent(
         val system = SYSTEM_PROMPT + if (agent.instructions.isNotBlank()) "\n\nOrganization instructions:\n${agent.instructions}" else ""
         var finalText = ""
         for (turn in 0 until maxTurns) {
-            val resp = llm.complete(LlmRequest(system, messages, tools))
+            val resp = chat(turn, LlmRequest(system, messages, tools))
             messages += resp.message
             val text = resp.message.blocks.filterIsInstance<LlmBlock.Text>().joinToString("\n") { it.text }.trim()
             if (text.isNotEmpty()) finalText = text
             when (resp.stopReason) {
                 StopReason.TOOL_USE -> {
-                    val results = resp.message.blocks.filterIsInstance<LlmBlock.ToolUse>().map { use ->
-                        val outcome = runCatching { catalog.call(principal, use.name, use.input, internal = true) }
-                            .getOrElse { ToolOutcome(it.message ?: "Tool failed", true) }
-                        LlmBlock.ToolResult(use.id, outcome.content.take(60_000), outcome.isError)
-                    }
+                    val results = resp.message.blocks.filterIsInstance<LlmBlock.ToolUse>().map { use -> callTool(principal, use) }
                     messages += LlmMessage(LlmRole.USER, results)
                 }
                 StopReason.REFUSAL -> throw IllegalStateException("The model declined this request")
@@ -38,6 +38,36 @@ class InternalAgent(
         }
         return finalText.ifEmpty { "Stopped after $maxTurns steps." }
     }
+
+    private suspend fun chat(turn: Int, request: LlmRequest): LlmResponse =
+        telemetry.span(if (model.isBlank()) "chat" else "chat $model", mapOf("gen_ai.operation.name" to "chat", "mayday.agent.turn" to turn, "mayday.agent.tools" to request.tools.size), SpanKind.CLIENT) { span ->
+            val resp = llm.complete(request)
+            span.set("gen_ai.response.model", resp.model.ifEmpty { null })
+            span.set("gen_ai.response.finish_reasons", listOf(resp.stopReason.name.lowercase()))
+            span.set("gen_ai.usage.input_tokens", resp.usage.inputTokens)
+            span.set("gen_ai.usage.output_tokens", resp.usage.outputTokens)
+            if (telemetry.captureContent) {
+                resp.message.blocks.filterIsInstance<LlmBlock.Text>().forEach { span.event("gen_ai.choice", mapOf("text" to it.text.take(8000))) }
+            }
+            resp
+        }
+
+    private suspend fun callTool(principal: Principal, use: LlmBlock.ToolUse): LlmBlock.ToolResult =
+        telemetry.span("execute_tool ${use.name}", mapOf("gen_ai.operation.name" to "execute_tool", "gen_ai.tool.name" to use.name, "gen_ai.tool.call.id" to use.id)) { span ->
+            if (telemetry.captureContent) span.set("gen_ai.tool.call.arguments", JSON.encodeToString(JsonObject.serializer(), use.input).take(8000))
+            val outcome = try {
+                catalog.call(principal, use.name, use.input, internal = true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: BudgetExhausted) {
+                ToolOutcome(e.message ?: "HTTP 429", true)
+            } catch (e: Exception) {
+                ToolOutcome(e.message ?: "Tool failed", true)
+            }
+            if (outcome.isError) span.fail(outcome.content.take(500))
+            span.set("mayday.tool.error", outcome.isError)
+            LlmBlock.ToolResult(use.id, outcome.content.take(60_000), outcome.isError)
+        }
 
     private fun task(run: AgentRun, subject: JsonObject): String {
         val ref = run.subjectLabel

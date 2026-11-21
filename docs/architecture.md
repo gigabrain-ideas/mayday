@@ -2,6 +2,8 @@
 
 Mayday is one deployable service. It uses domain-driven design (DDD) for the model and hexagonal architecture (ports and adapters) for the boundaries. You can replace each adapter without a change to the domain.
 
+The C4 diagrams (system context, containers, components, code) are in [c4.md](c4.md).
+
 ## Principles
 
 - The domain has no framework code. It uses the Kotlin standard library, the JDK, `kotlinx-coroutines` and `kotlinx-serialization` only. Spring and gRPC types stay in the adapters.
@@ -77,7 +79,7 @@ flowchart TB
   subgraph Driven adapters
     MEM[Memory + journal<br/>adapters/memory]
     PG[PostgreSQL<br/>adapters/postgres]
-    LLM[Anthropic<br/>adapters/llm]
+    LLM[Anthropic or OpenAI-compatible<br/>adapters/llm]
     WH[Webhook dispatcher<br/>adapters/dispatch]
     GW[MCP client gateway<br/>adapters/mcp/McpGateway]
     BUS[Event bus<br/>in-process or PgEventBus]
@@ -98,7 +100,9 @@ flowchart TB
 |---|---|---|
 | `*Repository` (13 ports) | each context | `MemoryStore`, `PostgresStore` |
 | `EventBus` | `shared` | `InProcessEventBus`, `PgEventBus` |
-| `LlmProvider`, `LlmProviderFactory` | `agents` | `AnthropicProvider`; tests use `FakeLlm` |
+| `LlmProvider`, `LlmProviderFactory` | `agents` | `LlmProviders` → `AnthropicProvider` (official SDK) or `OpenAiProvider` (Chat Completions); tests use `FakeLlm` |
+| `CredentialProvider`, `CredentialProviderFactory` | `agents` | `Credentials` (static key, OAuth 2.0 / workload identity, token file); see [gateway-identity.md](domains/gateway-identity.md) |
+| `Telemetry` | `shared` | `OtelTelemetry` (OpenTelemetry); default `Telemetry.noop`; see [observability.md](observability.md) |
 | `AgentDispatcher` | `agents` | `WebhookDispatcher`; tests use `RecordingDispatcher` |
 | `ToolCatalog` | `agents` | `MaydayTools`, `McpGateway`, `CompositeCatalog` |
 | `AgentIdentityLookup` | `identity` | `AgentService` |
@@ -135,6 +139,7 @@ sequenceDiagram
   AL->>POL: alerts.auto_incident_min_severity
   AL->>INC: declareFromAlert()
   AL->>AG: onAlertCreated(alert)
+  Note over AL,AG: Returns at once. The agent works in its own scope.
   AG->>POL: agents.auto_analysis
   AG->>AG: create run (identity of the agent)
   AG->>LLM: task + tools

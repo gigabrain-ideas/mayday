@@ -32,6 +32,18 @@ services:
       MAYDAY_DEMO: ${MAYDAY_DEMO:-true}
       MAYDAY_DEV_LOGIN: ${MAYDAY_DEV_LOGIN:-true}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Traces: MAYDAY_OTEL_ENDPOINT=http://jaeger:4318 docker compose --profile observability up
+      MAYDAY_OTEL_ENDPOINT: ${MAYDAY_OTEL_ENDPOINT:-}
+      MAYDAY_OTEL_CAPTURE_CONTENT: ${MAYDAY_OTEL_CAPTURE_CONTENT:-false}
+      MAYDAY_TRACE_URL_TEMPLATE: ${MAYDAY_TRACE_URL_TEMPLATE:-http://localhost:16686/trace/{traceId}}
+
+  # Trace UI on http://localhost:16686. Receives OTLP on 4317 (gRPC) and 4318 (HTTP).
+  jaeger:
+    image: jaegertracing/jaeger:2.5.0
+    profiles: [observability]
+    ports:
+      - "16686:16686"
+      - "4318:4318"
 
 volumes:
   pgdata:

@@ -38,7 +38,13 @@ resource "kubernetes_secret_v1" "mayday" {
     oidcClientSecret = var.oidc_client_secret
     anthropicApiKey  = var.anthropic_api_key
     databasePassword = var.database_password
+    llmApiKey        = var.llm_api_key
+    llmClientSecret  = var.llm_client_secret
   }
+}
+
+locals {
+  secret_name = kubernetes_secret_v1.mayday.metadata[0].name
 }
 
 resource "helm_release" "mayday" {
@@ -50,7 +56,7 @@ resource "helm_release" "mayday" {
     image          = { repository = var.image_repository, tag = var.image_tag }
     replicaCount   = var.database_url == "" ? 1 : var.replicas
     publicUrl      = var.public_url
-    existingSecret = kubernetes_secret_v1.mayday.metadata[0].name
+    existingSecret = local.secret_name
     adminEmails    = join(",", var.admin_emails)
     database       = { url = var.database_url, user = var.database_user }
     oidc           = { issuer = var.oidc_issuer, clientId = var.oidc_client_id }
@@ -70,5 +76,28 @@ resource "helm_release" "mayday" {
         tls     = var.ingress_tls_secret == "" ? [] : [{ hosts = [var.grpc_ingress_host], secretName = var.ingress_tls_secret }]
       }
     }
+    llm = {
+      provider           = var.llm_provider
+      baseUrl            = var.llm_base_url
+      model              = var.llm_model
+      authStyle          = var.llm_auth_style
+      credential         = var.llm_credential
+      issuer             = var.llm_issuer
+      tokenUrl           = var.llm_token_url
+      grant              = var.llm_grant
+      clientAuth         = var.llm_client_auth
+      clientId           = var.llm_client_id
+      scope              = var.llm_scope
+      tokenParams        = var.llm_token_params
+      headers            = var.llm_headers
+      apiKeySecret       = { name = var.llm_api_key == "" ? "" : local.secret_name, key = "llmApiKey" }
+      clientSecretSecret = { name = var.llm_client_secret == "" ? "" : local.secret_name, key = "llmClientSecret" }
+    }
+    workloadIdentity = { enabled = var.workload_identity_audience != "", audience = var.workload_identity_audience }
+    serviceAccount   = { create = length(var.service_account_annotations) > 0, name = "", annotations = var.service_account_annotations }
+    podLabels        = var.pod_labels
+    tokenProxy       = { enabled = var.token_proxy_upstream != "", upstream = var.token_proxy_upstream }
+    otel             = { endpoint = var.otel_endpoint, sampling = var.otel_sampling, captureContent = var.otel_capture_content }
+    traceUrlTemplate = var.trace_url_template
   })]
 }

@@ -152,7 +152,7 @@ export function SecretOnce({ label, value }: { label: string; value: string }) {
   return (
     <Field label={label} hint="Copy it now. Mayday stores only a hash and cannot show it again.">
       <div className="flex gap-2">
-        <Input readOnly value={value} onFocus={(e) => e.target.select()} className="font-mono" />
+        <Input readOnly value={value} onFocus={(e) => e.target.select()} className="font-mono read-only:opacity-100" />
         <Button variant="outline" size="icon" aria-label="Copy" onClick={() => navigator.clipboard.writeText(value).then(() => toast.show("Copied."))}><Copy /></Button>
       </div>
     </Field>

@@ -26,6 +26,11 @@ management:
   endpoint.health.probes:
     enabled: true
     add-additional-paths: true
+  # Traces: OTLP export only when an endpoint is set (MAYDAY_OTEL_ENDPOINT or OTEL_EXPORTER_OTLP_*). See docs/observability.md.
+  tracing.sampling.probability: ${MAYDAY_OTEL_SAMPLING:1.0}
+  opentelemetry.tracing.export.otlp.transport: ${MAYDAY_OTEL_TRANSPORT:http}
+  # Metrics: Prometheus at /metrics. OTLP push only when MAYDAY_OTEL_METRICS=true or OTEL_METRICS_EXPORTER=otlp.
+  otlp.metrics.export.enabled: ${MAYDAY_OTEL_METRICS:false}
 
 mayday:
   public-url: ${MAYDAY_PUBLIC_URL:http://localhost:${server.port}}
@@ -45,8 +50,34 @@ mayday:
     client-secret: ${MAYDAY_OIDC_CLIENT_SECRET:}
     scopes: ${MAYDAY_OIDC_SCOPES:openid email profile}
     audiences: ${MAYDAY_OIDC_AUDIENCES:}
-  anthropic-api-key: ${ANTHROPIC_API_KEY:}
+  # Internal agent. A set value overrides the admin UI and is shown read-only there.
+  llm:
+    provider: ${MAYDAY_LLM_PROVIDER:}
+    model: ${MAYDAY_LLM_MODEL:}
+    base-url: ${MAYDAY_LLM_BASE_URL:}
+    effort: ${MAYDAY_LLM_EFFORT:}
+    enabled: ${MAYDAY_LLM_ENABLED:}
+    api-key: ${MAYDAY_LLM_API_KEY:${ANTHROPIC_API_KEY:}}
+    auth-style: ${MAYDAY_LLM_AUTH_STYLE:}
+    credential: ${MAYDAY_LLM_CREDENTIAL:}
+    token-url: ${MAYDAY_LLM_TOKEN_URL:}
+    issuer: ${MAYDAY_LLM_ISSUER:}
+    grant: ${MAYDAY_LLM_GRANT:}
+    client-auth: ${MAYDAY_LLM_CLIENT_AUTH:}
+    client-id: ${MAYDAY_LLM_CLIENT_ID:}
+    client-secret: ${MAYDAY_LLM_CLIENT_SECRET:}
+    assertion-file: ${MAYDAY_LLM_ASSERTION_FILE:}
+    token-file: ${MAYDAY_LLM_TOKEN_FILE:}
+    scope: ${MAYDAY_LLM_SCOPE:}
+    token-params: ${MAYDAY_LLM_TOKEN_PARAMS:}
+    headers: ${MAYDAY_LLM_HEADERS:}
   web-dir: ${MAYDAY_WEB_DIR:}
   session-hours: ${MAYDAY_SESSION_HOURS:12}
   max-live-connections: ${MAYDAY_MAX_LIVE_CONNECTIONS:100000}
   agent-concurrency: ${MAYDAY_AGENT_CONCURRENCY:16}
+  trace-url-template: ${MAYDAY_TRACE_URL_TEMPLATE:}
+  telemetry:
+    endpoint: ${MAYDAY_OTEL_ENDPOINT:}
+    environment: ${MAYDAY_ENVIRONMENT:}
+    capture-content: ${MAYDAY_OTEL_CAPTURE_CONTENT:false}
+    sample-agent-runs: ${MAYDAY_OTEL_SAMPLE_AGENT_RUNS:true}

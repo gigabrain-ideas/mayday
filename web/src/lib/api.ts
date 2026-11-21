@@ -43,7 +43,7 @@ export interface User {
   id: string; email: string; name: string; orgRole: OrgRole; teams: Record<string, TeamRole>;
   projectAdmin: string[]; externalId?: string; disabled: boolean; createdAt: string;
 }
-export interface Me { user: User; actorKind: string; scopes: TokenScope[]; agentReady: boolean }
+export interface Me { user: User; actorKind: string; scopes: TokenScope[]; agentReady: boolean; traceUrlTemplate?: string }
 export interface ActionItem { text: string; owner: string; done: boolean }
 export interface Postmortem {
   status: "DRAFT" | "IN_REVIEW" | "PUBLISHED"; summary: string; impact: string; rootCause: string; detection: string;
@@ -76,10 +76,27 @@ export interface AgentCredentials { agent: AgentConfig; token?: IssuedToken; sig
 export interface AgentRun {
   id: string; agentId: string; agentName: string; action: AgentAction; subjectKind: "INCIDENT" | "ALERT"; subjectId: string;
   subjectLabel: string; status: RunStatus; trigger: "AUTO" | "MANUAL"; requestedBy: Actor; onBehalfOf?: string; prompt: string;
-  output: string; error: string; createdAt: string; startedAt?: string; finishedAt?: string;
+  output: string; error: string; createdAt: string; startedAt?: string; finishedAt?: string; traceId?: string;
 }
-export interface LlmView { provider: string; model: string; baseUrl: string; effort: string; enabled: boolean; hasApiKey: boolean; ready: boolean }
-export interface McpServerView { id: string; name: string; url: string; headerName: string; hasCredential: boolean; toolAllowlist: string[]; enabled: boolean }
+export type LlmProvider = "anthropic" | "openai";
+export type AuthStyle = "API_KEY" | "BEARER";
+export type CredentialMode = "NONE" | "STATIC" | "OAUTH2" | "FILE";
+export type GrantType = "CLIENT_CREDENTIALS" | "TOKEN_EXCHANGE";
+export type ClientAuth = "BASIC" | "POST";
+export interface LlmView {
+  provider: LlmProvider; model: string; baseUrl: string; effort: string; enabled: boolean; hasApiKey: boolean; ready: boolean;
+  authStyle?: AuthStyle; credential?: CredentialMode; tokenUrl: string; issuer: string; grant?: GrantType; clientAuth?: ClientAuth;
+  clientId: string; hasClientSecret: boolean; assertionFile: string; tokenFile: string; scope: string; tokenParams: Record<string, string>;
+  headers: Record<string, string>; managedFields: string[]; pausedUntil?: string; pauseReason: string;
+}
+/** Unset fields keep their value. An empty secret removes it. Headers and token parameters change only with their replace flag. */
+export type LlmInput = Partial<Omit<LlmView, "hasApiKey" | "hasClientSecret" | "ready" | "managedFields" | "pausedUntil" | "pauseReason">> & {
+  apiKey?: string; clientSecret?: string; replaceHeaders?: boolean; replaceTokenParams?: boolean;
+};
+export interface McpServerView {
+  id: string; name: string; url: string; headerName: string; hasCredential: boolean; toolAllowlist: string[]; enabled: boolean;
+  useAgentIdentity: boolean;
+}
 export interface SettingDef {
   key: string; label: string; description: string; type: "BOOL" | "INT" | "SEVERITY" | "STRING"; default: string;
   scopes: Scope[]; strictness: string; min?: number; max?: number;
@@ -186,6 +203,7 @@ const STATUS: Partial<Record<Code, [number, string]>> = {
   [Code.AlreadyExists]: [409, "conflict"],
   [Code.Aborted]: [409, "conflict"],
   [Code.Unavailable]: [503, "unavailable"],
+  [Code.ResourceExhausted]: [429, "resource_exhausted"],
 };
 
 function toApiError(e: unknown): ApiError {
@@ -230,6 +248,12 @@ export const rpc = {
   agents: service(AgentService),
   agentRuns: service(AgentRunService),
 };
+
+/** Link to the trace of a run in the tracing UI, or undefined when tracing or the link template is not configured. */
+export function traceUrl(template: string | undefined, traceId: string | undefined): string | undefined {
+  if (!template || !traceId) return undefined;
+  return template.split("{traceId}").join(encodeURIComponent(traceId));
+}
 
 export const items = <T>(p: Promise<{ items: T[] }>) => p.then((r) => r.items);
 

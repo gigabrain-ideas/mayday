@@ -26,9 +26,46 @@ Mayday exposes its use cases as tools. External agents use them through the MCP 
 
 ## Tool gateway
 
-- Administrators add MCP servers (URL, header, credential, allowlist).
-- `McpGateway` connects with the Streamable HTTP client, lists tools (cached for two minutes) and prefixes names with the server slug (`grafana__query`).
-- Only the built-in agent sees gateway tools. They are not re-exposed through Mayday's MCP server.
+The tool gateway gives the built-in agent the tools of remote MCP servers, for example a company tools gateway. Only the built-in agent sees these tools. Mayday's MCP server does not expose them again.
+
+Configuration per server (`McpServerConfig`, administrators only):
+
+| Field | Meaning |
+|---|---|
+| `name`, `url` | Display name and Streamable HTTP endpoint (http or https). The name slug is the tool prefix. |
+| `headerName`, `credential` | Static mode: header and sealed secret. Default header `Authorization`. |
+| `toolAllowlist` | Remote tool names to expose. Empty: all tools. |
+| `useAgentIdentity` | True: send the identity headers of the LLM settings (token and custom headers) instead of the static credential. |
+| `enabled` | False: the server is ignored. |
+
+Behaviour (`McpGateway`, `McpClient`):
+
+- Identity mode: before each HTTP request (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`), the client gets new headers from `GatewayAuth.headers()` of `identity()`. These are the same headers as for the AI gateway: the custom headers and the token (`Authorization: Bearer` or `x-api-key`, per `AuthStyle`). The tools gateway is expected in the customer's cloud and accepts the same token as the AI gateway; Mayday has no per-server token settings. The client does not keep header values, so token rotation applies at once.
+- Static mode: the client sends the static credential in `headerName`. No identity is used.
+- Each request also has the W3C trace context headers (`traceparent`, `tracestate`) of the current span.
+- Tool names: `<server slug with _>__<remote name>`, maximum 64 characters, for example `grafana_prod__query`. Descriptions start with `[<server name>]`.
+- Tool list cache: two minutes per server. The cache key is the server configuration and the identity (custom headers, auth style, credential provider, `useAgentIdentity`). A different key starts a new client and a new MCP session. One refresh at a time per server.
+- Sessions: the client keeps the `Mcp-Session-Id`. A mutex makes sure that only one `initialize` runs at a time. HTTP 404 on a request with a session id: the client starts a new session and sends the request once more. Blocking HTTP calls run on `Dispatchers.IO`.
+- HTTP 401: identity mode calls `GatewayAuth.invalidate()` and sends the request once more. A second 401 is a tool error (`unauthorized`). Static mode does not retry.
+- Grants: the tools gateway grants tools per identity. Mayday does not configure grants. A refused call answers a normal `tools/call` result with `isError: true` and a message. Mayday gives that message to the model unchanged, does not retry and does not hide the tool. The run continues.
+- Mayday never reads an error message to decide what to do. Only the HTTP status, the JSON-RPC structure and `isError` decide. HTTP 403 and JSON-RPC errors are tool errors like any other transport error.
+- HTTP 429: Mayday never retries. The server is paused for the cooldown that the response states (`statedCooldown`: `Retry-After`, `retry-after-ms`, RateLimit or provider reset headers, or a `retry_after` JSON field). Without one: 15 minutes. The pause is between 1 second and 24 hours. The call returns a tool error at once. During the pause, calls to that server fail without network I/O, and `tools()` returns the cached tools without a refresh.
+- Failures of one server (network, HTTP 5xx, bad JSON) do not change the tools of other servers. The failed server gives no tools until the next successful refresh. Mayday logs the failure once until it changes or the server recovers.
+- Spans (kind CLIENT): `mcp tools/list <server>` and `mcp tools/call <tool>`. Attributes: `mcp.method.name`, `mcp.session.id` (when known), `mayday.mcp.server`, `gen_ai.tool.name` (calls), `server.address`, `http.response.status_code`. On failure: `error.type` = `budget_exhausted`, `unauthorized` or `transport` (the span is failed), or `tool_error` for an `isError: true` result.
+
+### Tool gateway positive use cases
+
+- The company tools gateway accepts the workload identity token and the custom headers. The agent lists `observability__query_logs` and calls it. The trace shows the agent run, the `execute_tool` span and the `mcp tools/call query_logs` span, and the tools gateway joins the same trace.
+- The token rotates every 5 minutes. Each request has the current token. No restart is necessary.
+- An administrator changes a custom header (for example the agent registry id). The next `tools()` call lists the tools again with the new identity.
+
+### Tool gateway negative use cases
+
+- The identity has no grant for `restart_pod`. The gateway answers `isError: true` with its reason. The agent receives that reason as the tool result and reports it. The next call goes to the gateway again, because the gateway decides each call.
+- The tools gateway answers 429 with `Retry-After: 300` (or `RateLimit: "budget";r=0;t=300`). One call goes out. All calls to that server in the next 5 minutes fail at once with a "do not retry" message.
+- The tools gateway answers 429 without a cooldown. Calls to that server fail at once for 15 minutes.
+- One MCP server is down. The tools of the other servers stay available.
+- The token is expired (401). Mayday gets a new token and sends the request once more. If the new token also fails, the call is a tool error.
 
 ## Positive use cases
 
@@ -43,4 +80,4 @@ Mayday exposes its use cases as tools. External agents use them through the MCP 
 
 ## Rebuild checklist
 
-Pass the MCP part of `HttpEdgesContractTest`, the pull-agent part of `GrpcContractTest` and the tool parts of `AgentTest`.
+Pass the MCP part of `HttpEdgesContractTest`, the pull-agent part of `GrpcContractTest`, the tool parts of `AgentTest` and `McpGatewayContractTest` (tool gateway: identity headers with token rotation, static mode, allowlist and prefixes, 401 retry, grants, 429 pause, failure isolation, session expiry, cache key).

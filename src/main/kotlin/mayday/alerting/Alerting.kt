@@ -22,6 +22,8 @@ import mayday.shared.Invalid
 import mayday.shared.NotFound
 import mayday.shared.Page
 import mayday.shared.Severity
+import mayday.shared.SpanScope
+import mayday.shared.Telemetry
 import mayday.shared.Ts
 import java.time.Duration
 import java.time.Instant
@@ -99,6 +101,7 @@ class AlertService(
     private val policy: PolicyReader,
     private val events: EventPublisher,
     private val clock: Clock,
+    private val telemetry: Telemetry = Telemetry.noop,
 ) {
     @Volatile var automation: AlertAutomation = object : AlertAutomation { override suspend fun onAlertCreated(alert: Alert) = Unit }
 
@@ -107,7 +110,17 @@ class AlertService(
     suspend fun list(by: Principal, filter: AlertFilter, cursor: String?, limit: Int) =
         Access.requireRead(by).let { alerts.list(filter, cursor, limit.coerceIn(1, 200)) }
 
-    suspend fun ingest(by: Principal, signal: AlertSignal): IngestResult {
+    suspend fun ingest(by: Principal, signal: AlertSignal): IngestResult =
+        telemetry.span("alert.ingest", mapOf("mayday.alert.source" to signal.source, "mayday.alert.severity" to signal.severity.name, "mayday.alert.status" to signal.status.name)) { span ->
+            ingest(by, signal, span).also { r ->
+                span.set("mayday.alert.id", r.alert.id)
+                span.set("mayday.alert.team_id", r.alert.teamId)
+                span.set("mayday.alert.count", r.alert.count)
+                span.set("mayday.incident.key", r.incidentKey)
+            }
+        }
+
+    private suspend fun ingest(by: Principal, signal: AlertSignal, span: SpanScope): IngestResult {
         if (!by.has(TokenScope.ALERTS_INGEST) && !by.has(TokenScope.WRITE)) throw Forbidden("The token cannot send alerts")
         if (signal.title.isBlank()) throw Invalid("Alert title is required")
         val team = directory.team(signal.team)
@@ -119,6 +132,7 @@ class AlertService(
         val sourceActor = Actor(ActorKind.SYSTEM, signal.source, signal.source)
 
         if (signal.status == AlertStatus.RESOLVED) {
+            span.set(OUTCOME, "resolved")
             if (active != null) return IngestResult(resolveInternal(active, sourceActor, "Resolved by ${signal.source}."), false)
             return IngestResult(latest ?: resolveInternal(createAlert(signal, fp, team.id, now), sourceActor, "Resolved by ${signal.source}."), latest == null)
         }
@@ -138,12 +152,14 @@ class AlertService(
                 version = target.version + 1,
             )
             alerts.save(next, target.version)
+            span.set(OUTCOME, if (reopened) "reopened" else "deduplicated")
             if (reopened) next.incidentId?.let { incidentTimeline(it, sourceActor, "Alert firing again: ${next.title}") }
             publish("alert.updated", next)
             return IngestResult(next, false)
         }
 
         val created = createAlert(signal, fp, team.id, now)
+        span.set(OUTCOME, "created")
         var result = created
         var incidentKey: String? = null
         val threshold = policy.severity(Keys.ALERT_AUTO_INCIDENT_SEVERITY, listOf(team.id))
@@ -256,6 +272,8 @@ class AlertService(
         events.publish(DomainEvent(type, a.id, clock.now(), listOf(a.teamId), mapOf("severity" to a.severity.name, "status" to a.status.name)))
 
     companion object {
+        private const val OUTCOME = "mayday.alert.outcome"
+
         fun fingerprint(source: String, title: String, teamId: String, labels: Map<String, String>): String {
             val canonical = buildString {
                 append(source).append('|').append(title).append('|').append(teamId)

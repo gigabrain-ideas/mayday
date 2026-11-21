@@ -29,13 +29,48 @@ Mayday is one process: a Spring Boot jar (`build/libs/mayday.jar`). It needs Jav
 | `MAYDAY_OIDC_SCOPES` | `openid email profile` | Requested scopes |
 | `MAYDAY_OIDC_AUDIENCES` | – | Extra audiences accepted on SSO access tokens (on-behalf-of) |
 | `MAYDAY_ADMIN_EMAILS` | – | These users become administrators at first login. The first user is always an administrator. |
-| `ANTHROPIC_API_KEY` | – | LLM key for the built-in agent (or set it in the interface) |
+| `ANTHROPIC_API_KEY` | – | Fallback for `MAYDAY_LLM_API_KEY` |
 | `MAYDAY_DEV_LOGIN` | false | Email sign-in without a password. Never in production. |
 | `MAYDAY_DEMO` | false | Sample data when the store is empty |
 | `MAYDAY_SESSION_HOURS` | 12 | Session lifetime |
 | `MAYDAY_MAX_LIVE_CONNECTIONS` | 100000 | Live event streams (`EventService.Subscribe`) per instance |
 | `MAYDAY_AGENT_CONCURRENCY` | 16 | Parallel built-in agent runs per instance |
 | `MAYDAY_WEB_DIR` | – | Serve the interface from a directory instead of the built-in copy |
+
+### Built-in agent (LLM provider)
+
+A set variable overrides the value in Settings → Agents → LLM provider. The interface shows it read-only with the hint "Set by the environment". An empty variable leaves the value to the interface.
+
+| Variable | Meaning |
+|---|---|
+| `MAYDAY_LLM_PROVIDER` | `anthropic` or `openai` (OpenAI-compatible API) |
+| `MAYDAY_LLM_BASE_URL` | Provider or AI gateway URL, for example `https://ai-gateway.example.com/v1` |
+| `MAYDAY_LLM_MODEL` | Model name |
+| `MAYDAY_LLM_EFFORT` | `low`, `medium`, `high`, `xhigh` or `max` |
+| `MAYDAY_LLM_ENABLED` | `true` or `false` |
+| `MAYDAY_LLM_AUTH_STYLE` | `api_key` (header `x-api-key`) or `bearer` (`Authorization: Bearer`). The default follows the provider. |
+| `MAYDAY_LLM_CREDENTIAL` | `none`, `static`, `oauth2` or `file` |
+| `MAYDAY_LLM_API_KEY` | API key for `static`. Fallback: `ANTHROPIC_API_KEY`. |
+| `MAYDAY_LLM_ISSUER` or `MAYDAY_LLM_TOKEN_URL` | `oauth2`: the issuer (Mayday reads the token endpoint from its metadata) or the token endpoint |
+| `MAYDAY_LLM_GRANT` | `oauth2`: `client_credentials` (default) or `token_exchange` |
+| `MAYDAY_LLM_CLIENT_ID`, `MAYDAY_LLM_CLIENT_SECRET`, `MAYDAY_LLM_CLIENT_AUTH` | `oauth2`: client, secret, and `basic` (default) or `post` for the secret |
+| `MAYDAY_LLM_ASSERTION_FILE` | `oauth2`: workload identity token file (client assertion, or subject token for `token_exchange`) |
+| `MAYDAY_LLM_SCOPE`, `MAYDAY_LLM_TOKEN_PARAMS` | `oauth2`: scope, and extra token request fields such as `audience=...,resource=...` |
+| `MAYDAY_LLM_TOKEN_FILE` | Token for `file`. Another process writes and refreshes it. |
+| `MAYDAY_LLM_HEADERS` | Custom headers on each gateway call: `name=value,name2=value2`, for example `x-company-agent-id=mayday-prod` |
+
+Mayday uses standard OAuth 2.0 only and works with any compliant authorization server. Details: [domains/gateway-identity.md](domains/gateway-identity.md).
+
+### Token proxy and tracing
+
+| Variable | Meaning |
+|---|---|
+| `MAYDAY_PROXY_UPSTREAM` | Token proxy only: the AI gateway URL |
+| `MAYDAY_PROXY_LISTEN` | Token proxy only: listen address, for example `127.0.0.1:8091` |
+| `MAYDAY_OTEL_ENDPOINT` | OTLP/HTTP endpoint, for example `http://otel-collector:4318`. Empty: tracing is off. |
+| `MAYDAY_OTEL_SAMPLING` | Ratio of traces to keep, `0.0` to `1.0` |
+| `MAYDAY_OTEL_CAPTURE_CONTENT` | `true` exports prompts, responses and tool arguments. They can contain incident data. Default `false`. |
+| `MAYDAY_TRACE_URL_TEMPLATE` | Link from a run to its trace, for example `https://grafana.example.com/explore?traceId={traceId}`. Without it, the interface shows the trace ID for copying. |
 
 Spring Boot reads all other `spring.*` and `server.*` properties from the environment too, for example `spring.grpc.server.ssl.*` (as `SPRING_GRPC_SERVER_SSL_*`) for TLS on the gRPC port. The defaults are in `src/main/resources/application.yaml`.
 
@@ -67,6 +102,14 @@ docker compose up --build
 
 Both open http://localhost:8080 with sample data and email sign-in.
 
+To see the traces of agent runs, start Jaeger with the `observability` profile:
+
+```bash
+MAYDAY_OTEL_ENDPOINT=http://jaeger:4318 docker compose --profile observability up --build
+```
+
+Jaeger shows the traces on http://localhost:16686. A run in the interface links to its trace.
+
 ## Container
 
 ```bash
@@ -91,6 +134,8 @@ helm install mayday deploy/helm/mayday --set secretKey=$(openssl rand -hex 32) -
 - The service has port `http` (`service.port`, 80) and, with `grpc.enabled` (default), port `grpc` (`service.grpcPort`, 9090, `appProtocol: kubernetes.io/h2c`).
 - The ingress (`ingress.*`) serves the web interface, gRPC-Web, MCP and webhooks. It turns off proxy buffering for the live event stream.
 - Native gRPC through an ingress: set `grpc.ingress.enabled=true`, `grpc.ingress.host` and `grpc.ingress.tls`. The default annotation is for ingress-nginx (`backend-protocol: GRPC`). Clients need TLS, because the ingress accepts HTTP/2 only with TLS.
+- `llm.*` sets the `MAYDAY_LLM_*` variables. `llm.apiKeySecret` and `llm.clientSecretSecret` refer to existing secrets.
+- `workloadIdentity.*`, `serviceAccount.*`, `podLabels`, `podAnnotations`, `tokenProxy.*`, `otel.*` and `traceUrlTemplate`: see [Enterprise AI gateway](#enterprise-ai-gateway).
 
 ## Terraform
 
@@ -101,6 +146,82 @@ cd deploy/terraform && terraform init && terraform apply -var-file=example.tfvar
 ```
 
 Use your cloud's managed PostgreSQL (RDS, Cloud SQL, Azure Database) and pass its URL in `database_url`.
+
+The `llm_*`, `workload_identity_audience`, `service_account_annotations`, `pod_labels`, `token_proxy_upstream`, `otel_*` and `trace_url_template` variables set the matching chart values. Terraform keeps `llm_api_key` and `llm_client_secret` in the `mayday` secret. `example.tfvars` has an example.
+
+## Enterprise AI gateway
+
+Many organizations send all LLM traffic through an AI gateway (an API gateway or an internal proxy). The gateway identifies the caller, checks its budget and keeps an audit log. Tools come from a tools gateway in the same cloud. Mayday supports this setup:
+
+- OpenAI-compatible or Anthropic API at a custom `MAYDAY_LLM_BASE_URL`.
+- Short-lived tokens from any OAuth 2.0 authorization server: client credentials with a secret or a workload identity token, token exchange, or a token file. Mayday finds the token endpoint from the issuer, caches the token and gets a new one before it expires.
+- Custom headers on each LLM call, for example an agent registry id. MCP servers with "Use agent identity" get the same token and headers.
+- W3C trace context on each call. With `MAYDAY_OTEL_ENDPOINT`, each run has a trace that the gateway can join.
+
+```mermaid
+flowchart LR
+  M[Mayday pod] -- "Bearer token + custom headers + traceparent" --> G[AI gateway]
+  M -- "Bearer token + custom headers" --> T[Tools gateway, MCP]
+  M -- "workload identity token" --> E[OAuth 2.0 authorization server]
+  E -- "access token" --> M
+  G --> L[LLM]
+```
+
+### Kubernetes workload identity
+
+1. In your identity provider, trust the cluster's OIDC issuer and allow the service account `system:serviceaccount:<namespace>:<service account>` to get tokens for the gateway.
+2. Install the chart:
+
+```yaml
+workloadIdentity:
+  enabled: true
+  audience: https://idp.example.com   # the audience your identity provider expects
+llm:
+  provider: openai
+  baseUrl: https://ai-gateway.example.com/v1
+  model: gpt-gateway
+  enabled: true
+  issuer: https://idp.example.com
+  clientId: mayday
+  scope: ai-gateway.invoke
+  headers:
+    x-company-agent-id: mayday-prod   # only if your gateway needs it
+```
+
+The chart projects a service account token with that audience to `/var/run/secrets/mayday/workload-identity/token`. With `workloadIdentity.enabled`, `llm.credential` is `oauth2` and `llm.assertionFile` is that path by default.
+
+- Identity provider that exchanges the platform token (RFC 8693): set `llm.grant: token_exchange` and, if needed, `llm.tokenParams: { audience: ... }`.
+- Cloud whose webhook writes the token file: set `serviceAccount.create`, `serviceAccount.annotations` and `podLabels` as the webhook needs, leave `workloadIdentity.enabled` off, and set `llm.credential: oauth2` and `llm.assertionFile` to the file the webhook writes.
+
+### Token proxy sidecar
+
+Use the sidecar when a central team owns the gateway credentials, or when other tools in the pod use the same gateway. Set `tokenProxy.enabled=true` and `tokenProxy.upstream`. The chart then:
+
+- Starts a second container from the same image with the argument `token-proxy`, `MAYDAY_PROXY_UPSTREAM` and `MAYDAY_PROXY_LISTEN=127.0.0.1:<tokenProxy.port>`.
+- Gives the `llm.*` credential and identity settings to the sidecar, not to Mayday.
+- Sets `MAYDAY_LLM_BASE_URL=http://127.0.0.1:<port>` and `MAYDAY_LLM_CREDENTIAL=none` for Mayday.
+
+The sidecar adds the token and the custom headers to each request. MCP servers with "Use agent identity" get no token from Mayday in this mode. Send them through the sidecar too, or give them a static credential.
+
+### Budget used up (HTTP 429)
+
+- Mayday does not retry a call that got HTTP 429.
+- The run fails with a clear message. The internal agent pauses for the cooldown that the response states (`Retry-After`, `retry-after-ms`, RateLimit headers, provider reset headers or a `retry_after` JSON field). Without one, it pauses for 15 minutes. The LLM settings page shows the pause in yellow.
+- A 429 from an MCP server pauses only that server, with the same cooldown rules.
+- Manual runs of the built-in agent fail with `UNAVAILABLE` while the agent is paused. External agents continue to work.
+- Saving the LLM settings ends the pause.
+- Alert intake and incidents never wait for an agent. A paused agent does not change them.
+
+## Run without an agent
+
+Mayday works fully without an LLM provider and without external agents:
+
+- Incidents, alerts, timelines, postmortems, runbooks, reports and policies work as usual. People write the content.
+- The agent buttons on an incident or alert open a dialog that tells you how to configure an agent. Nothing fails.
+- Settings → Agents shows that the built-in agent needs an LLM provider.
+- Do not set `MAYDAY_LLM_*`. Leave `MAYDAY_OTEL_ENDPOINT` empty if you do not collect traces.
+
+You can add an LLM provider or an external agent at any time. A restart is not necessary.
 
 ## Bare metal
 

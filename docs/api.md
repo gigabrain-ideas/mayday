@@ -57,10 +57,43 @@ gRPC calls return a status code. The trailer `mayday-error-code` has the domain 
 | `invalid` | `INVALID_ARGUMENT` | 400 | Bad input |
 | `not_found` | `NOT_FOUND` | 404 | Unknown resource |
 | `conflict` | `ABORTED` | 409 | Stale `version` or duplicate |
-| `unavailable` | `UNAVAILABLE` | 503 | A dependency is not configured (for example no LLM provider), or too many live streams |
+| `unavailable` | `UNAVAILABLE` | 503 | A dependency is not configured (for example no LLM provider), the agent is paused after HTTP 429, or too many live streams |
+| `resource_exhausted` | `RESOURCE_EXHAUSTED` | 429 | The AI gateway refused a call because the agent budget or rate limit is used up. Do not retry before the pause ends. |
 | (unexpected error) | `INTERNAL` | 500 | The details are in the server log only |
 
 HTTP edges return the body `{"error": "<code>", "message": "<text for people>"}`.
+
+## LLM provider and tool gateway
+
+`AgentService.GetLlm` returns `LlmView`. `AgentService.UpdateLlm` takes `LlmInput` and needs an administrator.
+
+| Field | Meaning |
+|---|---|
+| `provider` | `anthropic` or `openai` (OpenAI-compatible API at `base_url`) |
+| `model`, `base_url`, `effort`, `enabled` | Model, provider or AI gateway URL (`http` or `https`), effort (`low` to `max`), on or off |
+| `auth_style` | `AUTH_STYLE_API_KEY` (header `x-api-key`) or `AUTH_STYLE_BEARER` (`Authorization: Bearer`). The default follows the provider. |
+| `credential` | `CREDENTIAL_MODE_NONE`, `_STATIC` (`api_key`), `_OAUTH2`, `_FILE` (`token_file`) |
+| `issuer`, `token_url` | OAuth 2.0: issuer for metadata discovery, or the token endpoint (wins) |
+| `grant` | `GRANT_TYPE_CLIENT_CREDENTIALS` (default) or `GRANT_TYPE_TOKEN_EXCHANGE` (RFC 8693) |
+| `client_id`, `client_secret`, `client_auth` | OAuth 2.0 client. `CLIENT_AUTH_BASIC` (default) or `CLIENT_AUTH_POST` for the secret |
+| `assertion_file` | Workload identity token file: client assertion, or subject token for token exchange |
+| `scope`, `token_params` | Scope and extra token request fields (for example `audience`, `resource`) |
+| `headers` | Custom headers for each gateway call, for example an agent registry id |
+| `has_api_key`, `has_client_secret` | `true` when a secret is set. Mayday never returns secrets. |
+| `ready` | The internal agent can call the provider |
+| `managed_fields` | Field names (lowerCamelCase) that the environment sets. `UpdateLlm` refuses them with `INVALID_ARGUMENT`. |
+| `paused_until`, `pause_reason` | Set after the gateway answered HTTP 429. The agent makes no LLM call before this time. A successful `UpdateLlm` ends the pause. |
+
+`UpdateLlm` rules:
+
+- An unset field keeps its value. An empty `api_key` or `client_secret` removes the secret.
+- `headers` change only when `replace_headers` is `true`, and `token_params` only when `replace_token_params` is `true`. Then the map replaces all entries. An empty map removes them.
+- An invalid URL, header name, provider or effort, or a reserved token parameter (`grant_type`, `client_id`, `client_secret`, `client_assertion`, `client_assertion_type`, `subject_token`, `scope`) gives `INVALID_ARGUMENT`. Mayday then changes nothing.
+- Fields 15 and 16 of `LlmInput` and 16 and 17 of `LlmView` (agent ID header and value) are removed and reserved. Use `headers`.
+
+`McpServerView` and `SaveMcpServerRequest` have `use_agent_identity`: Mayday sends the identity headers of the LLM settings (token and custom headers) to the MCP server instead of the static credential. Field 9 (`scope`) is removed and reserved.
+
+`AgentRun.trace_id` is the OpenTelemetry trace of the run. It is empty when tracing is off. `Me.trace_url_template` is the value of `MAYDAY_TRACE_URL_TEMPLATE`. Replace `{traceId}` to get a link to the trace.
 
 ## gRPC-Web
 

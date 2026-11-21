@@ -21,16 +21,77 @@ secretKey: ""
 existingSecret: ""
 
 oidc:
-  issuer: ""                  # for example https://login.microsoftonline.com/<tenant>/v2.0
+  issuer: ""                  # for example https://idp.example.com/realms/acme
   clientId: ""
   clientSecret: ""            # or put it in existingSecret with key: oidcClientSecret
   scopes: "openid email profile"
   audiences: ""               # extra audiences accepted for on-behalf-of access tokens, comma separated
 
 adminEmails: ""               # comma separated; these users become administrators at first login
-anthropicApiKey: ""           # optional; can also be set in the web interface
+anthropicApiKey: ""           # optional; can also be set in the web interface. Prefer llm.apiKeySecret.
 devLogin: false
 demo: false
+
+# Internal agent (LLM provider). A set value overrides the web interface and is shown read-only there.
+# Empty values leave the setting to the web interface. See docs/deployment.md, "Enterprise AI gateway".
+llm:
+  provider: ""                # anthropic | openai (OpenAI-compatible API)
+  baseUrl: ""                 # for example https://ai-gateway.example.com/v1
+  model: ""
+  effort: ""                  # low | medium | high | xhigh | max
+  enabled: ""                 # "true" | "false"
+  authStyle: ""               # api_key (x-api-key) | bearer (Authorization: Bearer). Default follows the provider.
+  credential: ""              # none | static | oauth2 | file. Default with workloadIdentity.enabled: oauth2.
+  issuer: ""                  # OIDC issuer; Mayday reads the token endpoint from its metadata
+  tokenUrl: ""                # OAuth 2.0 token endpoint, when the issuer publishes no metadata
+  grant: ""                   # client_credentials (default) | token_exchange (RFC 8693)
+  clientAuth: ""              # basic (default, client_secret_basic) | post (client_secret_post)
+  clientId: ""
+  scope: ""                   # for example ai-gateway.invoke
+  tokenParams: {}             # extra token request fields, for example { audience: https://ai-gateway.example.com }
+  assertionFile: ""           # workload identity token file. Default with workloadIdentity.enabled: the projected token.
+  tokenFile: ""               # credential: file. Another process writes the token to this file.
+  headers: {}                 # custom headers on each gateway call, for example { x-company-agent-id: mayday-prod }
+  apiKeySecret:               # credential: static. Existing secret with the API key.
+    name: ""
+    key: apiKey
+  clientSecretSecret:         # credential: oauth2 with a client secret instead of an assertion file
+    name: ""
+    key: clientSecret
+
+serviceAccount:
+  create: false
+  name: ""                    # empty: the release name when create is true, else "default"
+  annotations: {}             # for example the annotation that your cloud's workload identity needs
+podLabels: {}
+podAnnotations: {}
+
+# Kubernetes workload identity. Projects a short-lived service account token into the pod; Mayday sends it to the token
+# endpoint as client assertion (grant client_credentials) or subject token (grant token_exchange). Works with every
+# identity provider that trusts the cluster's OIDC issuer.
+workloadIdentity:
+  enabled: false
+  audience: ""                # audience that the identity provider expects in the token
+  expirationSeconds: 3600
+
+# Optional sidecar that adds the agent identity (token and custom headers) to each request and forwards it to the
+# AI gateway. When enabled, Mayday calls the sidecar on 127.0.0.1 without a credential.
+tokenProxy:
+  enabled: false
+  upstream: ""                # AI gateway URL, for example https://ai-gateway.example.com
+  port: 8091
+  extraEnv: []
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+# OpenTelemetry tracing (OTLP over HTTP). Empty endpoint: tracing is off.
+otel:
+  endpoint: ""                # for example http://otel-collector.observability:4318
+  sampling: ""                # ratio of traces to keep, 0.0 to 1.0
+  captureContent: false       # export prompts, responses and tool arguments. They can contain incident data.
+# Link from a run to its trace. {traceId} is the placeholder, for example https://grafana.example.com/explore?traceId={traceId}
+traceUrlTemplate: ""
 
 extraEnv: []
 

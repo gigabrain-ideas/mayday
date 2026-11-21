@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { Bot, FileText, GitPullRequest, ListChecks, ScrollText, Search, Wrench } from "lucide-react";
-import { ACTION_LABEL, items, rpc, type AgentAction, type AgentConfig, type AgentRun, type Page } from "@/lib/api";
+import { ACTION_LABEL, ApiError, items, rpc, type AgentAction, type AgentConfig, type AgentRun, type Page } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { ago } from "@/lib/utils";
 import { Button, Card, CardHeader, Dialog, DialogContent, Empty, Field, NativeSelect, Spinner, Textarea } from "@/components/ui";
-import { DictateButton, RunStatusBadge } from "@/components/common";
+import { DictateButton, RunStatusBadge, RunTrace } from "@/components/common";
 import { Markdown } from "@/lib/markdown";
 
 export interface Subject { kind: "INCIDENT" | "ALERT"; ref: string }
@@ -24,10 +24,12 @@ export function useAgentTrigger(subject: Subject, onStarted?: () => void) {
   const [agentId, setAgentId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<{ text: string; warning: boolean } | null>(null);
 
   const open = async (action: AgentAction) => {
     setPending(action);
     setPrompt("");
+    setRefusal(null);
     try {
       const list = await items(rpc.agents.listEligibleAgents<Page<AgentConfig>>({ action }));
       setAgents(list);
@@ -40,13 +42,15 @@ export function useAgentTrigger(subject: Subject, onStarted?: () => void) {
   const start = async () => {
     if (!pending) return;
     setBusy(true);
+    setRefusal(null);
     try {
       await rpc.agentRuns.startRun({ subjectKind: subject.kind, subjectRef: subject.ref, action: pending, agentId: agentId || undefined, prompt });
       toast.show(`${ACTION_LABEL[pending]} started. Progress appears on the timeline.`, "success");
       setPending(null);
       onStarted?.();
     } catch (e) {
-      toast.error(e);
+      if (e instanceof ApiError && e.status !== 401) setRefusal({ text: e.message, warning: e.code === "unavailable" || e.code === "resource_exhausted" });
+      else toast.error(e);
     } finally {
       setBusy(false);
     }
@@ -73,6 +77,11 @@ export function useAgentTrigger(subject: Subject, onStarted?: () => void) {
                   <DictateButton onText={(t) => setPrompt((p) => (p ? p + " " : "") + t)} />
                 </div>
               </Field>
+              {refusal && (
+                <p role="alert" className={refusal.warning ? "rounded-lg border border-warning/50 bg-warning-soft p-3" : "rounded-lg border border-destructive/40 bg-destructive-soft p-3 text-destructive"}>
+                  {refusal.text}
+                </p>
+              )}
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" onClick={() => setPending(null)}>Cancel</Button>
                 <Button onClick={start} disabled={busy}>{busy ? <Spinner /> : <Bot />} Start</Button>
@@ -134,6 +143,7 @@ export function AgentRuns({ subject, subjectId }: { subject: Subject; subjectId:
               {r.prompt && <p className="text-muted-foreground">Instructions: {r.prompt}</p>}
               {r.output && <Markdown text={r.output} />}
               {r.error && <p className="text-destructive">{r.error}</p>}
+              <RunTrace traceId={r.traceId} />
               {canWrite && !["SUCCEEDED", "FAILED", "CANCELLED"].includes(r.status) && (
                 <Button size="sm" variant="ghost" onClick={() => rpc.agentRuns.cancelRun({ id: r.id }).then(reload).catch(toast.error)}>Cancel run</Button>
               )}

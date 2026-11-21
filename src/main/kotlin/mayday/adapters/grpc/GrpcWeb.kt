@@ -41,7 +41,7 @@ import java.nio.ByteBuffer
  * so browsers and native clients use the same services, interceptors and authentication.
  * Supported: binary gRPC-Web (application/grpc-web, application/grpc-web+proto), unary and server-streaming calls.
  */
-class GrpcWebBridge(services: List<BindableService>, inProcessName: String) : DisposableBean {
+class GrpcWebBridge(services: List<BindableService>, inProcessName: String, private val telemetry: mayday.shared.Telemetry = mayday.shared.Telemetry.noop) : DisposableBean {
     private val channel: ManagedChannel = InProcessChannelBuilder.forName(inProcessName).directExecutor().build()
     private val methods: Map<String, MethodDescriptor<ByteArray, ByteArray>> = services
         .flatMap { it.bindService().methods }
@@ -56,6 +56,7 @@ class GrpcWebBridge(services: List<BindableService>, inProcessName: String) : Di
         val headers = Metadata()
         request.headers().firstHeader("Authorization")?.let { headers.put(Grpc.AUTHORIZATION, it) }
         request.headers().firstHeader("Cookie")?.let { headers.put(Grpc.COOKIE, it) }
+        traceHeaders().forEach { (k, v) -> headers.put(Metadata.Key.of(k, Metadata.ASCII_STRING_MARSHALLER), v) }
 
         val replies: Flow<ByteArray> = when (method.type) {
             MethodDescriptor.MethodType.UNARY -> flow { emit(ClientCalls.unaryRpc(channel, method, message, headers = headers)) }
@@ -78,6 +79,15 @@ class GrpcWebBridge(services: List<BindableService>, inProcessName: String) : Di
         }
         return response.header("X-Accel-Buffering", "no").body(flushEach(frames.map { buffers.wrap(it) as DataBuffer }.asFlux())).awaitSingle()
     }
+
+    /** The server span lives in the Reactor context; a coroutine does not restore it on its thread. */
+    private suspend fun traceHeaders(): Map<String, String> {
+        val reactor = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.reactor.ReactorContext]?.context
+            ?: return telemetry.propagationHeaders()
+        return snapshots.captureFrom(reactor).setThreadLocals().use { telemetry.propagationHeaders() }
+    }
+
+    private val snapshots = io.micrometer.context.ContextSnapshotFactory.builder().build()
 
     override fun destroy() {
         channel.shutdownNow()
@@ -120,7 +130,8 @@ class GrpcWebBridge(services: List<BindableService>, inProcessName: String) : Di
 @Configuration(proxyBeanMethods = false)
 class GrpcWebRoutes {
     @Bean
-    fun grpcWebBridge(services: List<BindableService>, @Value("\${spring.grpc.server.inprocess.name}") name: String) = GrpcWebBridge(services, name)
+    fun grpcWebBridge(services: List<BindableService>, @Value("\${spring.grpc.server.inprocess.name}") name: String, telemetry: mayday.shared.Telemetry) =
+        GrpcWebBridge(services, name, telemetry)
 
     @Bean
     fun grpcWebRouter(bridge: GrpcWebBridge) = coRouter {

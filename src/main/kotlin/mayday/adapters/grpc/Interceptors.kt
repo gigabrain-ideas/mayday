@@ -36,6 +36,7 @@ object Grpc {
         "conflict" -> Status.ABORTED
         "unauthenticated" -> Status.UNAUTHENTICATED
         "unavailable" -> Status.UNAVAILABLE
+        "resource_exhausted" -> Status.RESOURCE_EXHAUSTED
         else -> Status.INVALID_ARGUMENT
     }
 }

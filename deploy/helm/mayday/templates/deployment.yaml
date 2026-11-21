@@ -16,10 +16,18 @@ spec:
     matchLabels: {{- include "mayday.selector" . | nindent 6 }}
   template:
     metadata:
-      labels: {{- include "mayday.selector" . | nindent 8 }}
+      labels:
+        {{- include "mayday.selector" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       annotations:
         checksum/config: {{ toJson .Values | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
+      serviceAccountName: {{ include "mayday.serviceAccountName" . }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -62,6 +70,34 @@ spec:
             - { name: MAYDAY_ADMIN_EMAILS, value: {{ .Values.adminEmails | quote }} }
             - { name: MAYDAY_DEV_LOGIN, value: {{ .Values.devLogin | quote }} }
             - { name: MAYDAY_DEMO, value: {{ .Values.demo | quote }} }
+            {{- $l := .Values.llm }}
+            {{- $model := dict "MAYDAY_LLM_PROVIDER" $l.provider "MAYDAY_LLM_MODEL" $l.model "MAYDAY_LLM_EFFORT" $l.effort "MAYDAY_LLM_ENABLED" (toString $l.enabled) }}
+            {{- range $k := keys $model | sortAlpha }}
+            {{- with get $model $k }}
+            - { name: {{ $k }}, value: {{ . | quote }} }
+            {{- end }}
+            {{- end }}
+            {{- if .Values.tokenProxy.enabled }}
+            - { name: MAYDAY_LLM_BASE_URL, value: "http://127.0.0.1:{{ .Values.tokenProxy.port }}" }
+            - { name: MAYDAY_LLM_CREDENTIAL, value: none }
+            {{- else }}
+            {{- with $l.baseUrl }}
+            - { name: MAYDAY_LLM_BASE_URL, value: {{ . | quote }} }
+            {{- end }}
+            {{- include "mayday.llmIdentityEnv" . | trim | nindent 12 }}
+            {{- end }}
+            {{- with .Values.otel.endpoint }}
+            - { name: MAYDAY_OTEL_ENDPOINT, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .Values.otel.sampling }}
+            - { name: MAYDAY_OTEL_SAMPLING, value: {{ . | quote }} }
+            {{- end }}
+            {{- if .Values.otel.captureContent }}
+            - { name: MAYDAY_OTEL_CAPTURE_CONTENT, value: "true" }
+            {{- end }}
+            {{- with .Values.traceUrlTemplate }}
+            - { name: MAYDAY_TRACE_URL_TEMPLATE, value: {{ . | quote }} }
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -82,9 +118,44 @@ spec:
             {{- if not .Values.database.url }}
             - { name: data, mountPath: /data }
             {{- end }}
+            {{- if .Values.workloadIdentity.enabled }}
+            - { name: workload-identity, mountPath: /var/run/secrets/mayday/workload-identity, readOnly: true }
+            {{- end }}
+        {{- if .Values.tokenProxy.enabled }}
+        - name: token-proxy
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["token-proxy"]
+          env:
+            - { name: MAYDAY_PROXY_UPSTREAM, value: {{ required "Set tokenProxy.upstream" .Values.tokenProxy.upstream | quote }} }
+            - { name: MAYDAY_PROXY_LISTEN, value: "127.0.0.1:{{ .Values.tokenProxy.port }}" }
+            {{- include "mayday.llmIdentityEnv" . | trim | nindent 12 }}
+            {{- with .Values.tokenProxy.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources: {{- toYaml .Values.tokenProxy.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            {{- if .Values.workloadIdentity.enabled }}
+            - { name: workload-identity, mountPath: /var/run/secrets/mayday/workload-identity, readOnly: true }
+            {{- end }}
+        {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if .Values.workloadIdentity.enabled }}
+        - name: workload-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: {{ required "Set workloadIdentity.audience" .Values.workloadIdentity.audience | quote }}
+                  expirationSeconds: {{ .Values.workloadIdentity.expirationSeconds }}
+        {{- end }}
         {{- if not .Values.database.url }}
         - name: data
           {{- if .Values.persistence.enabled }}

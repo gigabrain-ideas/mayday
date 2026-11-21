@@ -1,7 +1,9 @@
-import { Bot, CircleAlert, CircleCheck, CircleDot, Cog, Mic, MicOff, TriangleAlert, User as UserIcon } from "lucide-react";
-import type { Actor, AlertStatus, IncidentStatus, RunStatus, Severity } from "@/lib/api";
+import { Bot, CircleAlert, CircleCheck, CircleDot, Cog, Copy, ExternalLink, Mic, MicOff, TriangleAlert, User as UserIcon } from "lucide-react";
+import { traceUrl, type Actor, type AlertStatus, type IncidentStatus, type RunStatus, type Severity } from "@/lib/api";
 import { Badge, Button, Tip } from "@/components/ui";
 import { useDictation } from "@/lib/hooks";
+import { useSession } from "@/lib/session";
+import { useToast } from "@/lib/toast";
 import { titleCase } from "@/lib/utils";
 
 /** Severity is signalled by color and by an icon, never by color alone. */
@@ -69,5 +71,28 @@ export function PageHeader({ title, eyebrow, actions, children }: { title: React
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
+  );
+}
+
+/** Link to the OpenTelemetry trace of an agent run. Without MAYDAY_TRACE_URL_TEMPLATE the trace ID is shown for copying. */
+export function RunTrace({ traceId }: { traceId?: string }) {
+  const { me } = useSession();
+  const toast = useToast();
+  if (!traceId) return null;
+  const url = traceUrl(me.traceUrlTemplate, traceId);
+  if (url) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] hover:underline">
+        <ExternalLink className="size-3.5" /> View trace
+      </a>
+    );
+  }
+  return (
+    <Tip content="Copy the trace ID">
+      <button type="button" onClick={() => navigator.clipboard?.writeText(traceId).then(() => toast.show("Trace ID copied."))}
+        className="inline-flex items-center gap-1 font-mono text-[12px] text-muted-foreground hover:text-foreground">
+        <Copy className="size-3.5" /> {traceId}
+      </button>
+    </Tip>
   );
 }

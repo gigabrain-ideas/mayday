@@ -12,11 +12,13 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CompletableDeferred
 import mayday.adapters.grpc.Grpc
+import mayday.agents.BudgetExhausted
 import mayday.api.v1.*
 import mayday.eventually
 import mayday.policy.Keys
 import mayday.suspendTest
 import org.springframework.test.context.TestPropertySource
+import java.time.Duration
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -27,7 +29,7 @@ import kotlin.test.assertTrue
 import mayday.identity.TokenScope as DTokenScope
 
 /** Native gRPC contract: status codes, trailers and payloads that clients and agents rely on. */
-@TestPropertySource(properties = ["spring.grpc.server.inprocess.name=grpc-contract"])
+@TestPropertySource(properties = ["spring.grpc.server.inprocess.name=grpc-contract", "mayday.trace-url-template=https://traces.example.com/trace/{traceId}"])
 class GrpcContractTest : ServerContract() {
     private val empty = Empty.getDefaultInstance()
     private val authn by lazy { AuthServiceGrpcKt.AuthServiceCoroutineStub(channel) }
@@ -61,6 +63,7 @@ class GrpcContractTest : ServerContract() {
         assertStatus(Status.Code.UNAUTHENTICATED, "unauthenticated") {
             incidents.listIncidents(ListIncidentsRequest.getDefaultInstance(), Metadata().apply { put(Grpc.COOKIE, "mayday_session=forged") })
         }
+        assertEquals("https://traces.example.com/trace/{traceId}", authn.getMe(empty, auth("viewer")).traceUrlTemplate)
         val config = authn.getAuthConfig(empty)
         assertTrue(config.devLogin)
         assertFalse(config.sso)
@@ -450,6 +453,158 @@ class GrpcContractTest : ServerContract() {
         assertEquals(RunStatus.RUN_STATUS_FAILED, done.status)
         assertEquals("No access", done.error)
         assertStatus(Status.Code.ABORTED, "conflict") { runs.completeRun(CompleteRunRequest.newBuilder().setId(run.id).setSuccess(true).build(), agentAuth) }
+    }
+
+    // ---- LLM provider, tool gateway and run tracing ----
+
+    private fun llmInput(f: LlmInput.Builder.() -> Unit) = LlmInput.newBuilder().apply(f).build()
+
+    private suspend fun resetLlm() {
+        agents.updateLlm(llmInput {
+            provider = "anthropic"; model = "claude-opus-5-5"; baseUrl = ""; effort = "high"; enabled = false; apiKey = ""; clientSecret = ""
+            credential = CredentialMode.CREDENTIAL_MODE_STATIC; tokenUrl = ""; clientId = ""; assertionFile = ""; tokenFile = ""; scope = ""
+            issuer = ""; grant = GrantType.GRANT_TYPE_CLIENT_CREDENTIALS; clientAuth = ClientAuth.CLIENT_AUTH_BASIC
+            replaceHeaders = true; replaceTokenParams = true
+        }, auth("admin"))
+    }
+
+    @Test
+    fun `LLM settings round trip every field and never return secrets`() = suspendTest {
+        try {
+            val saved = agents.updateLlm(llmInput {
+                provider = "openai"; model = "gpt-gateway"; baseUrl = "https://ai-gateway.example.com/v1"; effort = "medium"; enabled = false
+                authStyle = AuthStyle.AUTH_STYLE_BEARER; credential = CredentialMode.CREDENTIAL_MODE_OAUTH2
+                apiKey = "sk-secret-api-key"; clientSecret = "client-secret-value"
+                tokenUrl = "https://idp.example.com/oauth2/token"; clientId = "client-1"; assertionFile = "/var/run/secrets/token"
+                tokenFile = "/var/run/gateway/token"; scope = "gateway.invoke"; issuer = "https://idp.example.com"
+                grant = GrantType.GRANT_TYPE_TOKEN_EXCHANGE; clientAuth = ClientAuth.CLIENT_AUTH_POST
+                putTokenParams("audience", "gateway"); replaceTokenParams = true
+                putHeaders("x-company-agent-id", "agent-42"); replaceHeaders = true
+            }, auth("admin"))
+            val read = agents.getLlm(empty, auth("viewer"))
+            for (v in listOf(saved, read)) {
+                assertEquals("openai", v.provider)
+                assertEquals("gpt-gateway", v.model)
+                assertEquals("https://ai-gateway.example.com/v1", v.baseUrl)
+                assertEquals("medium", v.effort)
+                assertFalse(v.enabled)
+                assertFalse(v.ready)
+                assertEquals(AuthStyle.AUTH_STYLE_BEARER, v.authStyle)
+                assertEquals(CredentialMode.CREDENTIAL_MODE_OAUTH2, v.credential)
+                assertEquals("https://idp.example.com/oauth2/token", v.tokenUrl)
+                assertEquals("https://idp.example.com", v.issuer)
+                assertEquals(GrantType.GRANT_TYPE_TOKEN_EXCHANGE, v.grant)
+                assertEquals(ClientAuth.CLIENT_AUTH_POST, v.clientAuth)
+                assertEquals(mapOf("audience" to "gateway"), v.tokenParamsMap)
+                assertEquals("client-1", v.clientId)
+                assertEquals("/var/run/secrets/token", v.assertionFile)
+                assertEquals("/var/run/gateway/token", v.tokenFile)
+                assertEquals("gateway.invoke", v.scope)
+                assertEquals(mapOf("x-company-agent-id" to "agent-42"), v.headersMap)
+                assertTrue(v.hasApiKey)
+                assertTrue(v.hasClientSecret)
+                assertTrue(v.managedFieldsList.isEmpty())
+                assertFalse(v.hasPausedUntil())
+                assertFalse(v.toString().contains("sk-secret-api-key"))
+                assertFalse(v.toString().contains("client-secret-value"))
+            }
+            val cleared = agents.updateLlm(llmInput { apiKey = ""; clientSecret = "" }, auth("admin"))
+            assertFalse(cleared.hasApiKey)
+            assertFalse(cleared.hasClientSecret)
+            assertEquals("gpt-gateway", cleared.model, "unset fields keep their value")
+            assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { agents.updateLlm(llmInput { model = "x" }, auth("member")) }
+        } finally {
+            resetLlm()
+        }
+    }
+
+    @Test
+    fun `fixed LLM headers change only with replace_headers`() = suspendTest {
+        try {
+            agents.updateLlm(llmInput { putHeaders("x-team", "sre"); replaceHeaders = true }, auth("admin"))
+            val kept = agents.updateLlm(llmInput { model = "claude-opus-5-5"; putHeaders("x-ignored", "1") }, auth("admin"))
+            assertEquals(mapOf("x-team" to "sre"), kept.headersMap)
+            val replaced = agents.updateLlm(llmInput { putHeaders("x-a", "1"); putHeaders("x-b", "2"); replaceHeaders = true }, auth("admin"))
+            assertEquals(mapOf("x-a" to "1", "x-b" to "2"), replaced.headersMap)
+            assertTrue(agents.updateLlm(llmInput { replaceHeaders = true }, auth("admin")).headersMap.isEmpty())
+        } finally {
+            resetLlm()
+        }
+    }
+
+    @Test
+    fun `invalid LLM settings answer INVALID_ARGUMENT and change nothing`() = suspendTest {
+        val before = agents.getLlm(empty, auth("admin"))
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { agents.updateLlm(llmInput { baseUrl = "ftp://gateway.example.com" }, auth("admin")) }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { agents.updateLlm(llmInput { baseUrl = "not a url" }, auth("admin")) }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { agents.updateLlm(llmInput { tokenUrl = "file:///etc/passwd" }, auth("admin")) }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { agents.updateLlm(llmInput { putHeaders("bad header", "1"); replaceHeaders = true }, auth("admin")) }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { agents.updateLlm(llmInput { putHeaders("bad:name", "x"); replaceHeaders = true }, auth("admin")) }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { agents.updateLlm(llmInput { provider = "gemini" }, auth("admin")) }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { agents.updateLlm(llmInput { effort = "extreme" }, auth("admin")) }
+        assertEquals(before, agents.getLlm(empty, auth("admin")))
+    }
+
+    @Test
+    fun `the resource_exhausted domain code maps to RESOURCE_EXHAUSTED`() {
+        assertEquals(Status.Code.RESOURCE_EXHAUSTED, Grpc.status("resource_exhausted").code)
+        assertEquals("resource_exhausted", BudgetExhausted(Duration.ofSeconds(30)).code)
+        assertEquals(429, mayday.adapters.http.HttpErrors.statusOf("resource_exhausted").value(), "HTTP edges answer 429")
+    }
+
+    @Test
+    fun `HTTP 429 from the gateway fails the run, pauses the agent, and saving the settings resumes it`() = suspendTest {
+        try {
+            agents.updateLlm(llmInput { credential = CredentialMode.CREDENTIAL_MODE_STATIC; apiKey = "sk-test"; enabled = true }, auth("admin"))
+            synchronized(llm.script) { llm.script.addLast { throw BudgetExhausted(Duration.ofMinutes(10), "budget of agent-42") } }
+            val i = incidents.declareIncident(declare("Budget ${unique()}"), auth("member"))
+            val start = StartRunRequest.newBuilder().setSubjectKind(SubjectKind.SUBJECT_KIND_INCIDENT).setSubjectRef(i.key)
+                .setAction(AgentAction.AGENT_ACTION_ANALYZE).setAgentId("mayday").build()
+            val run = runs.startRun(start, auth("member"))
+            eventually { runs.getRun(id(run.id), auth("viewer")).status == RunStatus.RUN_STATUS_FAILED }
+            assertTrue(runs.getRun(id(run.id), auth("viewer")).error.contains("paused"))
+
+            val paused = agents.getLlm(empty, auth("viewer"))
+            assertTrue(paused.hasPausedUntil())
+            assertTrue(paused.pauseReason.isNotBlank())
+            val refused = assertStatus(Status.Code.UNAVAILABLE, "unavailable") { runs.startRun(start, auth("member")) }
+            assertTrue(refused.status.description!!.contains("budget"), refused.status.description)
+
+            assertFalse(agents.updateLlm(llmInput { effort = "high" }, auth("admin")).hasPausedUntil())
+        } finally {
+            synchronized(llm.script) { llm.script.clear() }
+            resetLlm()
+        }
+    }
+
+    @Test
+    fun `MCP servers round trip agent identity`() = suspendTest {
+        val saved = agents.saveMcpServer(SaveMcpServerRequest.newBuilder().setName("Gateway ${unique()}").setUrl("https://tools.example.com/mcp")
+            .setHeaderName("Authorization").setEnabled(true).setUseAgentIdentity(true).build(), auth("admin"))
+        assertTrue(saved.useAgentIdentity)
+        assertFalse(saved.hasCredential)
+        val listed = agents.listMcpServers(empty, auth("viewer")).itemsList.single { it.id == saved.id }
+        assertTrue(listed.useAgentIdentity)
+        val off = agents.saveMcpServer(SaveMcpServerRequest.newBuilder().setId(saved.id).setName(saved.name).setUrl(saved.url).setEnabled(true)
+            .setCredential("Bearer static-secret").build(), auth("admin"))
+        assertFalse(off.useAgentIdentity)
+        assertTrue(off.hasCredential)
+        assertFalse(agents.listMcpServers(empty, auth("viewer")).toString().contains("static-secret"))
+        agents.deleteMcpServer(id(saved.id), auth("admin"))
+    }
+
+    @Test
+    fun `runs carry their trace id`() = suspendTest {
+        val creds = agents.createAgent(agentInput("Traced ${unique()}", Delivery.DELIVERY_PULL, AgentAction.AGENT_ACTION_ANALYZE), auth("admin"))
+        val i = incidents.declareIncident(declare("Trace ${unique()}"), auth("member"))
+        val run = runs.startRun(StartRunRequest.newBuilder().setSubjectKind(SubjectKind.SUBJECT_KIND_INCIDENT).setSubjectRef(i.key)
+            .setAction(AgentAction.AGENT_ACTION_ANALYZE).setAgentId(creds.agent.id).build(), auth("member"))
+        val trace = "4bf92f3577b34da6a3ce929d0e0e4736"
+        val stored = app.ports.runs.get(run.id)!!
+        app.ports.runs.save(stored.copy(traceId = trace, version = stored.version + 1), stored.version)
+        val bySubject = runs.listRuns(ListRunsRequest.newBuilder().setSubjectKind(SubjectKind.SUBJECT_KIND_INCIDENT).setSubjectRef(i.key).build(), auth("viewer"))
+        assertEquals(trace, bySubject.itemsList.single().traceId)
+        assertEquals(trace, runs.listRuns(ListRunsRequest.newBuilder().setLimit(100).build(), auth("viewer")).itemsList.single { it.id == run.id }.traceId)
     }
 
     // ---- reports ----

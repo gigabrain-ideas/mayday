@@ -7,6 +7,7 @@ import mayday.identity.Principal
 import mayday.policy.Keys
 import mayday.policy.PolicyReader
 import mayday.shared.Actor
+import mayday.shared.ActorKind
 import mayday.shared.Clock
 import mayday.shared.DomainEvent
 import mayday.shared.EventPublisher
@@ -14,6 +15,8 @@ import mayday.shared.Ids
 import mayday.shared.Invalid
 import mayday.shared.NotFound
 import mayday.shared.Severity
+import mayday.shared.SpanScope
+import mayday.shared.Telemetry
 import mayday.shared.Ts
 import java.time.Duration
 import java.time.Instant
@@ -54,6 +57,7 @@ class IncidentService(
     private val policy: PolicyReader,
     private val events: EventPublisher,
     private val clock: Clock,
+    private val telemetry: Telemetry = Telemetry.noop,
 ) {
     private val keyPattern = Regex("^([A-Za-z0-9]+)-(\\d+)$")
 
@@ -74,13 +78,18 @@ class IncidentService(
 
     suspend fun timeline(by: Principal, ref: String): List<TimelineEntry> = timeline.list(get(by, ref).id)
 
-    suspend fun declare(by: Principal, input: NewIncident): Incident {
+    suspend fun declare(by: Principal, input: NewIncident): Incident = traced("incident.declare", input, by.actor.kind.name, "manual") {
         Access.requireWrite(by)
-        return create(by.actor, input)
+        create(by.actor, input)
     }
 
     /** Used by the alerting context; the trigger is a policy decision, not a user action. */
-    suspend fun declareFromAlert(input: NewIncident): Incident = create(Actor.system, input)
+    suspend fun declareFromAlert(input: NewIncident): Incident = traced("incident.declare", input, ActorKind.SYSTEM.name, "alert") { create(Actor.system, input) }
+
+    private suspend fun traced(name: String, input: NewIncident, actor: String, trigger: String, block: suspend () -> Incident): Incident =
+        telemetry.span(name, mapOf("mayday.incident.severity" to input.severity.name, "mayday.actor.kind" to actor, "mayday.incident.trigger" to trigger)) { span ->
+            block().also { span.set("mayday.incident.id", it.id); span.set("mayday.incident.key", it.key) }
+        }
 
     private suspend fun create(actor: Actor, input: NewIncident): Incident {
         val teams = input.teamIds.distinct().map { directory.team(it).id }
@@ -112,9 +121,16 @@ class IncidentService(
         return incident
     }
 
-    suspend fun update(by: Principal, ref: String, patch: IncidentPatch): Incident {
+    suspend fun update(by: Principal, ref: String, patch: IncidentPatch): Incident =
+        telemetry.span("incident.update", mapOf("mayday.actor.kind" to by.actor.kind.name)) { span ->
+            update(by, ref, patch, span)
+        }
+
+    private suspend fun update(by: Principal, ref: String, patch: IncidentPatch, span: SpanScope): Incident {
         Access.requireWrite(by)
         val cur = get(by, ref)
+        span.set("mayday.incident.id", cur.id)
+        span.set("mayday.incident.key", cur.key)
         val now = clock.now()
         val teams = patch.teamIds?.distinct()?.map { directory.team(it).id } ?: cur.teamIds
         val severity = patch.severity ?: cur.severity
@@ -156,6 +172,13 @@ class IncidentService(
             version = cur.version + 1,
         )
         incidents.save(next, patch.version ?: cur.version)
+        if (next.status != cur.status) {
+            span.set("mayday.incident.status.from", cur.status.name)
+            span.set("mayday.incident.status.to", next.status.name)
+            if (resolvedNow) span.event("incident.resolved")
+            if (reopened) span.event("incident.reopened")
+        }
+        if (next.severity != cur.severity) span.set("mayday.incident.severity", next.severity.name)
         if (next.status != cur.status) record(next, EntryKind.STATUS, by.actor, "Status changed from ${cur.status} to ${next.status}.")
         if (next.severity != cur.severity) record(next, EntryKind.SEVERITY, by.actor, "Severity changed from ${cur.severity} to ${next.severity}.")
         val fields = buildList {
