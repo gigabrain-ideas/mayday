@@ -15,7 +15,7 @@ Policy holds the configurable rules: postmortem obligations, alert behavior, age
 | Resolution | Walk organization → project of the team → team. The most specific accepted value wins. A LOCKED value above blocks lower values. A MINIMUM value above accepts only lower values that are at least as strict. An approved exception is always accepted. |
 | Strictness | HIGHER (more severities covered is stricter), LOWER (smaller number is stricter), TRUE, FALSE, NONE (MINIMUM acts as LOCKED). |
 | Multi-team | For an incident with many teams, the strictest team value applies. |
-| `ChangeRequest` | Scope, key, proposed value, reason, status PENDING → APPROVED or REJECTED. Approval stores the value with `exception = true`. |
+| `ChangeRequest` | Scope, key, proposed value, reason, status PENDING → APPROVED or REJECTED. Approval stores the value with `exception = true` and publishes `setting.changed`, like a direct change. |
 
 ## Settings
 
@@ -60,4 +60,4 @@ Policy holds the configurable rules: postmortem obligations, alert behavior, age
 
 ## Rebuild checklist
 
-Pass `PolicyTest`. Keep the resolution order and the meaning of MINIMUM. Invalidate caches on `setting.changed`.
+Pass `PolicyTest` and `PolicyReplicaTest` (a direct change and an approved change request reach a second instance). Keep the resolution order and the meaning of MINIMUM. Invalidate caches on `setting.changed`.

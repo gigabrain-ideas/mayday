@@ -285,8 +285,10 @@ class PolicyService(
         val cr = requests.get(id) ?: throw NotFound("Change request")
         if (cr.status != ChangeRequestStatus.PENDING) throw Invalid("This request is already decided")
         if (approve) {
-            settings.save(SettingValue(cr.scope, cr.scopeId, cr.key, cr.proposedValue, Enforcement.NONE, exception = true, updatedBy = by.actor, updatedAt = clock.now()))
+            val sv = SettingValue(cr.scope, cr.scopeId, cr.key, cr.proposedValue, Enforcement.NONE, exception = true, updatedBy = by.actor, updatedAt = clock.now())
+            settings.save(sv)
             invalidate()
+            events.publish(DomainEvent("setting.changed", sv.id, clock.now(), data = mapOf("key" to cr.key)))
             if (cr.scope == Scope.ORG) listener.orgSettingChanged(cr.key)
         }
         val decided = cr.copy(

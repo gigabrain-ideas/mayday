@@ -345,3 +345,28 @@ class AgentTest {
         assertTrue(f.llm.requests.last().messages.first().blocks.first().toString().contains("ASD-STE100"))
     }
 }
+
+/** Two instances share storage and events, as replicas share PostgreSQL and LISTEN/NOTIFY. */
+class PolicyReplicaTest {
+    private val f = Fixture()
+    private val replica = App(
+        AppSettings(secretKey = "test-secret", publicUrl = "http://mayday.test"),
+        Ports.memory(f.store, f.events).with(llm = f.llm, dispatcher = f.dispatcher),
+    )
+
+    @Test
+    fun `another instance sees a direct setting change`() = suspendTest {
+        assertEquals("false", replica.policy.effective(listOf(f.team.id))[Keys.MCP_WRITE])
+        f.app.policy.set(f.admin, Scope.TEAM, f.team.id, Keys.MCP_WRITE, "true", Enforcement.NONE)
+        assertEquals("true", replica.policy.effective(listOf(f.team.id))[Keys.MCP_WRITE])
+    }
+
+    @Test
+    fun `another instance sees a setting from an approved change request`() = suspendTest {
+        assertEquals("false", replica.policy.effective(listOf(f.team.id))[Keys.MCP_WRITE])
+        val cr = f.app.policy.requestChange(f.lead, Scope.TEAM, f.team.id, Keys.MCP_WRITE, "true", "Our agent writes the timeline")
+        f.app.policy.decide(f.admin, cr.id, true, "ok")
+        assertEquals("true", f.app.policy.effective(listOf(f.team.id))[Keys.MCP_WRITE])
+        assertEquals("true", replica.policy.effective(listOf(f.team.id))[Keys.MCP_WRITE], "the other instance keeps a stale cache")
+    }
+}
