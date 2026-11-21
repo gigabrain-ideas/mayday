@@ -1,9 +1,13 @@
-docs/drafts/ 
+.claude/
 .idea/
-build/
 .gradle/
 .kotlin/
+.DS_Store
+.env
+
+docs/drafts/
+data/
+
+build/
 web/node_modules/
 web/dist/
-data/
-.DS_Store
