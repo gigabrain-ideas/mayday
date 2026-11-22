@@ -44,6 +44,12 @@ import mayday.shared.InProcessEventBus
 import mayday.shared.SecretBox
 import mayday.shared.Telemetry
 import mayday.shared.TokenSigner
+import mayday.agents.ToolCatalog
+import mayday.audit.AuditChain
+import mayday.audit.AuditLog
+import mayday.audit.AuditSettings
+import mayday.audit.AuditSink
+import mayday.tools.AuditedCatalog
 import mayday.tools.CompositeCatalog
 import mayday.tools.MaydayTools
 
@@ -57,6 +63,9 @@ data class AppSettings(
     val llm: LlmEnvironment = LlmEnvironment(),
     val agentConcurrency: Int = 16,
     val groups: GroupSyncSettings = GroupSyncSettings(),
+    val audit: AuditSettings = AuditSettings(),
+    /** MAYDAY_AUDIT_KEY. Empty: derived from [secretKey]. */
+    val auditKey: String = "",
 )
 
 /** Every outbound port the application needs. Adapters provide one implementation each. */
@@ -84,10 +93,17 @@ class Ports(
     val close: () -> Unit = {},
     val credentials: CredentialProviderFactory = Credentials(),
     val telemetry: Telemetry = Telemetry.noop,
+    val audit: List<AuditSink> = emptyList(),
 ) {
-    fun with(telemetry: Telemetry = this.telemetry, llm: LlmProviderFactory = this.llm, dispatcher: AgentDispatcher = this.dispatcher, credentials: CredentialProviderFactory = this.credentials) = Ports(
+    fun with(
+        telemetry: Telemetry = this.telemetry,
+        llm: LlmProviderFactory = this.llm,
+        dispatcher: AgentDispatcher = this.dispatcher,
+        credentials: CredentialProviderFactory = this.credentials,
+        audit: List<AuditSink> = this.audit,
+    ) = Ports(
         projects, teams, users, tokens, settings, changeRequests, incidents, timeline, alerts, agents, runs, mcpServers, config,
-        schedules, overrides, groups, events, llm, dispatcher, clock, close, credentials, telemetry,
+        schedules, overrides, groups, events, llm, dispatcher, clock, close, credentials, telemetry, audit,
     )
 
     companion object {
@@ -111,32 +127,36 @@ class Ports(
 class App(val settings: AppSettings, val ports: Ports) {
     private val key = settings.secretKey.ifEmpty { "insecure-development-key-change-me" }.toByteArray()
     val signer = TokenSigner(key)
+    val audit = AuditLog(
+        ports.audit, settings.audit, AuditChain.key(String(key), settings.auditKey), ports.clock,
+        { ports.telemetry.currentTraceId() }, mapOf("version" to VERSION),
+    )
     val box = SecretBox(key)
     val directory = DirectoryService(ports.projects, ports.teams, ports.clock)
-    val policy = PolicyService(ports.settings, ports.changeRequests, directory, ports.events, ports.clock)
+    val policy = PolicyService(ports.settings, ports.changeRequests, directory, ports.events, ports.clock, audit)
     val incidents = IncidentService(ports.incidents, ports.timeline, directory, policy, ports.events, ports.clock, ports.telemetry)
     val alerts = AlertService(ports.alerts, incidents, directory, policy, ports.events, ports.clock, ports.telemetry)
     lateinit var identity: IdentityService
-    lateinit var tools: CompositeCatalog
+    lateinit var tools: ToolCatalog
     val agents: AgentService = AgentService(
         ports.agents, ports.runs, ports.mcpServers, ports.config, incidents, alerts, { identity }, policy, box,
         ports.llm, ports.dispatcher, { tools }, ports.events, ports.clock, settings.publicUrl, settings.llm, settings.agentConcurrency,
-        ports.credentials, ports.telemetry,
+        ports.credentials, ports.telemetry, audit = audit,
     )
     val reports = ReportService(ports.incidents, ports.alerts, directory)
     val onCall = OnCallService(ports.schedules, ports.overrides, ports.users, directory, ports.events, ports.clock)
-    val groupSync = GroupSync(ports.users, directory, settings.groups) { onCall }
+    val groupSync = GroupSync(ports.users, directory, settings.groups, audit) { onCall }
     val provisioning = ProvisioningService(ports.users, ports.groups, directory, groupSync, ports.clock, settings.adminEmails)
     val maydayTools: MaydayTools
     val mcp: McpServer
 
     init {
-        identity = IdentityService(ports.users, ports.tokens, ports.teams, agents, signer, ports.clock, settings.adminEmails, policy)
+        identity = IdentityService(ports.users, ports.tokens, ports.teams, agents, signer, ports.clock, settings.adminEmails, policy, audit)
         identity.membership = onCall
         identity.groupSync = groupSync
         maydayTools = MaydayTools(incidents, alerts, directory, policy, { identity }, { agents }, onCall)
-        tools = CompositeCatalog(listOf(maydayTools, McpGateway(ports.mcpServers, box, { agents.gatewayAuth() }, ports.telemetry)))
-        mcp = McpServer(maydayTools, VERSION, ports.telemetry)
+        tools = AuditedCatalog(CompositeCatalog(listOf(maydayTools, McpGateway(ports.mcpServers, box, { agents.gatewayAuth() }, ports.telemetry))), audit)
+        mcp = McpServer(AuditedCatalog(maydayTools, audit), VERSION, ports.telemetry, audit)
         alerts.automation = agents
         policy.listener = identity
         ports.events.subscribe { if (it.type == "setting.changed") policy.invalidate() }
@@ -146,6 +166,7 @@ class App(val settings: AppSettings, val ports: Ports) {
 
     fun stop() {
         agents.shutdown()
+        audit.close()
         ports.close()
     }
 }

@@ -80,6 +80,10 @@ Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider
 - An admin tries to change a field that the environment sets: `invalid`.
 - An invalid base URL, issuer, token URL or header name, or a reserved token parameter (`client_secret`, `scope`, ...): `invalid`.
 
+## Audit
+
+Agents record `agent.created`, `.updated`, `.deleted`, `.credentials_rotated`, `run.started`, `run.claimed`, `run.succeeded`, `run.failed`, `run.cancelled`, `llm.updated` (field names only) and `mcp_server.*` to the audit stream. Each tool call of the built-in agent is recorded with the agent, the person it acts for and the run (channel `internal-agent`). See [audit.md](audit.md).
+
 ## Rebuild checklist
 
 Pass `AgentTest`, `DelegationLimitsTest`, `UntrustedSubjectDataTest`, `AgentIndependenceTest`, `BudgetExhaustedTest`, `GatewaySettingsTest`, `IdentityTest` (delegation), `WebhookContractTest`, `LlmProviderContractTest`, `CredentialsContractTest`, the agent and run parts of `GrpcContractTest`, and the run part of `StoreContract`.

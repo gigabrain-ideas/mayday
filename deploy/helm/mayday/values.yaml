@@ -97,6 +97,34 @@ otel:
   endpoint: ""                # for example http://otel-collector.observability:4318
   sampling: ""                # ratio of traces to keep, 0.0 to 1.0
   captureContent: false       # export prompts, responses and tool arguments. They can contain incident data.
+# Audit stream for your SIEM: every authorization decision, token event, policy change and agent action.
+# See docs/domains/audit.md. Secrets (auditKey, auditLokiPassword, auditLokiToken, auditSentinelClientSecret,
+# auditHttpHeaders) go in the chart secret or in existingSecret.
+audit:
+  sinks: stdout               # comma separated: stdout, file, http, loki, sentinel, none
+  reads: true                 # record allowed reads; refusals are always recorded
+  auditKey: ""                # HMAC key of the hash chain; give it to auditors. Empty: derived from secretKey.
+  file: ""                    # sink file: path on a mounted volume
+  http:
+    url: ""                   # sink http: Splunk HEC, Elastic, Vector, any collector
+    format: json              # json (array) | ndjson
+    headers: ""               # name=value,name2=value2 (stored in the secret)
+  loki:
+    url: ""                   # for example http://loki-gateway.monitoring
+    tenant: ""                # X-Scope-OrgID
+    user: ""
+    password: ""              # stored in the secret; or token
+    token: ""
+    labels: ""                # extra labels: env=prod,cluster=eu1
+  sentinel:
+    endpoint: ""              # data collection endpoint, for example https://mayday-abcd.westeurope-1.ingest.monitor.azure.com
+    dcrId: ""                 # immutable id of the data collection rule
+    stream: Custom-MaydayAudit_CL
+    tenantId: ""
+    clientId: ""
+    clientSecret: ""          # stored in the secret; leave empty with Azure workload identity
+    assertionFile: ""         # empty: AZURE_FEDERATED_TOKEN_FILE from the Azure workload identity webhook
+
 # Link from a run to its trace. {traceId} is the placeholder, for example https://grafana.example.com/explore?traceId={traceId}
 traceUrlTemplate: ""
 

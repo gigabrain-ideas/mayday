@@ -78,14 +78,30 @@ class RecordingDispatcher : AgentDispatcher {
     }
 }
 
-class Fixture(llmEnv: mayday.agents.LlmEnvironment = mayday.agents.LlmEnvironment(), extraTools: List<mayday.agents.ToolCatalog> = emptyList()) {
+/** Keeps every audit batch in memory. */
+class RecordingSink : mayday.audit.AuditSink {
+    override val name = "recording"
+    val records = CopyOnWriteArrayList<mayday.audit.AuditRecord>()
+    val lines = CopyOnWriteArrayList<String>()
+
+    override fun write(batch: mayday.audit.AuditBatch) {
+        records += batch.records
+        lines += batch.lines
+    }
+}
+
+class Fixture(
+    llmEnv: mayday.agents.LlmEnvironment = mayday.agents.LlmEnvironment(),
+    extraTools: List<mayday.agents.ToolCatalog> = emptyList(),
+    val auditSink: RecordingSink = RecordingSink(),
+) {
     val llm = FakeLlm()
     val dispatcher = RecordingDispatcher()
     val events = InProcessEventBus()
     val store = MemoryStore(null)
     val app = App(
         AppSettings(secretKey = "test-secret", publicUrl = "http://mayday.test", llm = llmEnv),
-        Ports.memory(store, events).with(llm = llm, dispatcher = dispatcher),
+        Ports.memory(store, events).with(llm = llm, dispatcher = dispatcher, audit = listOf(auditSink)),
     ).also { a -> if (extraTools.isNotEmpty()) a.tools = mayday.tools.CompositeCatalog(listOf(a.tools) + extraTools) }
     val project = runBlocking { app.start(); app.directory.createProject("Payments", "payments") }
     val team = runBlocking { app.directory.createTeam("Checkout", "checkout", project.id) }

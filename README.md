@@ -6,6 +6,7 @@ Mayday is an AI-first, self-hosted incident management platform.
 
 - **Agents start before you do.** A severe alert opens an incident and an agent analyzes it with your tools (Grafana, GitHub, tickets through MCP). Its findings are on the timeline when you open the page.
 - **Agents act as you, never more.** Press "Create patch" and the agent receives a delegated token. It has your permissions, and every change shows the agent's name and yours.
+- **An audit trail your SIEM trusts.** Every allowed and refused action, token, policy change and agent call goes to Microsoft Sentinel, Grafana Loki or any collector, with the actor and the person an agent acts for. A hash chain shows changed or missing records. It gives evidence for ISO/IEC 27001 access, logging and monitoring controls.
 - **Less writing after the incident.** Agents keep the timeline complete, draft the postmortem, and turn your resolution notes (typed, written with a stylus, or dictated) into a runbook in ASD-STE100 Simplified Technical English.
 - **Rules that hold.** Administrators set minimums (for example "postmortem mandatory from SEV2") that teams can make stricter but not weaker. Teams can request an exception.
 - **Open to any agent.** A built-in MCP server lets Claude, coding agents and your own bots read incidents and, when allowed, write to them.
@@ -27,6 +28,8 @@ Mayday is an AI-first, self-hosted incident management platform.
 6. Ana dictates how they solved it in **Resolution** and presses **Generate runbook**. She presses **Draft postmortem**, reviews the draft and publishes it.
 7. On Friday, the director opens **Reports** for the Payments teams: MTTA, MTTR and postmortem compliance for the quarter.
 
+Each step is in the audit stream: the alert intake, the agent's tool calls *as Ana*, the delegated token, the status change. Security finds them in Sentinel with one query.
+
 If the agent's gateway budget runs out during step 3, the run fails once with "HTTP 429", the agent pauses, and steps 1, 2, 5 and 7 work the same. **View trace** on each run shows what the agent did.
 
 ## Screenshots
@@ -35,7 +38,7 @@ If the agent's gateway budget runs out during step 3, the run fails once with "H
 |---|---|
 | ![Incident with agent findings](docs/screenshots/incident.png) | ![Incidents](docs/screenshots/incidents.png) |
 | ![Reports](docs/screenshots/reports.png) | ![Policies with enforcement](docs/screenshots/policies.png) |
-| ![On-call: who responds now, a 14-day plan with an override, team members](docs/screenshots/oncall.png) | |
+| ![On-call: who responds now, a 14-day plan with an override, team members](docs/screenshots/oncall.png) | ![Audit stream: health of each SIEM sink and what is recorded](docs/screenshots/audit.png) |
 | ![LLM provider set by the environment: AI gateway with OAuth 2.0 workload identity and a custom agent ID header](docs/screenshots/llm-gateway.png) | ![MCP servers: the cloud tools gateway with the agent identity](docs/screenshots/mcp.png) |
 
 ## Install and run
@@ -73,7 +76,8 @@ make test
 2. Deploy with the Helm chart in [deploy/helm/mayday](deploy/helm/mayday) or the Terraform module in [deploy/terraform](deploy/terraform).
 3. Optional: connect the built-in agent to your AI gateway with `MAYDAY_LLM_*` (base URL, provider, OAuth 2.0 issuer, custom headers) or in **Settings → LLM provider**. Add MCP servers and external agents in **Settings**.
 4. Optional: teams from your identity provider. Send a `groups` claim, and point your provider's SCIM app at `<public URL>/scim/v2` with an administrator token that has the SCIM scope. `MAYDAY_GROUPS_AUTO_CREATE=true` and `MAYDAY_GROUPS_FILTER=^oncall-` create teams from groups. Steps for Entra ID: [docs/domains/provisioning.md](docs/domains/provisioning.md).
-5. Optional: send traces to your collector with `MAYDAY_OTEL_ENDPOINT`. Locally: `MAYDAY_OTEL_ENDPOINT=http://jaeger:4318 docker compose --profile observability up` starts Jaeger on http://localhost:16686.
+5. Audit stream: records go to standard output by default. Send them to your SIEM with `MAYDAY_AUDIT_SINKS=sentinel` or `loki` (or `http`, `file`) and the settings in [docs/domains/audit.md](docs/domains/audit.md).
+6. Optional: send traces to your collector with `MAYDAY_OTEL_ENDPOINT`. Locally: `MAYDAY_OTEL_ENDPOINT=http://jaeger:4318 docker compose --profile observability up` starts Jaeger on http://localhost:16686.
 
 Details: [docs/deployment.md](docs/deployment.md) (enterprise AI gateway, Kubernetes workload identity, token proxy sidecar) and [docs/observability.md](docs/observability.md).
 

@@ -5,6 +5,7 @@ import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { createGrpcWebTransport } from "@connectrpc/connect-web";
 import { AgentRunService, AgentService } from "@/gen/mayday/v1/agents_pb";
 import { AlertService } from "@/gen/mayday/v1/alerting_pb";
+import { AuditService } from "@/gen/mayday/v1/audit_pb";
 import { DirectoryService } from "@/gen/mayday/v1/directory_pb";
 import { EventSchema, EventService } from "@/gen/mayday/v1/events_pb";
 import { AuthService, UserService } from "@/gen/mayday/v1/identity_pb";
@@ -260,6 +261,7 @@ export const rpc = {
   agents: service(AgentService),
   agentRuns: service(AgentRunService),
   oncall: service(OnCallService),
+  audit: service(AuditService),
 };
 
 /** Link to the trace of a run in the tracing UI, or undefined when tracing or the link template is not configured. */
@@ -267,6 +269,9 @@ export function traceUrl(template: string | undefined, traceId: string | undefin
   if (!template || !traceId) return undefined;
   return template.split("{traceId}").join(encodeURIComponent(traceId));
 }
+
+export interface AuditSinkStatus { name: string; delivered: number; failures: number; dropped: number; pending: number; lastError: string }
+export interface AuditStatus { schema: string; instance: string; reads: boolean; accepted: number; dropped: number; sinks: AuditSinkStatus[] }
 
 export const items = <T>(p: Promise<{ items: T[] }>) => p.then((r) => r.items);
 

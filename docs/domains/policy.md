@@ -58,6 +58,10 @@ Policy holds the configurable rules: postmortem obligations, alert behavior, age
 - `incident.key_prefix` at team level: `invalid`.
 - `agents.exchange_admin` at project or team level: `invalid`.
 
+## Audit
+
+Policy records `setting.set` and `setting.removed` (value, previous value, enforcement) and `change_request.created`, `.approved`, `.rejected` to the audit stream. See [audit.md](audit.md).
+
 ## Rebuild checklist
 
 Pass `PolicyTest` and `PolicyReplicaTest` (a direct change and an approved change request reach a second instance). Keep the resolution order and the meaning of MINIMUM. Invalidate caches on `setting.changed`.

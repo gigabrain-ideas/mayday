@@ -56,6 +56,10 @@ class GrpcWebBridge(services: List<BindableService>, inProcessName: String, priv
         val headers = Metadata()
         request.headers().firstHeader("Authorization")?.let { headers.put(Grpc.AUTHORIZATION, it) }
         request.headers().firstHeader("Cookie")?.let { headers.put(Grpc.COOKIE, it) }
+        headers.put(AuditHeaders.CHANNEL, "grpc-web")
+        request.remoteAddress().orElse(null)?.let { a -> (a.address?.hostAddress ?: a.hostString)?.let { headers.put(AuditHeaders.CLIENT_IP, it) } }
+        request.headers().firstHeader("X-Forwarded-For")?.let { headers.put(AuditHeaders.FORWARDED_FOR, it.take(300)) }
+        request.headers().firstHeader("User-Agent")?.let { headers.put(AuditHeaders.CLIENT_USER_AGENT, it.take(300)) }
         traceHeaders().forEach { (k, v) -> headers.put(Metadata.Key.of(k, Metadata.ASCII_STRING_MARSHALLER), v) }
 
         val replies: Flow<ByteArray> = when (method.type) {

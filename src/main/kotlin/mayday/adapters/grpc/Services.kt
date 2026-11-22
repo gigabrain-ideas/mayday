@@ -431,6 +431,33 @@ class AgentRunGrpc(private val auth: Authenticator, private val app: App) : Agen
         agents.complete(auth.caller(), request.id, request.success, request.output, request.error).into(AgentRun.newBuilder()).build()
 }
 
+@Serializable private data class AuditStatusView(
+    val schema: String, val instance: String, val reads: Boolean, val accepted: Long, val dropped: Long, val sinks: List<mayday.audit.SinkStats>,
+)
+
+@Service
+class AuditGrpc(private val auth: Authenticator, private val app: App, registry: MeterRegistry) : AuditServiceGrpcKt.AuditServiceCoroutineImplBase() {
+    init {
+        Gauge.builder("mayday.audit.accepted", app.audit) { it.stats().accepted.toDouble() }.register(registry)
+        Gauge.builder("mayday.audit.dropped", app.audit) { it.stats().dropped.toDouble() }.register(registry)
+        app.audit.stats().sinks.forEach { s ->
+            fun sink(metric: String, f: (mayday.audit.SinkStats) -> Long) = Gauge.builder(metric, app.audit) { a -> f(a.stats().sinks.first { it.name == s.name }).toDouble() }
+                .tag("sink", s.name).register(registry)
+            sink("mayday.audit.sink.delivered") { it.delivered }
+            sink("mayday.audit.sink.failures") { it.failures }
+            sink("mayday.audit.sink.dropped") { it.dropped }
+            sink("mayday.audit.sink.pending") { it.pending }
+        }
+    }
+
+    override suspend fun getAuditStatus(request: Empty): AuditStatus {
+        Access.requireAdmin(auth.caller())
+        val s = app.audit.stats()
+        return AuditStatusView(mayday.audit.AUDIT_SCHEMA, app.audit.instance, app.audit.reads, s.accepted, s.dropped, s.sinks)
+            .into(AuditStatus.newBuilder()).build()
+    }
+}
+
 /** Live domain events. Each subscriber has a bounded buffer; a slow subscriber loses the oldest events. */
 @Service
 class EventGrpc(

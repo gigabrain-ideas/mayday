@@ -106,6 +106,10 @@ Okta, OneLogin, JumpCloud: the same two steps with their SCIM app. Keycloak: add
 - POST of a user with an existing email: 409 `uniqueness`.
 - The SCIM token owner deactivates or deletes themselves: 409.
 
+## Audit
+
+Group sync records `team_roles.synced` (teams added, removed and changed) and `team.created_from_groups` with the actor `identity-provider`. SCIM requests are recorded as `http:<METHOD> /scim/v2/...` calls. See [audit.md](audit.md).
+
 ## Rebuild checklist
 
 Pass `GroupClaimTest`, `GroupSyncTest`, `ProvisioningTest`, `TeamMembersTest`, `ScimContractTest`, `OidcGroupSyncContractTest` (Keycloak container), the group part of `StoreContract`, and the group-link parts of `GrpcContractTest` and `ProtoJsonContractTest`.

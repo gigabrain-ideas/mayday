@@ -25,6 +25,9 @@ interface Telemetry {
     /** W3C trace context headers (traceparent, tracestate) of the current span, for outbound calls. */
     fun propagationHeaders(): Map<String, String>
 
+    /** Trace id of the current span, or empty. The audit stream uses it to link a record to its trace. */
+    fun currentTraceId(): String = ""
+
     /** True when span content (prompts, responses, tool arguments) may be exported. */
     val captureContent: Boolean get() = false
 

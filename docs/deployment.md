@@ -65,6 +65,33 @@ A set variable overrides the value in Settings → Agents → LLM provider. The 
 
 Mayday uses standard OAuth 2.0 only and works with any compliant authorization server. Details: [domains/gateway-identity.md](domains/gateway-identity.md).
 
+### Audit stream
+
+Every authorization decision, token event, policy change and agent action, for your SIEM. Details, Sentinel table, queries and ISO/IEC 27001 mapping: [audit.md](domains/audit.md).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MAYDAY_AUDIT_SINKS` | `stdout` | Comma separated: `stdout`, `file`, `http`, `loki`, `sentinel`, or `none` |
+| `MAYDAY_AUDIT_READS` | true | Record allowed reads. Refusals are always recorded. |
+| `MAYDAY_AUDIT_KEY` | derived from `MAYDAY_SECRET_KEY` | HMAC key of the hash chain. Give it to auditors for `audit-verify`. |
+| `MAYDAY_AUDIT_INSTANCE` | host name + boot id | Name of the chain of this process |
+| `MAYDAY_AUDIT_CAPACITY` | 65536 | Records that wait for the writer. When full, new records are dropped and reported as `audit.dropped`. |
+| `MAYDAY_AUDIT_FILE` | – | `file`: path of the JSON lines file |
+| `MAYDAY_AUDIT_HTTP_URL`, `MAYDAY_AUDIT_HTTP_HEADERS`, `MAYDAY_AUDIT_HTTP_FORMAT` | –, –, `json` | `http`: collector URL, headers (`name=value,...`), `json` or `ndjson` |
+| `MAYDAY_AUDIT_LOKI_URL`, `MAYDAY_AUDIT_LOKI_TENANT` | – | `loki`: base URL (or full push URL) and `X-Scope-OrgID` |
+| `MAYDAY_AUDIT_LOKI_USER`, `MAYDAY_AUDIT_LOKI_PASSWORD`, `MAYDAY_AUDIT_LOKI_TOKEN`, `MAYDAY_AUDIT_LOKI_LABELS` | – | `loki`: basic auth or bearer token, extra labels (`env=prod,...`) |
+| `MAYDAY_AUDIT_SENTINEL_ENDPOINT`, `MAYDAY_AUDIT_SENTINEL_DCR_ID`, `MAYDAY_AUDIT_SENTINEL_STREAM` | –, –, `Custom-MaydayAudit_CL` | `sentinel`: data collection endpoint, rule immutable id, stream |
+| `MAYDAY_AUDIT_SENTINEL_TENANT_ID`, `MAYDAY_AUDIT_SENTINEL_CLIENT_ID` | – | `sentinel`: Microsoft Entra tenant and application |
+| `MAYDAY_AUDIT_SENTINEL_CLIENT_SECRET` or `MAYDAY_AUDIT_SENTINEL_ASSERTION_FILE` | –, `AZURE_FEDERATED_TOKEN_FILE` | `sentinel`: client secret, or the workload identity token file |
+
+Helm: `audit.*` in `values.yaml` (secrets go to the chart secret). Terraform: `audit_*` variables.
+
+Verify an export (exit code 0 = intact):
+
+```bash
+MAYDAY_AUDIT_KEY=... java -jar mayday.jar audit-verify audit.jsonl
+```
+
 ### Token proxy and tracing
 
 | Variable | Meaning |
@@ -88,7 +115,7 @@ Spring Boot reads all other `spring.*` and `server.*` properties from the enviro
 | `/metrics` | Prometheus text format |
 | `grpc.health.v1.Health/Check` (port 9090) | gRPC health for gRPC load balancers |
 
-Important metrics: `http_server_requests_seconds` (HTTP and gRPC-Web), `grpc_server_*` (native gRPC and gRPC-Web calls), `mayday_live_connections` (open event streams), `hikaricp_connections_*` (database pool), `jvm_*`.
+Important metrics: `http_server_requests_seconds` (HTTP and gRPC-Web), `grpc_server_*` (native gRPC and gRPC-Web calls), `mayday_live_connections` (open event streams), `mayday_audit_accepted`, `mayday_audit_dropped`, `mayday_audit_sink_delivered`, `_failures`, `_dropped`, `_pending` (tag `sink`), `hikaricp_connections_*` (database pool), `jvm_*`. Alert when an audit `dropped` metric is above 0.
 
 ## On your machine
 

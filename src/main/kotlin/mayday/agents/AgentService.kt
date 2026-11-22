@@ -8,6 +8,14 @@ import kotlinx.serialization.json.put
 import mayday.alerting.Alert
 import mayday.alerting.AlertAutomation
 import mayday.alerting.AlertService
+import mayday.audit.AuditActor
+import mayday.audit.AuditCategory
+import mayday.audit.AuditOutcome
+import mayday.audit.AuditParty
+import mayday.audit.AuditTarget
+import mayday.audit.AuditTrail
+import mayday.audit.record
+import mayday.identity.audit
 import mayday.identity.Access
 import mayday.identity.AgentIdentity
 import mayday.identity.AgentIdentityLookup
@@ -173,6 +181,7 @@ class AgentService(
     private val credentials: CredentialProviderFactory = CredentialProviderFactory { StaticCredential(it.staticSecret) },
     private val telemetry: Telemetry = Telemetry.noop,
     private val budgetPause: Duration = DEFAULT_COOLDOWN,
+    private val audit: AuditTrail = AuditTrail.none,
 ) : AgentIdentityLookup, AlertAutomation {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("agent-runs"))
     private val permits = Semaphore(concurrency)
@@ -234,7 +243,8 @@ class AgentService(
             updatedAt = now,
         )
         agents.save(agent)
-        val token = identity().issueAgentToken(agent.id, "${agent.name} identity", scopesFor(agent.role))
+        audit.record(AuditCategory.AGENT, "agent.created", by.audit(), agent.target(), agent.auditDetails())
+        val token = identity().issueAgentToken(agent.id, "${agent.name} identity", scopesFor(agent.role), by.audit())
         events.publish(DomainEvent("agent.changed", agent.id, now))
         return AgentCredentials(redact(agent), token, secret)
     }
@@ -256,8 +266,12 @@ class AgentService(
             updatedAt = clock.now(),
         )
         agents.save(next)
+        audit.record(AuditCategory.AGENT, "agent.updated", by.audit(), next.target(), next.auditDetails() + buildMap {
+            if (cur.role != next.role) put("role.from", cur.role.name)
+            if (cur.enabled != next.enabled) put("enabled.from", cur.enabled.toString())
+        })
         if (cur.role != next.role && next.kind == AgentKind.EXTERNAL) {
-            identity().revokeAgentTokens(id)
+            identity().revokeAgentTokens(id, by.audit())
         }
         events.publish(DomainEvent("agent.changed", id, clock.now()))
         return redact(next)
@@ -267,20 +281,22 @@ class AgentService(
         Access.requireAdmin(by)
         val cur = agents.get(id) ?: throw NotFound("Agent")
         if (cur.kind != AgentKind.EXTERNAL) throw Invalid("The built-in agent has no credentials")
-        identity().revokeAgentTokens(id)
+        identity().revokeAgentTokens(id, by.audit())
         val secret = Ids.secret(32)
         val next = cur.copy(secretSealed = box.seal(secret), updatedAt = clock.now())
         agents.save(next)
-        val token = identity().issueAgentToken(id, "${cur.name} identity", scopesFor(cur.role))
+        audit.record(AuditCategory.AGENT, "agent.credentials_rotated", by.audit(), next.target())
+        val token = identity().issueAgentToken(id, "${cur.name} identity", scopesFor(cur.role), by.audit())
         return AgentCredentials(redact(next), token, secret)
     }
 
     suspend fun delete(by: Principal, id: String) {
         Access.requireAdmin(by)
         if (id == INTERNAL_AGENT_ID) throw Invalid("Disable the built-in agent instead of deleting it")
-        agents.get(id) ?: throw NotFound("Agent")
-        identity().revokeAgentTokens(id)
+        val gone = agents.get(id) ?: throw NotFound("Agent")
+        identity().revokeAgentTokens(id, by.audit())
         agents.delete(id)
+        audit.record(AuditCategory.AGENT, "agent.deleted", by.audit(), gone.target())
         events.publish(DomainEvent("agent.changed", id, clock.now()))
     }
 
@@ -395,6 +411,10 @@ class AgentService(
             headers = headers,
         )
         config.saveLlm(next)
+        audit.record(AuditCategory.CONFIGURATION, "llm.updated", by.audit(), AuditTarget("llm", "internal"), buildMap {
+            put("fields", (JSON.encodeToJsonElement(LlmInput.serializer(), input) as JsonObject).keys.sorted().joinToString(","))
+            put("provider", next.provider); put("enabled", next.enabled.toString()); put("credential", next.credential.name)
+        })
         pause = null
         return view(merge(next))
     }
@@ -492,6 +512,11 @@ class AgentService(
             useAgentIdentity = input.useAgentIdentity,
         )
         mcpServers.save(s)
+        audit.record(AuditCategory.CONFIGURATION, if (cur == null) "mcp_server.created" else "mcp_server.updated", by.audit(),
+            AuditTarget("mcp_server", s.id, s.name), mapOf(
+                "url" to s.url, "enabled" to s.enabled.toString(), "useAgentIdentity" to s.useAgentIdentity.toString(),
+                "toolAllowlist" to s.toolAllowlist.joinToString(","), "credentialChanged" to (input.credential != null).toString(),
+            ))
         events.publish(DomainEvent("mcp_server.changed", s.id, clock.now()))
         return mcpView(s)
     }
@@ -502,6 +527,7 @@ class AgentService(
     suspend fun deleteMcpServer(by: Principal, id: String) {
         Access.requireAdmin(by)
         mcpServers.delete(id)
+        audit.record(AuditCategory.CONFIGURATION, "mcp_server.deleted", by.audit(), AuditTarget("mcp_server", id))
         events.publish(DomainEvent("mcp_server.changed", id, clock.now()))
     }
 
@@ -553,6 +579,7 @@ class AgentService(
             createdAt = clock.now(),
         )
         runs.save(run, null)
+        audit.record(AuditCategory.AGENT, "run.started", by.audit(), run.target(), run.auditDetails())
         note(run, "${by.actor.name} started ${agent.name}: ${action.label}.")
         start(agent, run)
         return runs.get(run.id) ?: run
@@ -595,6 +622,7 @@ class AgentService(
                     createdAt = clock.now(),
                 )
                 runs.save(run, null)
+                audit.record(AuditCategory.AGENT, "run.started", AuditActor.system, run.target(), run.auditDetails(), teams)
                 note(run, "${agent.name} started automatically: ${t.action.label}.")
                 start(agent, run)
             }
@@ -643,6 +671,7 @@ class AgentService(
         val agent = agents.get(by.actor.id) ?: throw NotFound("Agent")
         return runs.claim(agent.id, limit.coerceIn(1, 50), clock.now()).map {
             publish(it)
+            audit.record(AuditCategory.AGENT, "run.claimed", by.audit(), it.target(), it.auditDetails())
             ClaimedRun(it, delegatedToken(agent, it), snapshot(it))
         }
     }
@@ -652,7 +681,7 @@ class AgentService(
         val run = runs.get(runId) ?: throw NotFound("Agent run")
         if (run.agentId != by.actor.id) throw Forbidden("This run belongs to another agent")
         if (run.status.terminal) throw Conflict("The run is already finished")
-        return finish(runId, if (success) RunStatus.SUCCEEDED else RunStatus.FAILED, output, error)
+        return finish(runId, if (success) RunStatus.SUCCEEDED else RunStatus.FAILED, output, error, by.audit())
     }
 
     suspend fun progress(by: Principal, runId: String, text: String): AgentRun {
@@ -668,14 +697,14 @@ class AgentService(
         Access.requireWrite(by)
         val run = runs.get(runId) ?: throw NotFound("Agent run")
         if (run.status.terminal) return run
-        return finish(runId, RunStatus.CANCELLED, run.output, "Cancelled by ${by.actor.name}")
+        return finish(runId, RunStatus.CANCELLED, run.output, "Cancelled by ${by.actor.name}", by.audit())
     }
 
     /** Mark runs that stopped reporting as failed so the queue does not grow without bound. */
     suspend fun reapStale(maxAge: Duration) {
         val limit = clock.now().minus(maxAge)
         runs.active().filter { (it.startedAt ?: it.createdAt).isBefore(limit) }.forEach {
-            finish(it.id, RunStatus.FAILED, it.output, "The agent did not report a result in time")
+            finish(it.id, RunStatus.FAILED, it.output, "The agent did not report a result in time", AuditActor.system)
         }
     }
 
@@ -736,8 +765,10 @@ class AgentService(
         return identity().delegate(user, AgentIdentity(agent.id, agent.name, agent.role, agent.enabled), run.id, delegationTtl, Principal.DELEGATED)
     }
 
-    private suspend fun finish(runId: String, status: RunStatus, output: String, error: String): AgentRun {
+    private suspend fun finish(runId: String, status: RunStatus, output: String, error: String, by: AuditActor? = null): AgentRun {
         val done = transition(runId) { it.copy(status = status, output = output.take(100_000), error = error.take(4000), finishedAt = clock.now()) }
+        audit.record(AuditCategory.AGENT, "run.${status.name.lowercase()}", by ?: done.agentActor(), done.target(), done.auditDetails(),
+            outcome = if (status == RunStatus.FAILED) AuditOutcome.FAILURE else AuditOutcome.SUCCESS)
         val agentActor = Actor(ActorKind.AGENT, done.agentId, done.agentName, done.onBehalfOf)
         when (status) {
             RunStatus.SUCCEEDED -> if (output.isNotBlank()) note(done, output.take(20_000), agentActor)
@@ -793,3 +824,16 @@ class AgentService(
 
     fun shutdown() = scope.cancel()
 }
+
+private fun AgentConfig.target() = AuditTarget("agent", id, name)
+private fun AgentConfig.auditDetails() = mapOf(
+    "kind" to kind.name, "role" to role.name, "enabled" to enabled.toString(), "delivery" to delivery.name,
+    "actions" to actions.map { it.name }.sorted().joinToString(","), "endpoint" to endpointUrl.orEmpty(),
+)
+private fun AgentRun.target() = AuditTarget("agent_run", id, "$agentName: ${action.name}")
+private fun AgentRun.auditDetails() = buildMap {
+    put("agent", agentId); put("action", action.name); put("trigger", trigger.name)
+    put("subject", "${subjectKind.name.lowercase()}:$subjectId"); put("subjectLabel", subjectLabel)
+    onBehalfOf?.let { put("onBehalfOf", it) }
+}
+private fun AgentRun.agentActor() = AuditActor(AuditParty("agent", agentId, agentName), onBehalfOf?.let { AuditParty("user", it) }, runId = id)

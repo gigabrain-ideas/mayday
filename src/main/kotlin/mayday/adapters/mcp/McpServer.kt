@@ -13,11 +13,18 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import mayday.agents.ToolCatalog
+import mayday.audit.AuditTrail
+import mayday.tools.AuditedCatalog
 import mayday.identity.Principal
 import mayday.shared.Telemetry
 
 /** MCP server (JSON-RPC 2.0). Transport independent: the HTTP adapter feeds it request bodies. */
-class McpServer(private val catalog: ToolCatalog, private val version: String, private val telemetry: Telemetry = Telemetry.noop) {
+class McpServer(
+    private val catalog: ToolCatalog,
+    private val version: String,
+    private val telemetry: Telemetry = Telemetry.noop,
+    private val audit: AuditTrail = AuditTrail.none,
+) {
     companion object {
         const val PROTOCOL = "2025-11-25"
         private val ERROR_CODE = Regex("^[a-z_]{1,40}$")
@@ -91,6 +98,7 @@ class McpServer(private val catalog: ToolCatalog, private val version: String, p
             if (catalog.tools(principal, internal = false).none { it.name == name }) {
                 span.fail("Unknown tool or not allowed")
                 span.set("error.type", "-32602")
+                AuditedCatalog.refused(audit, principal, name, args)
                 return@span error(id, -32602, "Unknown tool or not allowed: $name")
             }
             val out = catalog.call(principal, name, args, internal = false)

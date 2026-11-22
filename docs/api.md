@@ -23,6 +23,7 @@ gRPC reflection and the standard gRPC health service (`grpc.health.v1.Health`) a
 | `policy.proto` | `PolicyService` | `GetSettings`, `SetSetting`, `ClearSetting`, `ListChangeRequests`, `RequestChange`, `DecideChange` |
 | `agents.proto` | `AgentService` | `ListAgents`, `ListEligibleAgents`, `GetAgent`, `CreateAgent`, `UpdateAgent`, `DeleteAgent`, `RotateAgentCredentials` (secrets in the response only), `GetLlm`, `UpdateLlm`, `ListMcpServers`, `SaveMcpServer`, `DeleteMcpServer` |
 | `agents.proto` | `AgentRunService` | `ListRuns`, `GetRun`, `StartRun`, `CancelRun`, `ClaimRuns`, `ReportProgress`, `CompleteRun` |
+| `audit.proto` | `AuditService` | `GetAuditStatus` (administrators): instance, reads switch, accepted and lost records, per sink delivered, pending, failures, lost and last error. See [audit.md](domains/audit.md) |
 | `events.proto` | `EventService` | `Subscribe` (server stream): `incident.*`, `alert.*`, `agent_run.updated`, `setting.changed`, `oncall.changed`, and `ping` every 25 seconds |
 
 Conventions (`common.proto`):

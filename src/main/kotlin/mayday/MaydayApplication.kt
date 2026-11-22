@@ -60,7 +60,49 @@ data class MaydayProperties(
     val traceUrlTemplate: String = "",
     val telemetry: TelemetrySettings = TelemetrySettings(),
     val groups: Groups = Groups(),
+    val audit: Audit = Audit(),
 ) {
+    /** Audit stream. See docs/domains/audit.md. */
+    data class Audit(
+        val sinks: String = "stdout",
+        val reads: Boolean = true,
+        val key: String = "",
+        val instance: String = "",
+        val capacity: Int = 65_536,
+        val file: String = "",
+        val http: Http = Http(),
+        val loki: Loki = Loki(),
+        val sentinel: Sentinel = Sentinel(),
+    ) {
+        data class Http(val url: String = "", val headers: String = "", val format: String = "json")
+        data class Loki(val url: String = "", val tenant: String = "", val user: String = "", val password: String = "", val token: String = "", val labels: String = "")
+        data class Sentinel(
+            val endpoint: String = "",
+            val dcrId: String = "",
+            val stream: String = "Custom-MaydayAudit_CL",
+            val tenantId: String = "",
+            val clientId: String = "",
+            val clientSecret: String = "",
+            val assertionFile: String = "",
+            val authority: String = "https://login.microsoftonline.com",
+        )
+
+        fun settings() = mayday.audit.AuditSettings(reads = reads, capacity = capacity.coerceAtLeast(1024),
+            instance = instance.trim().ifEmpty { mayday.audit.AuditSettings.defaultInstance() })
+
+        fun sinkConfig() = mayday.adapters.audit.AuditSinkConfig(
+            sinks = csv(sinks),
+            file = file,
+            httpUrl = http.url, httpHeaders = http.headers.takeIf { it.isNotBlank() }?.let { parsePairs(it, "MAYDAY_AUDIT_HTTP_HEADERS") }.orEmpty(),
+            httpFormat = http.format,
+            lokiUrl = loki.url, lokiTenant = loki.tenant, lokiUser = loki.user, lokiPassword = loki.password, lokiToken = loki.token,
+            lokiLabels = loki.labels.takeIf { it.isNotBlank() }?.let { parsePairs(it, "MAYDAY_AUDIT_LOKI_LABELS") }.orEmpty(),
+            sentinelEndpoint = sentinel.endpoint, sentinelDcrId = sentinel.dcrId, sentinelStream = sentinel.stream,
+            sentinelTenantId = sentinel.tenantId, sentinelClientId = sentinel.clientId, sentinelClientSecret = sentinel.clientSecret,
+            sentinelAssertionFile = sentinel.assertionFile, sentinelAuthority = sentinel.authority,
+        )
+    }
+
     /** Teams from identity provider groups (sign-in claims and SCIM). See docs/domains/provisioning.md. */
     data class Groups(val autoCreate: Boolean = false, val filter: String = "", val ownerSuffix: String = "")
 
@@ -149,6 +191,8 @@ data class MaydayProperties(
         llm = llm.environment(),
         agentConcurrency = agentConcurrency,
         groups = mayday.provisioning.GroupSyncSettings(groups.autoCreate, groups.filter, groups.ownerSuffix),
+        audit = audit.settings(),
+        auditKey = audit.key,
     )
 
     companion object {
@@ -169,6 +213,7 @@ class MaydayApplication
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "token-proxy") return mayday.sidecar.TokenProxy.main(args.drop(1).toTypedArray())
+    if (args.firstOrNull() == "audit-verify") kotlin.system.exitProcess(mayday.audit.AuditVerify.main(args.drop(1).toTypedArray()))
     runApplication<MaydayApplication>(*args)
 }
 
@@ -181,15 +226,19 @@ class Wiring {
     fun telemetry(openTelemetry: OpenTelemetry, props: MaydayProperties): Telemetry = OtelTelemetry(openTelemetry, props.telemetry.captureContent)
 
     @Bean(destroyMethod = "")
-    fun ports(props: MaydayProperties, telemetry: Telemetry): Ports = (props.database.jdbcUrl?.let { url ->
-        val pool = Pool.of(url, props.database.user.ifBlank { null }, props.database.password.ifBlank { null }, props.database.pool)
-        Ports.postgres(PostgresStore(pool), PgEventBus(pool))
-    } ?: Ports.memory(MemoryStore(props.journalDir))).with(
-        telemetry = telemetry,
-        credentials = Credentials(telemetry = telemetry),
-        llm = LlmProviders.withTelemetry(telemetry),
-        dispatcher = WebhookDispatcher(telemetry = telemetry),
-    )
+    fun ports(props: MaydayProperties, telemetry: Telemetry): Ports {
+        val credentials = Credentials(telemetry = telemetry)
+        return (props.database.jdbcUrl?.let { url ->
+            val pool = Pool.of(url, props.database.user.ifBlank { null }, props.database.password.ifBlank { null }, props.database.pool)
+            Ports.postgres(PostgresStore(pool), PgEventBus(pool))
+        } ?: Ports.memory(MemoryStore(props.journalDir))).with(
+            telemetry = telemetry,
+            credentials = credentials,
+            llm = LlmProviders.withTelemetry(telemetry),
+            dispatcher = WebhookDispatcher(telemetry = telemetry),
+            audit = props.audit.sinkConfig().build(credentials),
+        )
+    }
 
     @Bean(destroyMethod = "stop")
     fun app(props: MaydayProperties, ports: Ports): App {
@@ -209,7 +258,7 @@ class Wiring {
 
     @Bean
     fun authenticator(props: MaydayProperties, app: App, oidc: OidcClient?, sessions: Sessions) =
-        Authenticator(app.identity, oidc, sessions, props.devLogin || (oidc == null && props.demo), props.baseUrl)
+        Authenticator(app.identity, oidc, sessions, props.devLogin || (oidc == null && props.demo), props.baseUrl, app.audit)
 
     @Bean
     fun startup(props: MaydayProperties, app: App, oidc: OidcClient?) = ApplicationRunner {

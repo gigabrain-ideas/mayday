@@ -99,6 +99,50 @@ spec:
             {{- if .Values.otel.captureContent }}
             - { name: MAYDAY_OTEL_CAPTURE_CONTENT, value: "true" }
             {{- end }}
+            {{- with .Values.audit }}
+            - { name: MAYDAY_AUDIT_SINKS, value: {{ .sinks | default "stdout" | quote }} }
+            - { name: MAYDAY_AUDIT_READS, value: {{ ternary "true" "false" (ne .reads false) | quote }} }
+            {{- with .file }}
+            - { name: MAYDAY_AUDIT_FILE, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .http.url }}
+            - { name: MAYDAY_AUDIT_HTTP_URL, value: {{ . | quote }} }
+            {{- end }}
+            - { name: MAYDAY_AUDIT_HTTP_FORMAT, value: {{ .http.format | default "json" | quote }} }
+            {{- with .loki.url }}
+            - { name: MAYDAY_AUDIT_LOKI_URL, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .loki.tenant }}
+            - { name: MAYDAY_AUDIT_LOKI_TENANT, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .loki.user }}
+            - { name: MAYDAY_AUDIT_LOKI_USER, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .loki.labels }}
+            - { name: MAYDAY_AUDIT_LOKI_LABELS, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .sentinel.endpoint }}
+            - { name: MAYDAY_AUDIT_SENTINEL_ENDPOINT, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .sentinel.dcrId }}
+            - { name: MAYDAY_AUDIT_SENTINEL_DCR_ID, value: {{ . | quote }} }
+            {{- end }}
+            - { name: MAYDAY_AUDIT_SENTINEL_STREAM, value: {{ .sentinel.stream | default "Custom-MaydayAudit_CL" | quote }} }
+            {{- with .sentinel.tenantId }}
+            - { name: MAYDAY_AUDIT_SENTINEL_TENANT_ID, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .sentinel.clientId }}
+            - { name: MAYDAY_AUDIT_SENTINEL_CLIENT_ID, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .sentinel.assertionFile }}
+            - { name: MAYDAY_AUDIT_SENTINEL_ASSERTION_FILE, value: {{ . | quote }} }
+            {{- end }}
+            {{- end }}
+            {{- $s := include "mayday.secretName" . }}
+            {{- range $env, $key := dict "MAYDAY_AUDIT_KEY" "auditKey" "MAYDAY_AUDIT_LOKI_PASSWORD" "auditLokiPassword" "MAYDAY_AUDIT_LOKI_TOKEN" "auditLokiToken" "MAYDAY_AUDIT_SENTINEL_CLIENT_SECRET" "auditSentinelClientSecret" "MAYDAY_AUDIT_HTTP_HEADERS" "auditHttpHeaders" }}
+            - name: {{ $env }}
+              valueFrom: { secretKeyRef: { name: {{ $s }}, key: {{ $key }}, optional: true } }
+            {{- end }}
             {{- with .Values.traceUrlTemplate }}
             - { name: MAYDAY_TRACE_URL_TEMPLATE, value: {{ . | quote }} }
             {{- end }}

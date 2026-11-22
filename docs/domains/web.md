@@ -32,7 +32,7 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 | `/alerts`, `/alerts/:id` | Alert list and detail with acknowledge, resolve, updates, link to incident, agent buttons |
 | `/oncall?team=<slug>` | Who is on call now for each schedule; for one team: schedules with a 14-day plan (overrides in yellow, nobody on call in red), overrides (add, remove), members (team owners add, remove and promote; locked when identity provider groups manage the team). Team members can add only themselves as override. |
 | `/reports` | Period presets and custom range, multi-select teams and severities, stat tiles, chart, team table, longest incidents |
-| `/settings/*` | Policies (scoped, enforcement, request change), change requests, agents, LLM provider, MCP (server info and tool gateway), teams and projects (administrators link identity provider groups), users, API tokens (administrators can add the SCIM scope) |
+| `/settings/*` | Policies (scoped, enforcement, request change), change requests, agents, LLM provider, MCP (server info and tool gateway), teams and projects (administrators link identity provider groups), users, API tokens (administrators can add the SCIM scope), audit (administrators: health of the audit stream and each sink, what is recorded, verify command) |
 
 ## Behavior
 
@@ -45,12 +45,14 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 
 - During an incident, the commander keeps the incident page open. Agent findings and teammates' notes appear without reload.
 - A team admin opens Settings → Policies, sees a lock on a setting and sends a change request.
+- An administrator opens Settings → Audit and sees that the Sentinel sink retries after an error and has lost no record.
 - A member is sick. A colleague opens On-call, selects the team and adds themselves as override until Friday. The "now" card shows the colleague and an Override badge on all open browsers.
 
 ## Negative use cases
 
 - A session expires: the next call returns `UNAUTHENTICATED` and the login page appears.
 - The browser has no speech recognition: the microphone button is hidden.
+- A member opens `/settings/audit`: the Audit tab is not shown and the status call returns `PERMISSION_DENIED`.
 
 ## Rebuild checklist
 

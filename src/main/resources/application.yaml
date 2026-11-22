@@ -81,6 +81,34 @@ mayday:
   max-live-connections: ${MAYDAY_MAX_LIVE_CONNECTIONS:100000}
   agent-concurrency: ${MAYDAY_AGENT_CONCURRENCY:16}
   trace-url-template: ${MAYDAY_TRACE_URL_TEMPLATE:}
+  # Audit stream for a SIEM (Microsoft Sentinel, Grafana Loki, any HTTP collector). See docs/domains/audit.md.
+  audit:
+    sinks: ${MAYDAY_AUDIT_SINKS:stdout}
+    reads: ${MAYDAY_AUDIT_READS:true}
+    key: ${MAYDAY_AUDIT_KEY:}
+    instance: ${MAYDAY_AUDIT_INSTANCE:}
+    capacity: ${MAYDAY_AUDIT_CAPACITY:65536}
+    file: ${MAYDAY_AUDIT_FILE:}
+    http:
+      url: ${MAYDAY_AUDIT_HTTP_URL:}
+      headers: ${MAYDAY_AUDIT_HTTP_HEADERS:}
+      format: ${MAYDAY_AUDIT_HTTP_FORMAT:json}
+    loki:
+      url: ${MAYDAY_AUDIT_LOKI_URL:}
+      tenant: ${MAYDAY_AUDIT_LOKI_TENANT:}
+      user: ${MAYDAY_AUDIT_LOKI_USER:}
+      password: ${MAYDAY_AUDIT_LOKI_PASSWORD:}
+      token: ${MAYDAY_AUDIT_LOKI_TOKEN:}
+      labels: ${MAYDAY_AUDIT_LOKI_LABELS:}
+    sentinel:
+      endpoint: ${MAYDAY_AUDIT_SENTINEL_ENDPOINT:}
+      dcr-id: ${MAYDAY_AUDIT_SENTINEL_DCR_ID:}
+      stream: ${MAYDAY_AUDIT_SENTINEL_STREAM:Custom-MaydayAudit_CL}
+      tenant-id: ${MAYDAY_AUDIT_SENTINEL_TENANT_ID:}
+      client-id: ${MAYDAY_AUDIT_SENTINEL_CLIENT_ID:}
+      client-secret: ${MAYDAY_AUDIT_SENTINEL_CLIENT_SECRET:}
+      assertion-file: ${MAYDAY_AUDIT_SENTINEL_ASSERTION_FILE:${AZURE_FEDERATED_TOKEN_FILE:}}
+      authority: ${MAYDAY_AUDIT_SENTINEL_AUTHORITY:https://login.microsoftonline.com}
   telemetry:
     endpoint: ${MAYDAY_OTEL_ENDPOINT:}
     environment: ${MAYDAY_ENVIRONMENT:}

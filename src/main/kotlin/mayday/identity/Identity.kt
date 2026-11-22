@@ -6,6 +6,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
+import mayday.audit.AuditActor
+import mayday.audit.AuditCategory
+import mayday.audit.AuditParty
+import mayday.audit.AuditTarget
+import mayday.audit.AuditTrail
+import mayday.audit.record
 import mayday.directory.TeamRepository
 import mayday.policy.Keys
 import mayday.policy.OrgSettingListener
@@ -177,6 +183,45 @@ object Access {
     }
 }
 
+fun User.auditParty() = AuditParty("user", id, name, email)
+fun User.target() = AuditTarget("user", id, name)
+private fun User.principalActor(credential: String) = AuditActor(auditParty(), role = orgRole.name, credential = credential)
+private fun ApiToken.target() = AuditTarget("token", id, name)
+private fun Set<TokenScope>.lowercase() = map { it.name.lowercase() }.sorted().joinToString(",")
+private fun ApiToken.auditDetails() = buildMap {
+    put("owner", "${ownerKind.name.lowercase()}:$ownerId")
+    put("prefix", prefix)
+    put("scopes", scopes.lowercase())
+    expiresAt?.let { put("expiresAt", it.toString()) }
+}
+
+private fun changes(before: User, after: User): Map<String, String> = buildMap {
+    if (before.name != after.name) put("name", after.name)
+    if (before.orgRole != after.orgRole) { put("role.from", before.orgRole.name); put("role.to", after.orgRole.name) }
+    if (before.disabled != after.disabled) put("disabled", after.disabled.toString())
+    val added = after.teams.keys - before.teams.keys
+    val removed = before.teams.keys - after.teams.keys
+    val changed = after.teams.filter { (k, v) -> before.teams[k] != null && before.teams[k] != v }
+    if (added.isNotEmpty()) put("teams.added", added.joinToString(",") { "$it:${after.teams[it]}" })
+    if (removed.isNotEmpty()) put("teams.removed", removed.joinToString(","))
+    if (changed.isNotEmpty()) put("teams.changed", changed.entries.joinToString(",") { "${it.key}:${it.value}" })
+    if (before.projectAdmin != after.projectAdmin) put("projectAdmin", after.projectAdmin.sorted().joinToString(","))
+}
+
+/** The principal as the audit stream shows it: the actor and, when an agent acts for a person, that person. */
+fun Principal.audit(credential: String? = null) = AuditActor(
+    actor = when (actor.kind) {
+        ActorKind.USER -> user?.auditParty() ?: AuditParty("user", actor.id, actor.name)
+        ActorKind.AGENT -> AuditParty("agent", actor.id, actor.name)
+        ActorKind.SYSTEM -> AuditParty.system
+    },
+    onBehalfOf = if (isDelegated) user?.auditParty() else null,
+    role = role.name,
+    scopes = scopes.map { it.name.lowercase() }.sorted(),
+    runId = runId,
+    credential = credential,
+)
+
 @Serializable
 data class IssuedToken(val token: ApiToken, val secret: String)
 
@@ -189,6 +234,7 @@ class IdentityService(
     private val clock: Clock,
     private val bootstrapAdmins: Set<String>,
     private val policy: PolicyReader,
+    private val audit: AuditTrail = AuditTrail.none,
 ) : OrgSettingListener {
     var membership: TeamMembershipListener? = null
     var groupSync: GroupMembershipSync? = null
@@ -208,6 +254,10 @@ class IdentityService(
         }
         if (user.disabled) throw Forbidden("This account is disabled")
         users.save(user)
+        if (existing == null) {
+            audit.record(AuditCategory.IDENTITY, "user.provisioned", user.principalActor("sso_token"), user.target(),
+                mapOf("role" to user.orgRole.name, "via" to "sso"))
+        }
         val sync = groupSync
         return if (groups != null && sync != null) sync.signedIn(user, groups) else user
     }
@@ -218,7 +268,10 @@ class IdentityService(
         if (!normalized.contains('@')) throw Invalid("A valid email is required")
         if (users.byEmail(normalized) != null) throw Conflict("A user with this email exists")
         return User(Ids.new(), normalized, name.ifBlank { normalized.substringBefore('@') }, role, createdAt = clock.now())
-            .also { users.save(it) }
+            .also {
+                users.save(it)
+                audit.record(AuditCategory.IDENTITY, "user.created", by.audit(), it.target(), mapOf("email" to it.email, "role" to it.orgRole.name))
+            }
     }
 
     suspend fun updateUser(
@@ -253,6 +306,8 @@ class IdentityService(
         ).also { saved ->
             users.save(saved)
             (u.teams.keys - saved.teams.keys).forEach { membership?.membershipRemoved(it, saved.id) }
+            val changes = changes(u, saved)
+            if (changes.isNotEmpty()) audit.record(AuditCategory.IDENTITY, "user.updated", by.audit(), saved.target(), changes, saved.teams.keys.toList())
         }
     }
 
@@ -273,6 +328,9 @@ class IdentityService(
         if (updated == u) return u
         users.save(updated)
         if (role == null && t.id in u.teams) membership?.membershipRemoved(t.id, u.id)
+        val action = when { role == null -> "team_member.removed"; t.id !in u.teams -> "team_member.added"; else -> "team_member.role_changed" }
+        audit.record(AuditCategory.IDENTITY, action, by.audit(), updated.target(),
+            buildMap { put("team", t.id); u.teams[t.id]?.let { put("from", it.name) }; role?.let { put("to", it.name) } }, listOf(t.id))
         return updated
     }
 
@@ -286,11 +344,16 @@ class IdentityService(
         val owner = by.user ?: throw Forbidden("Only users can create personal tokens")
         if (by.isDelegated) throw Forbidden("Agents cannot create tokens for users")
         val allowed = scopes.filter { it !in Principal.ADMIN_ONLY || owner.orgRole == OrgRole.ADMIN }.toSet()
-        return mint(OwnerKind.USER, owner.id, name, allowed.ifEmpty { setOf(TokenScope.READ) }, ttl)
+        return mint(OwnerKind.USER, owner.id, name, allowed.ifEmpty { setOf(TokenScope.READ) }, ttl).also {
+            audit.record(AuditCategory.TOKEN, "token.issued", by.audit(), it.token.target(),
+                it.token.auditDetails() + mapOf("requested" to scopes.lowercase()))
+        }
     }
 
-    suspend fun issueAgentToken(agentId: String, name: String, scopes: Set<TokenScope>): IssuedToken =
-        mint(OwnerKind.AGENT, agentId, name, scopes, null)
+    suspend fun issueAgentToken(agentId: String, name: String, scopes: Set<TokenScope>, by: AuditActor = AuditActor.system): IssuedToken =
+        mint(OwnerKind.AGENT, agentId, name, scopes, null).also {
+            audit.record(AuditCategory.TOKEN, "token.issued", by, it.token.target(), it.token.auditDetails())
+        }
 
     suspend fun tokensOf(kind: OwnerKind, ownerId: String) = tokens.byOwner(kind, ownerId)
 
@@ -299,9 +362,13 @@ class IdentityService(
         val own = t.ownerKind == OwnerKind.USER && t.ownerId == by.user?.id && !by.isDelegated
         if (!own) Access.requireAdmin(by)
         tokens.delete(id)
+        audit.record(AuditCategory.TOKEN, "token.revoked", by.audit(), t.target(), t.auditDetails())
     }
 
-    suspend fun revokeAgentTokens(agentId: String) = tokens.byOwner(OwnerKind.AGENT, agentId).forEach { tokens.delete(it.id) }
+    suspend fun revokeAgentTokens(agentId: String, by: AuditActor = AuditActor.system) = tokens.byOwner(OwnerKind.AGENT, agentId).forEach {
+        tokens.delete(it.id)
+        audit.record(AuditCategory.TOKEN, "token.revoked", by, it.target(), it.auditDetails())
+    }
 
     private suspend fun mint(kind: OwnerKind, ownerId: String, name: String, scopes: Set<TokenScope>, ttl: Duration?): IssuedToken {
         val secret = "mdy_" + Ids.secret(30)
@@ -349,7 +416,13 @@ class IdentityService(
     /**
      * Mint an on-behalf-of token: the agent acts with the RBAC of [user]. The token is short-lived and bound to a run.
      */
-    fun delegate(user: User, agent: AgentIdentity, runId: String?, ttl: Duration, scopes: Set<TokenScope>): String {
+    suspend fun delegate(user: User, agent: AgentIdentity, runId: String?, ttl: Duration, scopes: Set<TokenScope>): String =
+        sign(user, agent, runId, ttl, scopes).also {
+            audit.record(AuditCategory.TOKEN, "token.delegated", AuditActor(AuditParty("agent", agent.id, agent.name), user.auditParty(), runId = runId),
+                AuditTarget("user", user.id, user.name), mapOf("scopes" to scopes.lowercase(), "expiresAt" to clock.now().plus(ttl).toString()))
+        }
+
+    private fun sign(user: User, agent: AgentIdentity, runId: String?, ttl: Duration, scopes: Set<TokenScope>): String {
         val now = clock.now()
         return signer.sign(buildJsonObject {
             put("iss", "mayday")
@@ -370,7 +443,10 @@ class IdentityService(
         if (!actor.isAgent || actor.isDelegated) throw Forbidden("The actor token must belong to an agent")
         val agent = agents.find(actor.actor.id) ?: throw Forbidden("Unknown agent")
         val scopes = (if (agentAdminAllowed(user)) subject.scopes else subject.scopes - TokenScope.ADMIN) - TokenScope.SCIM
-        return delegate(user, agent, null, ttl, scopes)
+        return sign(user, agent, null, ttl, scopes).also {
+            audit.record(AuditCategory.TOKEN, "token.exchanged", actor.audit().copy(onBehalfOf = user.auditParty()), AuditTarget("user", user.id, user.name),
+                mapOf("scopes" to scopes.lowercase(), "adminKept" to (TokenScope.ADMIN in scopes).toString(), "expiresAt" to clock.now().plus(ttl).toString()))
+        }
     }
 
     suspend fun agentAdminOrgAllowed() = policy.bool(Keys.AGENT_EXCHANGE_ADMIN, emptyList())
@@ -378,7 +454,12 @@ class IdentityService(
     /** When the organization stops allowing it, every opt-in ends. Administrators must opt in again after it is allowed again. */
     override suspend fun orgSettingChanged(key: String) {
         if (key != Keys.AGENT_EXCHANGE_ADMIN || agentAdminOrgAllowed()) return
-        users.withAgentAdmin().forEach { users.save(it.copy(allowAgentAdmin = false)) }
+        val cleared = users.withAgentAdmin()
+        cleared.forEach { users.save(it.copy(allowAgentAdmin = false)) }
+        if (cleared.isNotEmpty()) {
+            audit.record(AuditCategory.IDENTITY, "agent_admin.cleared", AuditActor.system,
+                details = mapOf("count" to cleared.size.toString(), "users" to cleared.joinToString(",") { it.id }))
+        }
     }
 
     private suspend fun agentAdminAllowed(user: User) = user.allowAgentAdmin && agentAdminOrgAllowed()
@@ -392,7 +473,10 @@ class IdentityService(
             if (!Access.isAdmin(by)) throw Forbidden("Only administrators can let agents keep the admin scope")
             if (!agentAdminOrgAllowed()) throw Forbidden("The organization does not allow admin rights through token exchange")
         }
-        return u.copy(allowAgentAdmin = allow).also { users.save(it) }
+        return u.copy(allowAgentAdmin = allow).also {
+            users.save(it)
+            if (u.allowAgentAdmin != allow) audit.record(AuditCategory.IDENTITY, if (allow) "agent_admin.enabled" else "agent_admin.disabled", by.audit(), it.target())
+        }
     }
 
     private suspend fun authenticateDelegated(token: String): Principal? {

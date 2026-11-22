@@ -113,7 +113,8 @@ class AuthEndpoints(private val auth: Authenticator) {
     }
 
     @PostMapping("/auth/logout")
-    suspend fun logout(): ResponseEntity<String> {
+    suspend fun logout(@RequestHeader(HttpHeaders.COOKIE, required = false) cookies: String?): ResponseEntity<String> {
+        auth.signedOut(cookies)
         val url = auth.oidc?.let { withContext(Dispatchers.IO) { it.logoutUrl(auth.publicUrl) } } ?: "/"
         return json(mapOf("logoutUrl" to url), cookie = sessions.clear(Sessions.COOKIE))
     }
@@ -212,8 +213,10 @@ class HttpErrors {
     private val log = Logger.getLogger("mayday.http")
 
     @ExceptionHandler(DomainException::class)
-    fun domain(e: DomainException): ResponseEntity<String> = ResponseEntity.status(statusOf(e.code))
-        .contentType(MediaType.APPLICATION_JSON).body(errorBody(e.code, e.message ?: e.code))
+    fun domain(e: DomainException, exchange: ServerWebExchange): ResponseEntity<String> {
+        exchange.attributes[AuditFilter.REASON] = e.code
+        return ResponseEntity.status(statusOf(e.code)).contentType(MediaType.APPLICATION_JSON).body(errorBody(e.code, e.message ?: e.code))
+    }
 
     @ExceptionHandler(org.springframework.web.server.ServerWebInputException::class)
     fun input(e: org.springframework.web.server.ServerWebInputException): ResponseEntity<String> = ResponseEntity.badRequest()
@@ -225,16 +228,7 @@ class HttpErrors {
 
     @ExceptionHandler(org.springframework.web.server.ResponseStatusException::class)
     fun status(e: org.springframework.web.server.ResponseStatusException): ResponseEntity<String> {
-        val code = when (e.statusCode.value()) {
-            404 -> "not_found"
-            405 -> "method_not_allowed"
-            401 -> "unauthenticated"
-            403 -> "forbidden"
-            503 -> "unavailable"
-            429 -> "resource_exhausted"
-            in 400..499 -> "invalid"
-            else -> "internal"
-        }
+        val code = codeOf(e.statusCode.value())
         return ResponseEntity.status(e.statusCode).contentType(MediaType.APPLICATION_JSON).body(errorBody(code, e.reason ?: code))
     }
 
@@ -246,6 +240,17 @@ class HttpErrors {
     }
 
     companion object {
+        fun codeOf(status: Int) = when (status) {
+            404 -> "not_found"
+            405 -> "method_not_allowed"
+            401 -> "unauthenticated"
+            403 -> "forbidden"
+            503 -> "unavailable"
+            429 -> "resource_exhausted"
+            in 400..499 -> "invalid"
+            else -> "internal"
+        }
+
         fun statusOf(code: String) = when (code) {
             "not_found" -> HttpStatus.NOT_FOUND
             "forbidden", "locked" -> HttpStatus.FORBIDDEN

@@ -55,6 +55,8 @@ class OtelTelemetry(openTelemetry: OpenTelemetry, override val captureContent: B
         }
     }
 
+    override fun currentTraceId(): String = Span.current().spanContext.takeIf { it.isValid }?.traceId.orEmpty()
+
     override fun propagationHeaders(): Map<String, String> {
         val ctx = Context.current()
         if (!Span.fromContext(ctx).spanContext.isValid) return emptyMap()

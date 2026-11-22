@@ -76,6 +76,10 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 - An agent with a delegated token calls `SetAgentAdmin`: `forbidden`.
 - The organization turns `agents.exchange_admin` off and on again. Earlier opt-ins are gone; the exchanged token has no ADMIN until the administrator opts in again.
 
+## Audit
+
+Identity records `token.issued`, `token.revoked`, `token.delegated`, `token.exchanged`, `user.provisioned`, `user.created`, `user.updated`, `team_member.*` and `agent_admin.*` to the audit stream. The authenticator puts the resolved caller and the credential type into the audit context of each request. See [audit.md](audit.md).
+
 ## Rebuild checklist
 
 Pass `IdentityTest`, `TeamMembersTest`, `AgentAdminExchangeTest`, `AgentAdminOptInResetTest`, the agent admin part of `StoreContract`, `DelegationLimitsTest`, the credential, token and scope parts of `GrpcContractTest`, the sign-in and token-exchange parts of `HttpEdgesContractTest`, and the token part of `StoreContract`.

@@ -14,6 +14,10 @@ flowchart LR
   HC[WebhookContractTest] --> WH[WebhookDispatcher]
   SCT[ScimContractTest] --> SC[SCIM 2.0 endpoints]
   OGS[OidcGroupSyncContractTest] --> KC[Keycloak container + OIDC adapter]
+  ASC[AuditSinkContract] --> AS1[StdoutSink, FileSink]
+  ASC --> AS2[HttpSink, LokiSink, SentinelSink<br/>against a local HTTP destination]
+  ALC[AuditLogContractTest] --> AL[AuditLog: queue, chain, retries]
+  AST[AuditStreamContractTest] --> AE[Real server: gRPC, gRPC-Web, HTTP, MCP, agent records]
   DT[Domain tests] --> S[Services with fakes]
 ```
 
@@ -36,6 +40,9 @@ flowchart LR
 | `McpGatewayContractTest` | `contract/McpGatewayContractTest.kt` | Tools gateway client: identity headers per request, static mode, 401 refresh, a grant refusal (`isError: true`) reaches the model unchanged, no decision on error messages, 429 pause without network I/O, isolation of a broken server, session expiry |
 | `TelemetryContractTest` | `contract/TelemetryContractTest.kt` | OpenTelemetry adapter: nesting across suspension and dispatchers, typed attributes, errors and cancellation, W3C headers, run links |
 | `LlmSettingsContractTest` | `contract/LlmSettingsContractTest.kt` | `MAYDAY_LLM_*` values win and lock their fields, generic OAuth 2.0 variables, invalid values, token parameter validation |
+| `AuditLogContractTest` | `contract/AuditLogContractTest.kt` | The audit stream port: numbered and chained records, detection of changed, removed and forged records, arrival order does not matter, reads switch, a full queue reports `audit.dropped` with the exact count, a failing sink is retried without holding up the others, `emit` does not block, one chain per instance, the `audit-verify` exit codes |
+| `AuditSinkContract` (`StdoutSinkContractTest`, `FileSinkContractTest`, `HttpSinkContractTest`, `LokiSinkContractTest`, `SentinelSinkContractTest`) | `contract/AuditSinkContractTest.kt` | Each sink delivers every record unchanged and in order (the chain verifies at the destination), special characters survive, a refused delivery throws; file rotation; HTTP headers, NDJSON and size limits; Loki push path, tenant, auth, low cardinality labels and nanosecond timestamps; Sentinel DCR stream URL, Entra bearer token, `TimeGenerated`, token refresh after 401 |
+| `AuditStreamContractTest` | `contract/AuditStreamContractTest.kt` | The real server: denied and anonymous gRPC calls with caller, credential, source and reason; tokens issued and revoked without the secret; policy values before and after; agent admin opt-in and reset; token exchange and MCP tool calls with agent and on-behalf-of; refused hidden tools; built-in agent tool calls with the run; HTTP intake and sign-in; gRPC-Web source; spoofed source headers ignored; a client that closes its live stream is not a failure; status RPC for administrators only; the whole stream verifies |
 | `PolicyReplicaTest` | `DomainTest.kt` | Two instances on one store and event bus: direct changes and approved change requests clear the settings cache of the other instance |
 | `PolicyTest`, `IncidentTest`, `AlertTest`, `IdentityTest`, `AgentTest` | `DomainTest.kt` | The rules in each product brief, including negative cases |
 | `RotationTest`, `OnCallTest`, `TeamMembersTest` | `OnCallTest.kt` | Rotation math (order, wrap, before start, daylight saving, windows), override precedence and cuts, schedule and override RBAC (owners vs members), integrity rules, leaving a team |
@@ -46,7 +53,7 @@ flowchart LR
 
 `ServerContract` (`contract/ServerSupport.kt`) starts the real Spring Boot application on random HTTP and gRPC ports, with memory storage, `FakeLlm` and `RecordingDispatcher`. Both servers listen on `127.0.0.1` only. On a wildcard address, another local server (an IDE, a fake gateway in another test) could bind `127.0.0.1` on the same port and receive the test calls; the gRPC client then failed with "First received frame was not SETTINGS". Each subclass runs the check `no other loopback listener can take the ports of the test servers`. Test HTTP calls have a 30 s timeout, so a broken server fails a test instead of stopping the run. Each subclass sets its own `spring.grpc.server.inprocess.name`.
 
-Test doubles (`TestSupport.kt`): `FakeLlm` (scripted tool calls and answers) and `RecordingDispatcher` (records webhooks, can fail on request).
+Test doubles (`TestSupport.kt`): `FakeLlm` (scripted tool calls and answers), `RecordingDispatcher` (records webhooks, can fail on request) and `RecordingSink` (keeps every audit batch; `ServerContract` and `Fixture` use it).
 
 ## Run
 

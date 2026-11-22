@@ -224,3 +224,94 @@ variable "trace_url_template" {
   type        = string
   default     = ""
 }
+
+# ---- Audit stream (docs/domains/audit.md) ----
+variable "audit_sinks" {
+  description = "Audit sinks: stdout, file, http, loki, sentinel or none."
+  type        = list(string)
+  default     = ["stdout"]
+}
+variable "audit_reads" {
+  description = "Record allowed reads. Refusals are always recorded."
+  type        = bool
+  default     = true
+}
+variable "audit_key" {
+  description = "HMAC key of the audit hash chain. Give it to auditors. Empty: derived from the secret key."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+variable "audit_http_url" {
+  description = "Sink http: URL of the collector (Splunk HEC, Elastic, Vector)."
+  type        = string
+  default     = ""
+}
+variable "audit_http_format" {
+  description = "Sink http: json (array) or ndjson."
+  type        = string
+  default     = "json"
+}
+variable "audit_http_headers" {
+  description = "Sink http: headers as name=value,name2=value2, for example Authorization=Splunk <token>."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+variable "audit_loki_url" {
+  description = "Sink loki: Loki base URL, for example http://loki-gateway.monitoring."
+  type        = string
+  default     = ""
+}
+variable "audit_loki_tenant" {
+  description = "Sink loki: tenant (X-Scope-OrgID)."
+  type        = string
+  default     = ""
+}
+variable "audit_loki_user" {
+  description = "Sink loki: basic auth user."
+  type        = string
+  default     = ""
+}
+variable "audit_loki_password" {
+  description = "Sink loki: basic auth password."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+variable "audit_loki_labels" {
+  description = "Sink loki: extra labels as name=value,name2=value2."
+  type        = string
+  default     = ""
+}
+variable "audit_sentinel_endpoint" {
+  description = "Sink sentinel: data collection endpoint URL."
+  type        = string
+  default     = ""
+}
+variable "audit_sentinel_dcr_id" {
+  description = "Sink sentinel: immutable id of the data collection rule."
+  type        = string
+  default     = ""
+}
+variable "audit_sentinel_stream" {
+  description = "Sink sentinel: stream of the data collection rule."
+  type        = string
+  default     = "Custom-MaydayAudit_CL"
+}
+variable "audit_sentinel_tenant_id" {
+  description = "Sink sentinel: Microsoft Entra tenant id."
+  type        = string
+  default     = ""
+}
+variable "audit_sentinel_client_id" {
+  description = "Sink sentinel: application (client) id with Monitoring Metrics Publisher on the rule."
+  type        = string
+  default     = ""
+}
+variable "audit_sentinel_client_secret" {
+  description = "Sink sentinel: client secret. Empty with Azure workload identity."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

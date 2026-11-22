@@ -208,7 +208,8 @@ fun interface LlmProviderFactory {
 
 // ---- Tools port ----
 
-data class ToolOutcome(val content: String, val isError: Boolean = false)
+/** [code] is the domain error code of a failed call, for example forbidden or locked. */
+data class ToolOutcome(val content: String, val isError: Boolean = false, val code: String? = null)
 
 /** Tools that an agent can call. [internal] is true for the built-in agent, which bypasses the MCP write switch. */
 interface ToolCatalog {

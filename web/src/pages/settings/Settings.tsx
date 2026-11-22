@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/common";
 import { PoliciesPage, ChangeRequestsPage } from "./Policies";
 import { DirectoryPage, UsersPage, TokensPage } from "./Directory";
 import { AgentsPage, LlmPage, McpPage } from "./Agents";
+import { AuditPage } from "./Audit";
 
 export function SettingsPage() {
   const { isAdmin } = useSession();
@@ -17,6 +18,7 @@ export function SettingsPage() {
     { to: "directory", label: "Teams & projects" },
     { to: "users", label: "Users" },
     { to: "tokens", label: "API tokens" },
+    { to: "audit", label: "Audit", admin: true },
   ].filter((t) => !t.admin || isAdmin);
   return (
     <>
@@ -40,6 +42,7 @@ export function SettingsPage() {
         <Route path="directory" element={<DirectoryPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="tokens" element={<TokensPage />} />
+        <Route path="audit" element={<AuditPage />} />
       </Routes>
     </>
   );

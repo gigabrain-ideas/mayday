@@ -3,6 +3,13 @@ package mayday.provisioning
 import kotlinx.serialization.Serializable
 import mayday.directory.DirectoryService
 import mayday.directory.Team
+import mayday.audit.AuditActor
+import mayday.audit.AuditCategory
+import mayday.audit.AuditParty
+import mayday.audit.AuditTarget
+import mayday.audit.AuditTrail
+import mayday.audit.record
+import mayday.identity.target
 import mayday.identity.Access
 import mayday.identity.GroupMembershipSync
 import mayday.identity.OrgRole
@@ -53,6 +60,7 @@ class GroupSync(
     private val users: UserRepository,
     private val directory: DirectoryService,
     private val settings: GroupSyncSettings,
+    private val audit: AuditTrail = AuditTrail.none,
     private val membership: () -> TeamMembershipListener?,
 ) : GroupMembershipSync {
 
@@ -88,7 +96,10 @@ class GroupSync(
     }
 
     private suspend fun create(name: String, members: Set<String>, owners: Set<String>) =
-        directory.createTeam(name, directory.freeSlug(name), null, "Created from identity provider groups", members, owners)
+        directory.createTeam(name, directory.freeSlug(name), null, "Created from identity provider groups", members, owners).also {
+            audit.record(AuditCategory.IDENTITY, "team.created_from_groups", IDP, AuditTarget("team", it.id, it.name),
+                mapOf("memberGroups" to members.sorted().joinToString(","), "ownerGroups" to owners.sorted().joinToString(",")), listOf(it.id))
+        }
 
     suspend fun reconcile(user: User, teams: List<Team>): User {
         val next = desired(user, teams)
@@ -96,6 +107,14 @@ class GroupSync(
         val u = user.copy(teams = next)
         users.save(u)
         (user.teams.keys - next.keys).forEach { membership()?.membershipRemoved(it, u.id) }
+        audit.record(AuditCategory.IDENTITY, "team_roles.synced", IDP, u.target(), buildMap {
+            val added = next.keys - user.teams.keys
+            val removed = user.teams.keys - next.keys
+            val changed = next.filter { (k, v) -> user.teams[k] != null && user.teams[k] != v }
+            if (added.isNotEmpty()) put("teams.added", added.joinToString(",") { "$it:${next[it]}" })
+            if (removed.isNotEmpty()) put("teams.removed", removed.joinToString(","))
+            if (changed.isNotEmpty()) put("teams.changed", changed.entries.joinToString(",") { "${it.key}:${it.value}" })
+        }, (user.teams.keys + next.keys).toList())
         return u
     }
 
@@ -112,6 +131,7 @@ class GroupSync(
     }
 
     companion object {
+        private val IDP = AuditActor(AuditParty("system", "identity-provider", "Identity provider"))
         /** Team roles that the groups of [user] give. Teams without links keep their manual membership. */
         fun desired(user: User, teams: List<Team>): Map<String, TeamRole> {
             val groups = user.groups

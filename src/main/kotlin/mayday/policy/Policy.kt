@@ -9,6 +9,11 @@ import mayday.shared.Clock
 import mayday.shared.DomainEvent
 import mayday.shared.DomainException
 import mayday.shared.EventPublisher
+import mayday.audit.AuditCategory
+import mayday.audit.AuditTarget
+import mayday.audit.AuditTrail
+import mayday.audit.record
+import mayday.identity.audit
 import mayday.shared.Forbidden
 import mayday.shared.Ids
 import mayday.shared.Invalid
@@ -182,6 +187,7 @@ class PolicyService(
     private val directory: DirectoryService,
     private val events: EventPublisher,
     private val clock: Clock,
+    private val audit: AuditTrail = AuditTrail.none,
 ) : PolicyReader {
     @Volatile private var cache: Map<String, SettingValue>? = null
     @Volatile var listener: OrgSettingListener = object : OrgSettingListener { override suspend fun orgSettingChanged(key: String) = Unit }
@@ -248,7 +254,12 @@ class PolicyService(
         val parent = resolve(def, levels, index())
         if (!Access.isAdmin(by)) checkConstraint(def, parent, normalized)
         val sv = SettingValue(scope, id, key, normalized, enforcement, exception = false, updatedBy = by.actor, updatedAt = clock.now())
+        val before = index()[sv.id]
         settings.save(sv)
+        audit.record(AuditCategory.POLICY, "setting.set", by.audit(), AuditTarget("setting", sv.id, key), buildMap {
+            put("scope", scope.name); put("scopeId", id); put("key", key); put("value", normalized); put("enforcement", enforcement.name)
+            before?.let { put("previous", it.value); put("previousEnforcement", it.enforcement.name) }
+        }, teamsOf(scope, id))
         invalidate()
         events.publish(DomainEvent("setting.changed", sv.id, clock.now(), data = mapOf("key" to key)))
         if (scope == Scope.ORG) listener.orgSettingChanged(key)
@@ -262,6 +273,8 @@ class PolicyService(
         val existing = index()["${scope.name}:$id:$key"] ?: return
         if (existing.enforcement != Enforcement.NONE && !Access.isAdmin(by)) throw Forbidden("Only administrators can remove an enforced setting")
         settings.delete(existing.id)
+        audit.record(AuditCategory.POLICY, "setting.removed", by.audit(), AuditTarget("setting", existing.id, key),
+            mapOf("scope" to scope.name, "scopeId" to id, "key" to key, "previous" to existing.value, "previousEnforcement" to existing.enforcement.name), teamsOf(scope, id))
         invalidate()
         events.publish(DomainEvent("setting.changed", existing.id, clock.now(), data = mapOf("key" to key)))
         if (scope == Scope.ORG) listener.orgSettingChanged(key)
@@ -274,6 +287,8 @@ class PolicyService(
         if (scope !in def.scopes) throw Invalid("'$key' cannot be set at ${scope.name.lowercase()} level")
         val cr = ChangeRequest(Ids.new(), scope, id, key, validate(def, proposed), reason.trim(), requestedBy = by.actor, createdAt = clock.now())
         requests.save(cr)
+        audit.record(AuditCategory.POLICY, "change_request.created", by.audit(), AuditTarget("change_request", cr.id, key),
+            mapOf("scope" to scope.name, "scopeId" to id, "key" to key, "proposed" to cr.proposedValue), teamsOf(scope, id))
         events.publish(DomainEvent("change_request.created", cr.id, clock.now()))
         return cr
     }
@@ -296,9 +311,15 @@ class PolicyService(
             decidedBy = by.actor, decidedAt = clock.now(), decisionNote = note.trim(),
         )
         requests.save(decided)
+        audit.record(AuditCategory.POLICY, if (approve) "change_request.approved" else "change_request.rejected", by.audit(),
+            AuditTarget("change_request", cr.id, cr.key),
+            mapOf("scope" to cr.scope.name, "scopeId" to cr.scopeId, "key" to cr.key, "proposed" to cr.proposedValue, "requestedBy" to cr.requestedBy.id),
+            teamsOf(cr.scope, cr.scopeId))
         events.publish(DomainEvent("change_request.decided", cr.id, clock.now()))
         return decided
     }
+
+    private fun teamsOf(scope: Scope, id: String) = if (scope == Scope.TEAM) listOf(id) else emptyList()
 
     private suspend fun normalizeScopeId(scope: Scope, scopeId: String): String = when (scope) {
         Scope.ORG -> ORG_ID

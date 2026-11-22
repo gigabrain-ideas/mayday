@@ -1,6 +1,14 @@
 package mayday.adapters.auth
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import mayday.audit.AuditActor
+import mayday.audit.AuditContext
+import mayday.audit.AuditCategory
+import mayday.audit.AuditTrail
+import mayday.audit.record
+import mayday.identity.audit
+import mayday.identity.target
 import kotlinx.coroutines.withContext
 import mayday.identity.IdentityService
 import mayday.identity.Principal
@@ -18,12 +26,16 @@ class Authenticator(
     val sessions: Sessions,
     val devLogin: Boolean,
     val publicUrl: String,
+    private val audit: AuditTrail = AuditTrail.none,
 ) {
     suspend fun principal(authorization: String?, cookieHeader: String?): Principal {
         if (authorization != null && authorization.startsWith("Bearer ", ignoreCase = true)) return bearer(authorization.substring(7).trim())
-        val userId = sessions.verify(cookie(cookieHeader, Sessions.COOKIE)) ?: throw Unauthenticated()
+        val ctx = currentCoroutineContext()[AuditContext]
+        val raw = cookie(cookieHeader, Sessions.COOKIE)
+        if (raw != null) ctx?.caller = AuditActor.anonymous.copy(credential = "session")
+        val userId = sessions.verify(raw) ?: throw Unauthenticated()
         val user = runCatching { identity.user(userId) }.getOrNull() ?: throw Unauthenticated()
-        return identity.principalForUser(user)
+        return identity.principalForUser(user).also { ctx?.caller = it.audit("session") }
     }
 
     /**
@@ -38,20 +50,43 @@ class Authenticator(
     }
 
     suspend fun bearer(token: String): Principal {
-        if (oidc != null && !token.startsWith("mdy_") && oidc.looksLikeOurs(token)) {
-            val id = withContext(Dispatchers.IO) { oidc.verifyAccessToken(token) }
-            return identity.principalForUser(identity.upsertSso(id.subject, id.email, id.name, id.groups))
+        val ctx = currentCoroutineContext()[AuditContext]
+        val sso = oidc != null && !token.startsWith("mdy_") && oidc.looksLikeOurs(token)
+        val credential = when {
+            sso -> "sso_token"
+            token.startsWith("mdy_") -> "api_token"
+            else -> "delegated_token"
         }
-        return identity.authenticate(token)
+        ctx?.caller = AuditActor.anonymous.copy(credential = credential)
+        val p = if (sso) {
+            val id = withContext(Dispatchers.IO) { oidc!!.verifyAccessToken(token) }
+            identity.principalForUser(identity.upsertSso(id.subject, id.email, id.name, id.groups))
+        } else identity.authenticate(token)
+        ctx?.caller = p.audit(credential)
+        return p
     }
 
-    suspend fun ssoUser(subject: String, email: String, name: String, groups: Set<String>? = null): User = identity.upsertSso(subject, email, name, groups)
+    suspend fun ssoUser(subject: String, email: String, name: String, groups: Set<String>? = null): User =
+        identity.upsertSso(subject, email, name, groups).also { signedIn(it, "sso") }
 
     suspend fun exchange(subject: Principal, actor: Principal, ttl: java.time.Duration): String = identity.exchange(subject, actor, ttl)
 
     suspend fun devUser(email: String, name: String): User {
         if (!devLogin) throw Forbidden("Development login is turned off")
-        return identity.upsertSso("dev|${email.lowercase()}", email, name)
+        return identity.upsertSso("dev|${email.lowercase()}", email, name).also { signedIn(it, "dev_login") }
+    }
+
+    private suspend fun signedIn(user: User, method: String) {
+        val by = identity.principalForUser(user).audit("session")
+        currentCoroutineContext()[AuditContext]?.caller = by
+        audit.record(AuditCategory.AUTHENTICATION, "sign_in", by, user.target(), mapOf("method" to method))
+    }
+
+    suspend fun signedOut(cookieHeader: String?) {
+        val user = sessions.verify(cookie(cookieHeader, Sessions.COOKIE))?.let { runCatching { identity.user(it) }.getOrNull() } ?: return
+        val by = identity.principalForUser(user).audit("session")
+        currentCoroutineContext()[AuditContext]?.caller = by
+        audit.record(AuditCategory.AUTHENTICATION, "sign_out", by, user.target())
     }
 
     companion object {

@@ -34,12 +34,17 @@ resource "kubernetes_secret_v1" "mayday" {
     namespace = kubernetes_namespace_v1.mayday.metadata[0].name
   }
   data = {
-    secretKey        = random_password.secret_key.result
-    oidcClientSecret = var.oidc_client_secret
-    anthropicApiKey  = var.anthropic_api_key
-    databasePassword = var.database_password
-    llmApiKey        = var.llm_api_key
-    llmClientSecret  = var.llm_client_secret
+    secretKey                 = random_password.secret_key.result
+    oidcClientSecret          = var.oidc_client_secret
+    anthropicApiKey           = var.anthropic_api_key
+    databasePassword          = var.database_password
+    llmApiKey                 = var.llm_api_key
+    llmClientSecret           = var.llm_client_secret
+    auditKey                  = var.audit_key
+    auditLokiPassword         = var.audit_loki_password
+    auditLokiToken            = ""
+    auditSentinelClientSecret = var.audit_sentinel_client_secret
+    auditHttpHeaders          = var.audit_http_headers
   }
 }
 
@@ -100,5 +105,15 @@ resource "helm_release" "mayday" {
     tokenProxy       = { enabled = var.token_proxy_upstream != "", upstream = var.token_proxy_upstream }
     otel             = { endpoint = var.otel_endpoint, sampling = var.otel_sampling, captureContent = var.otel_capture_content }
     traceUrlTemplate = var.trace_url_template
+    audit = {
+      sinks = join(",", var.audit_sinks)
+      reads = var.audit_reads
+      http  = { url = var.audit_http_url, format = var.audit_http_format }
+      loki  = { url = var.audit_loki_url, tenant = var.audit_loki_tenant, user = var.audit_loki_user, labels = var.audit_loki_labels }
+      sentinel = {
+        endpoint = var.audit_sentinel_endpoint, dcrId = var.audit_sentinel_dcr_id, stream = var.audit_sentinel_stream
+        tenantId = var.audit_sentinel_tenant_id, clientId = var.audit_sentinel_client_id
+      }
+    }
   })]
 }

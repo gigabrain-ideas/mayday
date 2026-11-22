@@ -328,12 +328,12 @@ class MaydayTools(
     }
 
     override suspend fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome {
-        val tool = byName[name] ?: return ToolOutcome("Unknown tool '$name'", true)
+        val tool = byName[name] ?: return ToolOutcome("Unknown tool '$name'", true, "not_found")
         return try {
             val r = tool.handler(principal, args, Gate(internal))
             ToolOutcome(JSON.encodeToString(JsonElement.serializer(), r))
         } catch (e: DomainException) {
-            ToolOutcome("${e.code}: ${e.message}", true)
+            ToolOutcome("${e.code}: ${e.message}", true, e.code)
         }
     }
 }
@@ -344,6 +344,6 @@ class CompositeCatalog(private val parts: List<ToolCatalog>) : ToolCatalog {
 
     override suspend fun call(principal: Principal, name: String, args: JsonObject, internal: Boolean): ToolOutcome {
         for (p in parts) if (p.tools(principal, internal).any { it.name == name }) return p.call(principal, name, args, internal)
-        return ToolOutcome("Unknown tool '$name'", true)
+        return ToolOutcome("Unknown tool '$name'", true, "not_found")
     }
 }

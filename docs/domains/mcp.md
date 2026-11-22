@@ -79,6 +79,10 @@ Behaviour (`McpGateway`, `McpClient`):
 - A member calls `set_setting`: the tool is not listed, and a direct call returns JSON-RPC error -32602.
 - An unknown method: error -32601.
 
+## Audit
+
+`AuditedCatalog` records every tool call (MCP and built-in agent) as `tool:<name>` with the actor, the person an agent acts for, the run, the outcome and the identifiers in the arguments, never free text. The MCP server records a call to a tool the caller cannot see as `denied` with reason `not_allowed`. See [audit.md](audit.md).
+
 ## Rebuild checklist
 
 Pass the MCP part of `HttpEdgesContractTest`, the pull-agent part of `GrpcContractTest`, the tool parts of `AgentTest` and `McpGatewayContractTest` (tool gateway: identity headers with token rotation, static mode, allowlist and prefixes, 401 retry, grants, 429 pause, failure isolation, session expiry, cache key).

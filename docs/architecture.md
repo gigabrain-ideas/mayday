@@ -34,6 +34,7 @@ flowchart LR
     REP[Reporting]
   end
   TOOLS[Tools: use cases as tools]
+  AUD[Audit: stream for the SIEM]
 
   ALR -- opens incidents, adds timeline entries --> INC
   ALR -- AlertAutomation port --> AGT
@@ -54,6 +55,11 @@ flowchart LR
   IDN -- GroupMembershipSync --> PRV
   PRV -- team links, team roles --> DIR
   TOOLS --> ONC
+  IDN -- AuditTrail --> AUD
+  POL -- AuditTrail --> AUD
+  AGT -- AuditTrail --> AUD
+  PRV -- AuditTrail --> AUD
+  TOOLS -- AuditedCatalog --> AUD
 ```
 
 | Context | Package | Responsibility | Brief |
@@ -68,6 +74,7 @@ flowchart LR
 | Provisioning | `mayday.provisioning` | Teams from identity provider groups: groups claim and SCIM 2.0 | [provisioning.md](domains/provisioning.md) |
 | Reporting | `mayday.reporting` | Metrics over incidents and alerts | [reporting.md](domains/reporting.md) |
 | Tools | `mayday.tools` | Use cases as tools for MCP and the built-in agent | [mcp.md](domains/mcp.md) |
+| Audit | `mayday.audit` | Audit stream: every decision, token, policy and agent action, hash chain, sinks | [audit.md](domains/audit.md) |
 | Web interface | `web/` | React and shadcn-style interface | [web.md](domains/web.md) |
 
 ## Ports and adapters
@@ -93,6 +100,7 @@ flowchart TB
     WH[Webhook dispatcher<br/>adapters/dispatch]
     GW[MCP client gateway<br/>adapters/mcp/McpGateway]
     BUS[Event bus<br/>in-process or PgEventBus]
+    AUDS[Audit sinks<br/>stdout, file, Loki, Sentinel, HTTP<br/>adapters/audit]
   end
   GRPC --> SVC
   EDGE --> SVC
@@ -105,6 +113,8 @@ flowchart TB
   SVC -- AgentDispatcher --> WH
   SVC -- ToolCatalog --> GW
   SVC -- EventBus --> BUS
+  SVC -- AuditSink --> AUDS
+  GRPC & EDGE & MCPS -. "call records<br/>(AuditInterceptor, AuditFilter, AuditedCatalog)" .-> AUDS
 ```
 
 | Port | Defined in | Adapters |
@@ -121,6 +131,8 @@ flowchart TB
 | `PolicyReader` | `policy` | `PolicyService` |
 | `TeamMembershipListener` | `identity` | `OnCallService` (a person who leaves a team leaves its rotations) |
 | `GroupMembershipSync` | `identity` | `GroupSync` (groups of a sign-in become team roles) |
+| `AuditTrail` | `audit` | `AuditLog` (queue, hash chain, one thread per sink); `AuditTrail.none` |
+| `AuditSink` | `audit` | `StdoutSink`, `FileSink`, `LokiSink`, `SentinelSink`, `HttpSink`; tests use `RecordingSink` |
 
 | Driving adapter | Port | Clients |
 |---|---|---|
@@ -187,6 +199,31 @@ sequenceDiagram
   X->>M: tools/call report_agent_run (agent token)
 ```
 
+### Every call reaches the audit stream
+
+```mermaid
+sequenceDiagram
+  participant A as Agent (delegated token)
+  participant F as AuditFilter / AuditInterceptor
+  participant Au as Authenticator
+  participant T as AuditedCatalog
+  participant S as Service
+  participant L as AuditLog
+  participant K as Sinks (Loki, Sentinel, ...)
+  A->>F: POST /mcp tools/call update_incident
+  F->>F: AuditContext(source: mcp, IP, user agent)
+  F->>Au: principal(Bearer ...)
+  Au-->>F: caller = agent, onBehalfOf = Ana, delegated_token
+  F->>T: call(principal, update_incident)
+  T->>S: update (RBAC of Ana)
+  S-->>T: result or forbidden
+  T->>L: emit tool:update_incident (success or denied)
+  F->>L: emit http:POST /mcp
+  Note over L: emit returns at once
+  L->>L: writer: seq, prev, HMAC
+  L-)K: batch per sink, retries with backoff
+```
+
 ### Live updates across replicas
 
 Each service publishes a `DomainEvent`. `PgEventBus` sends it to local listeners and to `pg_notify`. The other replicas receive it with `LISTEN` and give it to their `EventService.Subscribe` streams. Each browser holds one gRPC-Web stream and reloads only the data that changed.
@@ -215,3 +252,4 @@ Targets: 50,000 to 100,000 concurrent users, 1,000 to 10,000 incidents and alert
 - Webhooks are signed with HMAC-SHA256 over the timestamp and the body.
 - The built-in agent uses the same tools as external agents. RBAC applies to each call.
 - SCIM accepts only a bearer token with the SCIM scope of an administrator. Session cookies and agents have no access. Groups of a person never leave the server.
+- Audit: every authorization decision, token event, policy change and agent action goes to the audit stream with the actor and the person an agent acts for. Records are chained with HMAC-SHA256 per instance and never contain secrets or free text. See [audit.md](domains/audit.md).
