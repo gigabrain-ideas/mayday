@@ -10,6 +10,6 @@
 | [deployment.md](deployment.md) | Ports, configuration, probes, metrics, local run, Docker, Helm, Terraform, enterprise AI gateway, sizing |
 | [observability.md](observability.md) | OpenTelemetry traces, agent run traces, metrics |
 
-Product briefs: [incidents](domains/incidents.md), [alerting](domains/alerting.md), [agents](domains/agents.md), [gateway identity](domains/gateway-identity.md), [policy](domains/policy.md), [identity](domains/identity.md), [directory](domains/directory.md), [on-call](domains/oncall.md), [provisioning](domains/provisioning.md), [reporting](domains/reporting.md), [tools and MCP](domains/mcp.md), [audit](domains/audit.md), [web interface](domains/web.md).
+Product briefs: [incidents](domains/incidents.md), [alerting](domains/alerting.md), [agents](domains/agents.md), [gateway identity](domains/gateway-identity.md), [policy](domains/policy.md), [identity](domains/identity.md), [directory](domains/directory.md), [on-call](domains/oncall.md), [escalation](domains/escalation.md), [provisioning](domains/provisioning.md), [reporting](domains/reporting.md), [tools and MCP](domains/mcp.md), [audit](domains/audit.md), [web interface](domains/web.md).
 
 API contract: [`proto/mayday/v1`](../proto/mayday/v1).

@@ -125,6 +125,13 @@ audit:
     clientSecret: ""          # stored in the secret; leave empty with Azure workload identity
     assertionFile: ""         # empty: AZURE_FEDERATED_TOKEN_FILE from the Azure workload identity webhook
 
+# Escalation pages: POST JSON to a chat bridge, SMS gateway or push service. See docs/domains/escalation.md.
+# webhookSecret and webhookHeaders go in the chart secret or in existingSecret.
+paging:
+  webhookUrl: ""
+  webhookSecret: ""           # signs each page: X-Mayday-Signature = sha256=HMAC(secret, timestamp + "." + body)
+  webhookHeaders: ""          # name=value,name2=value2, for example Authorization=Bearer <token>
+
 # Link from a run to its trace. {traceId} is the placeholder, for example https://grafana.example.com/explore?traceId={traceId}
 traceUrlTemplate: ""
 

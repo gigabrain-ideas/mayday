@@ -322,4 +322,44 @@ abstract class StoreContract {
         p.groups.delete(g.id)
         assertNull(p.groups.get(g.id))
     }
+
+    // ---- escalation ----
+
+    private fun policy(team: String = "t1") = mayday.escalation.EscalationPolicy(Ids.new(), team, "Default", "d",
+        listOf(mayday.escalation.EscalationLevel(5, listOf(mayday.escalation.EscalationTarget(mayday.escalation.TargetKind.SCHEDULE, "s1"),
+            mayday.escalation.EscalationTarget(mayday.escalation.TargetKind.USER, "u1")))), 1, true, now, now)
+
+    @Test
+    fun `escalation policies round trip by team and enforce optimistic concurrency`() = suspendTest {
+        val a = policy()
+        p.escalationPolicies.save(a, null)
+        p.escalationPolicies.save(policy("t2"), null)
+        assertEquals(a, p.escalationPolicies.get(a.id))
+        assertEquals(listOf(a), p.escalationPolicies.byTeam("t1"))
+        assertFailsWith<Conflict> { p.escalationPolicies.save(a, null) }
+        p.escalationPolicies.save(a.copy(name = "Night", version = 2), 1)
+        assertFailsWith<Conflict> { p.escalationPolicies.save(a.copy(name = "stale", version = 2), 1) }
+        assertEquals("Night", p.escalationPolicies.get(a.id)!!.name)
+        p.escalationPolicies.delete(a.id)
+        assertNull(p.escalationPolicies.get(a.id))
+    }
+
+    @Test
+    fun `due escalations are active ones whose time came, earliest first`() = suspendTest {
+        fun e(minutes: Long, status: mayday.escalation.EscalationStatus = mayday.escalation.EscalationStatus.ACTIVE, policy: String = "p1") =
+            mayday.escalation.Escalation(Ids.new(), "t1", policy, status, 0, 0, now.plus(minutes, ChronoUnit.MINUTES),
+                listOf(mayday.escalation.EscalationPage(now, 1, 0, listOf("u1"))), now, now)
+        val late = e(-1); val early = e(-5); val future = e(10); val stopped = e(-9, mayday.escalation.EscalationStatus.ACKNOWLEDGED); val other = e(-2, policy = "p2")
+        listOf(late, early, future, stopped, other).forEach { p.escalations.save(it, null) }
+        assertEquals(early, p.escalations.get(early.id))
+        assertEquals(listOf(early.id, other.id, late.id), p.escalations.due(now, 10).map { it.id })
+        assertEquals(listOf(early.id), p.escalations.due(now, 1).map { it.id })
+        assertEquals(setOf(late.id, early.id, future.id), p.escalations.activeByPolicy("p1").map { it.id }.toSet())
+        assertFailsWith<Conflict> { p.escalations.save(early, null) }
+        val acked = early.copy(status = mayday.escalation.EscalationStatus.ACKNOWLEDGED, nextAt = null, version = 2)
+        p.escalations.save(acked, 1)
+        assertFailsWith<Conflict> { p.escalations.save(early.copy(version = 2), 1) }
+        assertEquals(acked, p.escalations.get(early.id))
+        assertEquals(listOf(other.id, late.id), p.escalations.due(now, 10).map { it.id })
+    }
 }

@@ -43,6 +43,7 @@ class GrpcContractTest : ServerContract() {
     private val reports by lazy { ReportServiceGrpcKt.ReportServiceCoroutineStub(channel) }
     private val events by lazy { EventServiceGrpcKt.EventServiceCoroutineStub(channel) }
     private val oncall by lazy { OnCallServiceGrpcKt.OnCallServiceCoroutineStub(channel) }
+    private val escalation by lazy { EscalationServiceGrpcKt.EscalationServiceCoroutineStub(channel) }
 
     private fun unique() = UUID.randomUUID().toString().take(8)
 
@@ -351,6 +352,57 @@ class GrpcContractTest : ServerContract() {
         assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") {
             oncall.listShifts(window.toBuilder().setTo(ts(start.plus(Duration.ofDays(100)))).build(), auth("viewer"))
         }
+        oncall.deleteSchedule(id(s.id), auth("lead"))
+    }
+
+    // ---- escalation ----
+
+    private fun level(minutes: Int, vararg targets: Pair<TargetKind, String>) = EscalationLevel.newBuilder().setDelayMinutes(minutes)
+        .addAllTargets(targets.map { (k, v) -> EscalationTarget.newBuilder().setKind(k).setId(v).build() }).build()
+
+    @Test
+    fun `team owners manage escalation policies`() = suspendTest {
+        val s = newSchedule()
+        val req = SaveEscalationPolicyRequest.newBuilder().setTeamId("checkout").setName("Default ${unique()}")
+            .addLevels(level(5, TargetKind.TARGET_KIND_SCHEDULE to s.id)).addLevels(level(10, TargetKind.TARGET_KIND_USER to userOf("member").id)).setRepeat(1).build()
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { escalation.createPolicy(req, auth("member")) }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") {
+            escalation.createPolicy(req.toBuilder().clearLevels().addLevels(level(5, TargetKind.TARGET_KIND_SCHEDULE to "missing")).build(), auth("lead"))
+        }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { escalation.createPolicy(req.toBuilder().clearLevels().addLevels(level(999, TargetKind.TARGET_KIND_USER to userOf("member").id)).build(), auth("lead")) }
+        val p = escalation.createPolicy(req, auth("lead"))
+        assertEquals(TargetKind.TARGET_KIND_SCHEDULE, p.levelsList[0].targetsList.single().kind)
+        assertEquals(1, p.repeat)
+        assertTrue(escalation.listPolicies(ListEscalationPoliciesRequest.newBuilder().setTeamId("checkout").build(), auth("viewer")).itemsList.any { it.id == p.id })
+        val updated = escalation.updatePolicy(req.toBuilder().setId(p.id).setName("Renamed").setVersion(p.version).build(), auth("lead"))
+        assertEquals("Renamed", updated.name)
+        assertStatus(Status.Code.ABORTED, "conflict") { escalation.updatePolicy(req.toBuilder().setId(p.id).setVersion(p.version).build(), auth("lead")) }
+        escalation.deletePolicy(id(p.id), auth("lead"))
+        assertStatus(Status.Code.NOT_FOUND, "not_found") { escalation.getPolicy(id(p.id), auth("viewer")) }
+        oncall.deleteSchedule(id(s.id), auth("lead"))
+    }
+
+    @Test
+    fun `a firing alert pages the default policy and responders escalate now`() = suspendTest {
+        val s = newSchedule()
+        val p = escalation.createPolicy(SaveEscalationPolicyRequest.newBuilder().setTeamId("checkout").setName("Pager ${unique()}").setTeamDefault(true)
+            .addLevels(level(5, TargetKind.TARGET_KIND_SCHEDULE to s.id)).addLevels(level(10, TargetKind.TARGET_KIND_USER to userOf("member").id)).build(), auth("lead"))
+        val alert = alerts.ingestAlert(AlertSignal.newBuilder().setTitle("Latency ${unique()}").setSeverity(Severity.SEVERITY_SEV2).setTeam("checkout").build(), auth("member")).alert
+        val e = escalation.getEscalation(id(alert.id), auth("viewer"))
+        assertEquals(EscalationStatus.ESCALATION_STATUS_ACTIVE, e.status)
+        assertEquals(p.id, e.policyId)
+        assertEquals(listOf(userOf("lead").id), e.pagesList.single().userIdsList)
+        assertTrue(e.hasNextAt())
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { escalation.escalateNow(id(alert.id), auth("viewer")) }
+        val next = escalation.escalateNow(id(alert.id), auth("member"))
+        assertEquals(2, next.pagesList.last().level)
+        assertTrue(next.pagesList.last().manual)
+        alerts.acknowledgeAlert(id(alert.id), auth("member"))
+        val stopped = escalation.getEscalation(id(alert.id), auth("viewer"))
+        assertEquals(EscalationStatus.ESCALATION_STATUS_ACKNOWLEDGED, stopped.status)
+        assertFalse(stopped.hasNextAt())
+        assertStatus(Status.Code.NOT_FOUND, "not_found") { escalation.getEscalation(id("missing"), auth("viewer")) }
+        escalation.deletePolicy(id(p.id), auth("lead"))
         oncall.deleteSchedule(id(s.id), auth("lead"))
     }
 

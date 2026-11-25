@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+option java_outer_classname = "EscalationProto";
+
+enum TargetKind {
+  TARGET_KIND_UNSPECIFIED = 0;
+  // The person on call of a schedule, at the time of the page.
+  TARGET_KIND_SCHEDULE = 1;
+  TARGET_KIND_USER = 2;
+}
+
+message EscalationTarget {
+  TargetKind kind = 1;
+  // Schedule id or user id.
+  string id = 2;
+}
+
+// All targets are paged together. The next level is paged after delay_minutes without acknowledgement.
+message EscalationLevel {
+  int32 delay_minutes = 1;
+  repeated EscalationTarget targets = 2;
+}
+
+message EscalationPolicy {
+  string id = 1;
+  string team_id = 2;
+  string name = 3;
+  string description = 4;
+  repeated EscalationLevel levels = 5;
+  // Extra cycles through all levels: 0-9.
+  int32 repeat = 6;
+  // New alerts of the team page through this policy. At most one per team.
+  bool team_default = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  int64 version = 10;
+}
+
+message EscalationPolicies {
+  repeated EscalationPolicy items = 1;
+}
+
+message ListEscalationPoliciesRequest {
+  // Team id or slug.
+  string team_id = 1;
+}
+
+message SaveEscalationPolicyRequest {
+  // Empty on create.
+  string id = 1;
+  // On create only.
+  string team_id = 2;
+  string name = 3;
+  string description = 4;
+  repeated EscalationLevel levels = 5;
+  int32 repeat = 6;
+  bool team_default = 7;
+  // On update: the version you read. A different current version is a conflict.
+  optional int64 version = 8;
+}
+
+enum EscalationStatus {
+  ESCALATION_STATUS_UNSPECIFIED = 0;
+  ESCALATION_STATUS_ACTIVE = 1;
+  ESCALATION_STATUS_ACKNOWLEDGED = 2;
+  ESCALATION_STATUS_RESOLVED = 3;
+  ESCALATION_STATUS_EXHAUSTED = 4;
+  ESCALATION_STATUS_CANCELLED = 5;
+}
+
+// level is 1-based. user_ids is empty when the level reached nobody.
+message EscalationPage {
+  google.protobuf.Timestamp at = 1;
+  int32 level = 2;
+  int32 cycle = 3;
+  repeated string user_ids = 4;
+  bool manual = 5;
+}
+
+// The escalation of one alert. id is the alert id. level is the 0-based index of the level paged last.
+message Escalation {
+  string id = 1;
+  string team_id = 2;
+  string policy_id = 3;
+  EscalationStatus status = 4;
+  int32 level = 5;
+  int32 cycle = 6;
+  optional google.protobuf.Timestamp next_at = 7;
+  repeated EscalationPage pages = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  int64 version = 11;
+}
+
+service EscalationService {
+  rpc ListPolicies(ListEscalationPoliciesRequest) returns (EscalationPolicies);
+  rpc GetPolicy(IdRequest) returns (EscalationPolicy);
+  // Team owners only.
+  rpc CreatePolicy(SaveEscalationPolicyRequest) returns (EscalationPolicy);
+  rpc UpdatePolicy(SaveEscalationPolicyRequest) returns (EscalationPolicy);
+  rpc DeletePolicy(IdRequest) returns (google.protobuf.Empty);
+  // id: alert id.
+  rpc GetEscalation(IdRequest) returns (Escalation);
+  // id: alert id. Pages the next level now. Needs WRITE.
+  rpc EscalateNow(IdRequest) returns (Escalation);
+}

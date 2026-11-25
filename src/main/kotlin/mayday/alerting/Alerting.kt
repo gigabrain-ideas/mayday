@@ -91,6 +91,22 @@ interface AlertAutomation {
     suspend fun onAlertCreated(alert: Alert)
 }
 
+/** Port that the escalation context implements: an alert starts or stops needing a human. */
+interface AlertLifecycle {
+    /** A new alert, or a resolved alert that fires again. */
+    suspend fun opened(alert: Alert)
+
+    /** The alert was acknowledged or resolved. */
+    suspend fun closed(alert: Alert)
+
+    companion object {
+        val none = object : AlertLifecycle {
+            override suspend fun opened(alert: Alert) = Unit
+            override suspend fun closed(alert: Alert) = Unit
+        }
+    }
+}
+
 @Serializable
 data class IngestResult(val alert: Alert, val created: Boolean, val incidentKey: String? = null)
 
@@ -104,6 +120,7 @@ class AlertService(
     private val telemetry: Telemetry = Telemetry.noop,
 ) {
     @Volatile var automation: AlertAutomation = object : AlertAutomation { override suspend fun onAlertCreated(alert: Alert) = Unit }
+    @Volatile var lifecycle: AlertLifecycle = AlertLifecycle.none
 
     suspend fun get(by: Principal, id: String): Alert = Access.requireRead(by).let { alerts.get(id) ?: throw NotFound("Alert") }
 
@@ -163,6 +180,7 @@ class AlertService(
             span.set(OUTCOME, if (reopened) "reopened" else "deduplicated")
             if (reopened) next.incidentId?.let { incidentTimeline(it, sourceActor, "Alert firing again: ${next.title}") }
             publish("alert.updated", next)
+            if (reopened) runCatching { lifecycle.opened(next) }
             return IngestResult(next, false)
         }
 
@@ -190,6 +208,7 @@ class AlertService(
             incidents.systemEntry(inc.id, EntryKind.ALERT, Actor.system, "Alert from ${created.source}: ${created.title}", mapOf("alertId" to created.id))
         }
         publish("alert.created", result)
+        runCatching { lifecycle.opened(result) }
         runCatching { automation.onAlertCreated(result) }
         return IngestResult(result, true, incidentKey)
     }
@@ -224,6 +243,7 @@ class AlertService(
         )
         alerts.save(next, cur.version)
         publish("alert.updated", next)
+        runCatching { lifecycle.closed(next) }
         return next
     }
 
@@ -245,6 +265,7 @@ class AlertService(
         alerts.save(next, cur.version)
         next.incidentId?.let { incidentTimeline(it, actor, "Alert resolved: ${next.title}") }
         publish("alert.updated", next)
+        runCatching { lifecycle.closed(next) }
         return next
     }
 

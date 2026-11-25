@@ -90,10 +90,24 @@ class RecordingSink : mayday.audit.AuditSink {
     }
 }
 
+/** A clock that tests move by hand. */
+class TestClock(@Volatile var at: Instant = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS)) : mayday.shared.Clock {
+    override fun now(): Instant = at
+    fun advance(d: java.time.Duration) { at = at.plus(d) }
+}
+
+/** Records every page that the escalation context sends. */
+class RecordingPager : mayday.escalation.Pager {
+    val pages = CopyOnWriteArrayList<mayday.escalation.PageNotice>()
+    override suspend fun page(notice: mayday.escalation.PageNotice) { pages += notice }
+}
+
 class Fixture(
     llmEnv: mayday.agents.LlmEnvironment = mayday.agents.LlmEnvironment(),
     extraTools: List<mayday.agents.ToolCatalog> = emptyList(),
     val auditSink: RecordingSink = RecordingSink(),
+    val clock: mayday.shared.Clock = mayday.shared.Clock.system,
+    val pager: RecordingPager = RecordingPager(),
 ) {
     val llm = FakeLlm()
     val dispatcher = RecordingDispatcher()
@@ -101,7 +115,7 @@ class Fixture(
     val store = MemoryStore(null)
     val app = App(
         AppSettings(secretKey = "test-secret", publicUrl = "http://mayday.test", llm = llmEnv),
-        Ports.memory(store, events).with(llm = llm, dispatcher = dispatcher, audit = listOf(auditSink)),
+        Ports.memory(store, events).with(llm = llm, dispatcher = dispatcher, audit = listOf(auditSink), clock = clock, pager = pager),
     ).also { a -> if (extraTools.isNotEmpty()) a.tools = mayday.tools.CompositeCatalog(listOf(a.tools) + extraTools) }
     val project = runBlocking { app.start(); app.directory.createProject("Payments", "payments") }
     val team = runBlocking { app.directory.createTeam("Checkout", "checkout", project.id) }

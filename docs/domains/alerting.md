@@ -20,6 +20,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 
 - `AlertRepository`: `get`, `latestByFingerprint`, `save(expectedVersion)`, keyset `list`, `scan`.
 - `AlertAutomation`: called after a new alert. The agents context implements it.
+- `AlertLifecycle`: `opened` after a new alert and after a reopened alert, `closed` after acknowledge and resolve. The escalation context implements it ([escalation.md](escalation.md)). A failure there never blocks the alert.
 
 ## Interfaces
 

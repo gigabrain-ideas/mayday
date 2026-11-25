@@ -59,6 +59,8 @@ object Keys {
     const val MCP_WRITE = "mcp.write_enabled"
     const val AGENT_EXCHANGE_ADMIN = "agents.exchange_admin"
     const val INCIDENT_PREFIX = "incident.key_prefix"
+    const val ESCALATION_MIN_SEVERITY = "escalation.page_min_severity"
+    const val ESCALATION_MAX_ACK_MINUTES = "escalation.max_ack_minutes"
 }
 
 /** "NONE" disables a severity threshold. */
@@ -101,6 +103,12 @@ object SettingCatalog {
         SettingDef(Keys.INCIDENT_PREFIX, "Incident key prefix",
             "The prefix of incident identifiers, for example INC in INC-42.",
             SettingType.STRING, "INC", setOf(Scope.ORG), Strictness.NONE),
+        SettingDef(Keys.ESCALATION_MIN_SEVERITY, "Page from alert severity",
+            "A firing alert of this severity or worse pages the team through its default escalation policy. NONE turns paging off.",
+            SettingType.SEVERITY, "SEV3", all3, Strictness.HIGHER),
+        SettingDef(Keys.ESCALATION_MAX_ACK_MINUTES, "Longest escalation delay (minutes)",
+            "The longest time that a level of an escalation policy can wait for an acknowledgement before the next level is paged.",
+            SettingType.INT, "30", all3, Strictness.LOWER, 1, 1440),
     )
 
     private val byKey = defs.associateBy { it.key }

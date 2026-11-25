@@ -14,6 +14,7 @@ Mayday is an AI-first, self-hosted incident management platform.
 - **Agents are optional.** Without an agent, Mayday is a complete incident management tool. Alerts and incidents never wait for an agent.
 - **See what the agent did.** Every agent run is an OpenTelemetry trace: each model turn, each tool call, token usage and errors. The run links to it.
 - **The right person, without a spreadsheet.** Teams have on-call schedules. When someone is sick, a colleague covers for a set period with one click; team owners can plug in anyone from the team. Agents ask `get_on_call` too.
+- **Nobody sleeps through a page.** Escalation policies page the person on call, then the next level when nobody acknowledges in time. Team owners configure them; administrators set the limits for all teams (for example "the next level after 15 minutes at most"). Pages go to your chat, SMS or push service through one signed webhook.
 - **Teams stay in your identity provider.** Entra ID, Okta, Keycloak or any OIDC and SCIM 2.0 provider: groups become teams and owners, and people who leave a group leave the team and its rotations. Open standards only.
 - **Runs anywhere.** One service. A laptop with no database, a VM, or Kubernetes with PostgreSQL and many replicas.
 - **One typed API.** gRPC with a protobuf contract for the web interface, scripts and agents.
@@ -21,7 +22,7 @@ Mayday is an AI-first, self-hosted incident management platform.
 ## Example: a SEV1 with an agent
 
 1. Prometheus Alertmanager sends `CheckoutHighErrorRate` (critical, team `checkout`) to `/api/v1/integrations/alertmanager`.
-2. Mayday opens `INC-47` (SEV1), links the alert and marks the postmortem as mandatory (organization policy). **On-call** shows that Ana is the Checkout primary this week, so she gets the incident. Later this week Lee covers Sam's shift with an override, because Sam is at a conference.
+2. Mayday opens `INC-47` (SEV1), links the alert and marks the postmortem as mandatory (organization policy). The Checkout escalation policy pages Ana, the Checkout primary this week. She is on the train and does not acknowledge, so after 5 minutes Mayday pages Lee, the secondary. Lee acknowledges and the escalation stops. Later this week Lee covers Sam's shift with an override, because Sam is at a conference.
 3. The built-in agent starts automatically. It calls the company AI gateway with its workload identity token, queries the metrics and deploy history through the tools gateway, and posts: *"Errors started 2 minutes after deploy v2024.11.4. The card-processor connection pool is exhausted. Probable cause: pool size reduced from 200 to 20."*
 4. Ana, the incident commander, presses **Create patch**. The coding agent receives a signed webhook with a token that acts as Ana, opens a pull request that restores the pool size, and reports the link on the timeline: *"Mayday agent for Ana Responder"*.
 5. The team rolls back and sets the status to **Resolved**. Mayday records the resolution time and sets the postmortem due date.
@@ -39,6 +40,8 @@ If the agent's gateway budget runs out during step 3, the run fails once with "H
 | ![Incident with agent findings](docs/screenshots/incident.png) | ![Incidents](docs/screenshots/incidents.png) |
 | ![Reports](docs/screenshots/reports.png) | ![Policies with enforcement](docs/screenshots/policies.png) |
 | ![On-call: who responds now, a 14-day plan with an override, team members](docs/screenshots/oncall.png) | ![Audit stream: health of each SIEM sink and what is recorded](docs/screenshots/audit.png) |
+| ![Escalation policies: who is paged at each level and after how many minutes](docs/screenshots/escalation-policies.png) | ![Escalation policy editor: schedules and people per level, minutes to acknowledge, repeat, team default](docs/screenshots/escalation-policy.png) |
+| ![Alert with an active escalation: pages per level and the time of the next level](docs/screenshots/alert-escalation.png) | |
 | ![LLM provider set by the environment: AI gateway with OAuth 2.0 workload identity and a custom agent ID header](docs/screenshots/llm-gateway.png) | ![MCP servers: the cloud tools gateway with the agent identity](docs/screenshots/mcp.png) |
 
 ## Install and run
@@ -77,7 +80,8 @@ make test
 3. Optional: connect the built-in agent to your AI gateway with `MAYDAY_LLM_*` (base URL, provider, OAuth 2.0 issuer, custom headers) or in **Settings → LLM provider**. Add MCP servers and external agents in **Settings**.
 4. Optional: teams from your identity provider. Send a `groups` claim, and point your provider's SCIM app at `<public URL>/scim/v2` with an administrator token that has the SCIM scope. `MAYDAY_GROUPS_AUTO_CREATE=true` and `MAYDAY_GROUPS_FILTER=^oncall-` create teams from groups. Steps for Entra ID: [docs/domains/provisioning.md](docs/domains/provisioning.md).
 5. Audit stream: records go to standard output by default. Send them to your SIEM with `MAYDAY_AUDIT_SINKS=sentinel` or `loki` (or `http`, `file`) and the settings in [docs/domains/audit.md](docs/domains/audit.md).
-6. Optional: send traces to your collector with `MAYDAY_OTEL_ENDPOINT`. Locally: `MAYDAY_OTEL_ENDPOINT=http://jaeger:4318 docker compose --profile observability up` starts Jaeger on http://localhost:16686.
+6. Optional: deliver escalation pages to your chat, SMS or push service with `MAYDAY_PAGING_WEBHOOK_URL` (and `MAYDAY_PAGING_WEBHOOK_SECRET` to sign them). Team owners create escalation policies on the **On-call** page. See [docs/domains/escalation.md](docs/domains/escalation.md).
+7. Optional: send traces to your collector with `MAYDAY_OTEL_ENDPOINT`. Locally: `MAYDAY_OTEL_ENDPOINT=http://jaeger:4318 docker compose --profile observability up` starts Jaeger on http://localhost:16686.
 
 Details: [docs/deployment.md](docs/deployment.md) (enterprise AI gateway, Kubernetes workload identity, token proxy sidecar) and [docs/observability.md](docs/observability.md).
 

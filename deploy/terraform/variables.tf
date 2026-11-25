@@ -315,3 +315,22 @@ variable "audit_sentinel_client_secret" {
   default     = ""
   sensitive   = true
 }
+
+# ---- Escalation pages (docs/domains/escalation.md) ----
+variable "paging_webhook_url" {
+  description = "Endpoint that receives each escalation page as JSON (chat bridge, SMS gateway, push service). Empty: pages are only shown in Mayday."
+  type        = string
+  default     = ""
+}
+variable "paging_webhook_secret" {
+  description = "Signs each page: X-Mayday-Signature = sha256=HMAC(secret, timestamp + \".\" + body)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+variable "paging_webhook_headers" {
+  description = "Extra headers as name=value,name2=value2, for example Authorization=Bearer <token>."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

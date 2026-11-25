@@ -61,7 +61,7 @@ An agent with a delegated token has the rules of the person (a member's agent ca
 | `ScheduleRepository` | `MemoryStore`, `PostgresStore` (table `schedules`) |
 | `OverrideRepository` | `MemoryStore`, `PostgresStore` (table `schedule_overrides`, indexes on `(schedule_id, ends_at)` and `(team_id, user_id, ends_at)`) |
 
-The service reads users through `UserRepository` and teams through `DirectoryService`.
+The service reads users through `UserRepository` and teams through `DirectoryService`. Escalation asks `onCallFor(scheduleId, at)` (the person on call, overrides applied) and `exists(scheduleId)`; see [escalation.md](escalation.md).
 
 ## MCP tools
 

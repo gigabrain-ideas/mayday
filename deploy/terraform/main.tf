@@ -45,6 +45,8 @@ resource "kubernetes_secret_v1" "mayday" {
     auditLokiToken            = ""
     auditSentinelClientSecret = var.audit_sentinel_client_secret
     auditHttpHeaders          = var.audit_http_headers
+    pagingWebhookSecret       = var.paging_webhook_secret
+    pagingWebhookHeaders      = var.paging_webhook_headers
   }
 }
 
@@ -105,6 +107,7 @@ resource "helm_release" "mayday" {
     tokenProxy       = { enabled = var.token_proxy_upstream != "", upstream = var.token_proxy_upstream }
     otel             = { endpoint = var.otel_endpoint, sampling = var.otel_sampling, captureContent = var.otel_capture_content }
     traceUrlTemplate = var.trace_url_template
+    paging           = { webhookUrl = var.paging_webhook_url }
     audit = {
       sinks = join(",", var.audit_sinks)
       reads = var.audit_reads

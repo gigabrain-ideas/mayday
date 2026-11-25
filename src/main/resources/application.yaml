@@ -55,6 +55,10 @@ mayday:
     auto-create: ${MAYDAY_GROUPS_AUTO_CREATE:false}
     filter: ${MAYDAY_GROUPS_FILTER:}
     owner-suffix: ${MAYDAY_GROUPS_OWNER_SUFFIX:}
+  paging:
+    webhook-url: ${MAYDAY_PAGING_WEBHOOK_URL:}
+    webhook-secret: ${MAYDAY_PAGING_WEBHOOK_SECRET:}
+    webhook-headers: ${MAYDAY_PAGING_WEBHOOK_HEADERS:}
   # Internal agent. A set value overrides the admin UI and is shown read-only there.
   llm:
     provider: ${MAYDAY_LLM_PROVIDER:}

@@ -3,7 +3,8 @@ import { useSearchParams } from "react-router";
 import { ArrowDown, ArrowUp, CalendarClock, Lock, Pencil, Plus, Trash2, UserPlus, Users } from "lucide-react";
 import { items, rpc, type OnCall, type Schedule, type ScheduleOverride, type Shift, type ShiftUnit, type Team, type TeamMember, type TeamRole } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
-import { useSession } from "@/lib/session";
+import { useSession, useTeamOwner } from "@/lib/session";
+import { EscalationPolicies } from "@/pages/Escalation";
 import { useToast } from "@/lib/toast";
 import { cn, dateTime, duration, fromLocalInput, toLocalInput } from "@/lib/utils";
 import { PageHeader } from "@/components/common";
@@ -18,11 +19,6 @@ const ZONES: string[] = (() => {
 function every(s: Schedule) {
   const unit = s.shiftUnit.toLowerCase();
   return s.shiftLength === 1 ? `Every ${unit.slice(0, -1)}` : `Every ${s.shiftLength} ${unit}`;
-}
-
-function useOwner() {
-  const { me, isAdmin } = useSession();
-  return (team?: Team) => !!team && (isAdmin || me.user.teams[team.id] === "ADMIN" || (!!team.projectId && me.user.projectAdmin.includes(team.projectId)));
 }
 
 export function OnCallPage() {
@@ -53,7 +49,7 @@ export function OnCallPage() {
           <Schedules team={team} />
           <Members team={team} />
         </div>
-      ) : <p className="text-[12px] text-muted-foreground">Select a team to see its schedules, overrides and members.</p>}
+      ) : <p className="text-[12px] text-muted-foreground">Select a team to see its schedules, overrides, escalation policies and members.</p>}
     </>
   );
 }
@@ -77,7 +73,7 @@ function NowCard({ entry, team }: { entry: OnCall; team: string }) {
 }
 
 function Schedules({ team }: { team: Team }) {
-  const isOwner = useOwner()(team);
+  const isOwner = useTeamOwner()(team);
   const list = useQuery(() => items(rpc.oncall.listSchedules<{ items: Schedule[] }>({ teamId: team.id })), [team.id]);
   const members = useQuery(() => items(rpc.directory.listTeamMembers<{ items: TeamMember[] }>({ id: team.id })), [team.id]);
   useLive((t) => t === "oncall.changed", () => { list.reload(); members.reload(); });
@@ -105,6 +101,7 @@ function Schedules({ team }: { team: Team }) {
         )}
       </Card>
       {schedule && <Overrides schedule={schedule} team={team} members={members.data ?? []} isOwner={isOwner} />}
+      <EscalationPolicies team={team} members={members.data ?? []} />
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         {editing && <ScheduleForm team={team} members={members.data ?? []} schedule={editing === "new" ? undefined : editing}
           onDone={(s) => { setEditing(null); list.reload(); if (s) setPicked(s.id); }} />}
@@ -299,7 +296,7 @@ function OverrideForm({ schedule, members, isOwner, onDone }: { schedule: Schedu
 
 function Members({ team }: { team: Team }) {
   const { users, reloadDirectory } = useSession();
-  const isOwner = useOwner()(team);
+  const isOwner = useTeamOwner()(team);
   const toast = useToast();
   const list = useQuery(() => items(rpc.directory.listTeamMembers<{ items: TeamMember[] }>({ id: team.id })), [team.id]);
   const set = (userId: string, role?: TeamRole) =>

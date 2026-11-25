@@ -4,7 +4,7 @@ Package: `mayday.policy`. File: `Policy.kt`.
 
 ## Purpose
 
-Policy holds the configurable rules: postmortem obligations, alert behavior, agent automation, MCP write access and the incident key prefix. Settings exist at organization, project and team level. Administrators can enforce a value so that lower levels cannot weaken it. Lower roles can request a change.
+Policy holds the configurable rules: postmortem obligations, alert behavior, paging limits, agent automation, MCP write access and the incident key prefix. Settings exist at organization, project and team level. Administrators can enforce a value so that lower levels cannot weaken it. Lower roles can request a change.
 
 ## Model
 
@@ -32,6 +32,8 @@ Policy holds the configurable rules: postmortem obligations, alert behavior, age
 | `mcp.write_enabled` | false | false |
 | `agents.exchange_admin` | false (organization only). Turning it off clears every user's opt-in, see [identity.md](identity.md). | false |
 | `incident.key_prefix` | INC (organization only) | none |
+| `escalation.page_min_severity` | SEV3 | covers more severities ([escalation.md](escalation.md)) |
+| `escalation.max_ack_minutes` | 30 | fewer minutes ([escalation.md](escalation.md)) |
 
 ## Ports
 

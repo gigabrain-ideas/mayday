@@ -7,6 +7,7 @@ import { AgentRunService, AgentService } from "@/gen/mayday/v1/agents_pb";
 import { AlertService } from "@/gen/mayday/v1/alerting_pb";
 import { AuditService } from "@/gen/mayday/v1/audit_pb";
 import { DirectoryService } from "@/gen/mayday/v1/directory_pb";
+import { EscalationService } from "@/gen/mayday/v1/escalation_pb";
 import { EventSchema, EventService } from "@/gen/mayday/v1/events_pb";
 import { AuthService, UserService } from "@/gen/mayday/v1/identity_pb";
 import { IncidentService } from "@/gen/mayday/v1/incidents_pb";
@@ -52,6 +53,19 @@ export interface Schedule {
 export interface ScheduleOverride { id: string; scheduleId: string; teamId: string; userId: string; startsAt: string; endsAt: string; reason: string; createdBy: string; createdAt: string }
 export interface Shift { scheduleId: string; userId?: string; startsAt: string; endsAt: string; overrideId?: string }
 export interface OnCall { scheduleId: string; scheduleName: string; teamId: string; userId?: string; until?: string; overrideId?: string }
+export type TargetKind = "SCHEDULE" | "USER";
+export interface EscalationTarget { kind: TargetKind; id: string }
+export interface EscalationLevel { delayMinutes: number; targets: EscalationTarget[] }
+export interface EscalationPolicy {
+  id: string; teamId: string; name: string; description: string; levels: EscalationLevel[]; repeat: number; teamDefault: boolean;
+  createdAt: string; updatedAt: string; version: number;
+}
+export type EscalationStatus = "ACTIVE" | "ACKNOWLEDGED" | "RESOLVED" | "EXHAUSTED" | "CANCELLED";
+export interface EscalationPage { at: string; level: number; cycle: number; userIds: string[]; manual: boolean }
+export interface Escalation {
+  id: string; teamId: string; policyId: string; status: EscalationStatus; level: number; cycle: number; nextAt?: string;
+  pages: EscalationPage[]; startedAt: string; updatedAt: string; version: number;
+}
 export interface User {
   id: string; email: string; name: string; orgRole: OrgRole; teams: Record<string, TeamRole>;
   projectAdmin: string[]; externalId?: string; disabled: boolean; createdAt: string; allowAgentAdmin?: boolean;
@@ -261,6 +275,7 @@ export const rpc = {
   agents: service(AgentService),
   agentRuns: service(AgentRunService),
   oncall: service(OnCallService),
+  escalation: service(EscalationService),
   audit: service(AuditService),
 };
 

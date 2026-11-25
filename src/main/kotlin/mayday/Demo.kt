@@ -62,8 +62,18 @@ object Demo {
         fun rotation(team: mayday.directory.Team, name: String, unit: mayday.oncall.ShiftUnit, people: List<User>) = mayday.oncall.Schedule(
             Ids.new(), team.id, name, "Europe/Berlin", monday, 1, unit, people.map { it.id }, createdAt = now, updatedAt = now)
         val checkoutPrimary = rotation(checkout, "Primary", mayday.oncall.ShiftUnit.WEEKS, listOf(ana, sam, lee))
-        listOf(checkoutPrimary, rotation(checkout, "Secondary", mayday.oncall.ShiftUnit.WEEKS, listOf(lee, ana, sam)),
-            rotation(sre, "Primary", mayday.oncall.ShiftUnit.DAYS, listOf(sam, lee, admin))).forEach { p.schedules.save(it, null) }
+        val checkoutSecondary = rotation(checkout, "Secondary", mayday.oncall.ShiftUnit.WEEKS, listOf(lee, ana, sam))
+        val srePrimary = rotation(sre, "Primary", mayday.oncall.ShiftUnit.DAYS, listOf(sam, lee, admin))
+        listOf(checkoutPrimary, checkoutSecondary, srePrimary).forEach { p.schedules.save(it, null) }
+
+        fun target(s: mayday.oncall.Schedule) = mayday.escalation.EscalationTarget(mayday.escalation.TargetKind.SCHEDULE, s.id)
+        fun target(u: User) = mayday.escalation.EscalationTarget(mayday.escalation.TargetKind.USER, u.id)
+        fun level(minutes: Int, vararg t: mayday.escalation.EscalationTarget) = mayday.escalation.EscalationLevel(minutes, t.toList())
+        val checkoutPolicy = mayday.escalation.EscalationPolicy(Ids.new(), checkout.id, "Default", "Primary first, then Secondary, then the team owner.",
+            listOf(level(5, target(checkoutPrimary)), level(10, target(checkoutSecondary)), level(15, target(ana))), 1, true, now, now)
+        val sreLead = listOf(admin, lee).first { it.id != app.onCall.onCallFor(srePrimary.id, now) }
+        val srePolicy = mayday.escalation.EscalationPolicy(Ids.new(), sre.id, "Default", "", listOf(level(10, target(srePrimary)), level(15, target(sreLead))), 0, true, now, now)
+        listOf(checkoutPolicy, srePolicy).forEach { p.escalationPolicies.save(it, null) }
         p.overrides.save(mayday.oncall.ScheduleOverride(Ids.new(), checkoutPrimary.id, checkout.id, lee.id, now.plus(Duration.ofDays(2)),
             now.plus(Duration.ofDays(4)), "Sam is at a conference", ana.id, now))
 
@@ -136,6 +146,11 @@ object Demo {
         )
         p.alerts.save(alert.copy(incidentId = current.id), null)
         p.incidents.save(current, null)
+        val paged = alert.firstSeenAt
+        p.escalations.save(mayday.escalation.Escalation(alert.id, checkout.id, checkoutPolicy.id, mayday.escalation.EscalationStatus.ACKNOWLEDGED, 1, 0, null,
+            listOf(mayday.escalation.EscalationPage(paged, 1, 0, listOfNotNull(app.onCall.onCallFor(checkoutPrimary.id, paged))),
+                mayday.escalation.EscalationPage(paged.plus(Duration.ofMinutes(5)), 2, 0, listOfNotNull(app.onCall.onCallFor(checkoutSecondary.id, paged)))),
+            paged, start.plus(Duration.ofMinutes(9))), null)
         val tl = listOf(
             3L to (EntryKind.ALERT to (Actor.system to "Alert from prometheus: CheckoutHighErrorRate: 5xx ratio above 5% for 5m")),
             6L to (EntryKind.STATUS to (Actor.system to "Incident declared as SEV1 with status INVESTIGATING.")),
@@ -155,8 +170,14 @@ object Demo {
             Triple("BillingJobRetries: retries above threshold", billing, Severity.SEV3),
         ).forEachIndexed { i, (title, team, sev) ->
             val at = now.minus(Duration.ofMinutes(15L + i * 23))
-            p.alerts.save(Alert(Ids.new(), AlertService.fingerprint("prometheus", title, team.id, emptyMap()), "prometheus", title,
-                severity = sev, teamId = team.id, firstSeenAt = at, lastSeenAt = now.minus(Duration.ofMinutes(1)), count = 3L + i), null)
+            val open = Alert(Ids.new(), AlertService.fingerprint("prometheus", title, team.id, emptyMap()), "prometheus", title,
+                severity = sev, teamId = team.id, firstSeenAt = at, lastSeenAt = now.minus(Duration.ofMinutes(1)), count = 3L + i)
+            p.alerts.save(open, null)
+            if (team.id == sre.id) {
+                p.escalations.save(mayday.escalation.Escalation(open.id, sre.id, srePolicy.id, mayday.escalation.EscalationStatus.ACTIVE, 1, 0, at.plus(Duration.ofMinutes(25)),
+                    listOf(mayday.escalation.EscalationPage(at, 1, 0, listOfNotNull(app.onCall.onCallFor(srePrimary.id, at))),
+                        mayday.escalation.EscalationPage(at.plus(Duration.ofMinutes(10)), 2, 0, listOf(sreLead.id))), at, at.plus(Duration.ofMinutes(10))), null)
+            }
         }
         teams.size
     }

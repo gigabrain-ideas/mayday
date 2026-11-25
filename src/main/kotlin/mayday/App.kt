@@ -33,6 +33,10 @@ import mayday.policy.SettingRepository
 import mayday.oncall.OnCallService
 import mayday.oncall.OverrideRepository
 import mayday.oncall.ScheduleRepository
+import mayday.escalation.EscalationPolicyRepository
+import mayday.escalation.EscalationRepository
+import mayday.escalation.EscalationService
+import mayday.escalation.Pager
 import mayday.provisioning.GroupRepository
 import mayday.provisioning.GroupSync
 import mayday.provisioning.GroupSyncSettings
@@ -85,6 +89,8 @@ class Ports(
     val config: ConfigRepository,
     val schedules: ScheduleRepository,
     val overrides: OverrideRepository,
+    val escalationPolicies: EscalationPolicyRepository,
+    val escalations: EscalationRepository,
     val groups: GroupRepository,
     val events: EventBus,
     val llm: LlmProviderFactory = LlmProviders,
@@ -94,6 +100,7 @@ class Ports(
     val credentials: CredentialProviderFactory = Credentials(),
     val telemetry: Telemetry = Telemetry.noop,
     val audit: List<AuditSink> = emptyList(),
+    val pager: Pager = Pager.none,
 ) {
     fun with(
         telemetry: Telemetry = this.telemetry,
@@ -101,23 +108,25 @@ class Ports(
         dispatcher: AgentDispatcher = this.dispatcher,
         credentials: CredentialProviderFactory = this.credentials,
         audit: List<AuditSink> = this.audit,
+        clock: Clock = this.clock,
+        pager: Pager = this.pager,
     ) = Ports(
         projects, teams, users, tokens, settings, changeRequests, incidents, timeline, alerts, agents, runs, mcpServers, config,
-        schedules, overrides, groups, events, llm, dispatcher, clock, close, credentials, telemetry, audit,
+        schedules, overrides, escalationPolicies, escalations, groups, events, llm, dispatcher, clock, close, credentials, telemetry, audit, pager,
     )
 
     companion object {
         fun memory(store: MemoryStore, events: EventBus = InProcessEventBus()) = Ports(
             store.projects, store.teams, store.users, store.tokens, store.settings, store.changeRequests,
             store.incidents, store.timeline, store.alerts, store.agents, store.runs, store.mcpServers, store.config,
-            store.schedules, store.overrides, store.groups, events,
+            store.schedules, store.overrides, store.escalationPolicies, store.escalations, store.groups, events,
             close = { store.close() },
         )
 
         fun postgres(store: PostgresStore, events: EventBus) = Ports(
             store.projects, store.teams, store.users, store.tokens, store.settings, store.changeRequests,
             store.incidents, store.timeline, store.alerts, store.agents, store.runs, store.mcpServers, store.config,
-            store.schedules, store.overrides, store.groups, events,
+            store.schedules, store.overrides, store.escalationPolicies, store.escalations, store.groups, events,
             close = { (events as? AutoCloseable)?.close(); store.pool.close() },
         )
     }
@@ -145,6 +154,10 @@ class App(val settings: AppSettings, val ports: Ports) {
     )
     val reports = ReportService(ports.incidents, ports.alerts, directory)
     val onCall = OnCallService(ports.schedules, ports.overrides, ports.users, directory, ports.events, ports.clock)
+    val escalation = EscalationService(
+        ports.escalationPolicies, ports.escalations, ports.alerts, onCall, ports.users, directory, policy, ports.events, ports.clock,
+        settings.publicUrl, ports.pager,
+    )
     val groupSync = GroupSync(ports.users, directory, settings.groups, audit) { onCall }
     val provisioning = ProvisioningService(ports.users, ports.groups, directory, groupSync, ports.clock, settings.adminEmails)
     val maydayTools: MaydayTools
@@ -158,6 +171,7 @@ class App(val settings: AppSettings, val ports: Ports) {
         tools = AuditedCatalog(CompositeCatalog(listOf(maydayTools, McpGateway(ports.mcpServers, box, { agents.gatewayAuth() }, ports.telemetry))), audit)
         mcp = McpServer(AuditedCatalog(maydayTools, audit), VERSION, ports.telemetry, audit)
         alerts.automation = agents
+        alerts.lifecycle = escalation
         policy.listener = identity
         ports.events.subscribe { if (it.type == "setting.changed") policy.invalidate() }
     }

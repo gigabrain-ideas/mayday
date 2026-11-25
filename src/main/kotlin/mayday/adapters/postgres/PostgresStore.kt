@@ -37,6 +37,10 @@ import mayday.oncall.OverrideRepository
 import mayday.oncall.Schedule
 import mayday.oncall.ScheduleOverride
 import mayday.oncall.ScheduleRepository
+import mayday.escalation.Escalation
+import mayday.escalation.EscalationPolicy
+import mayday.escalation.EscalationPolicyRepository
+import mayday.escalation.EscalationRepository
 import mayday.provisioning.DirectoryGroup
 import mayday.provisioning.GroupRepository
 import mayday.shared.Conflict
@@ -116,6 +120,12 @@ class PostgresStore(val pool: Pool) {
                 starts_at timestamptz not null, ends_at timestamptz not null, created_at timestamptz not null, doc jsonb not null)""")
             s.execute("create index if not exists overrides_schedule on schedule_overrides (schedule_id, ends_at)")
             s.execute("create index if not exists overrides_user on schedule_overrides (team_id, user_id, ends_at)")
+            s.execute("create table if not exists escalation_policies (id text primary key, team_id text not null, version bigint not null, doc jsonb not null)")
+            s.execute("create index if not exists escalation_policies_team on escalation_policies (team_id)")
+            s.execute("""create table if not exists escalations (
+                id text primary key, policy_id text not null, status text not null, next_at timestamptz, version bigint not null, doc jsonb not null)""")
+            s.execute("create index if not exists escalations_due on escalations (next_at) where status = 'ACTIVE'")
+            s.execute("create index if not exists escalations_policy on escalations (policy_id) where status = 'ACTIVE'")
         }
     }
 
@@ -438,6 +448,52 @@ class PostgresStore(val pool: Pool) {
             "select doc from schedule_overrides where team_id = ? and user_id = ? and ends_at > ?", teamId, userId, after,
         ) { dec(ser, it) }
         override suspend fun deleteBySchedule(scheduleId: String) { exec("delete from schedule_overrides where schedule_id = ?", scheduleId) }
+    }
+
+    val escalationPolicies = object : EscalationPolicyRepository {
+        private val ser = EscalationPolicy.serializer()
+        override suspend fun get(id: String) = query("select doc from escalation_policies where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun byTeam(teamId: String) = query("select doc from escalation_policies where team_id = ?", teamId) { dec(ser, it) }
+        override suspend fun delete(id: String) { exec("delete from escalation_policies where id = ?", id) }
+        override suspend fun save(policy: EscalationPolicy, expectedVersion: Long?) {
+            val doc = JsonDoc(enc(ser, policy))
+            if (expectedVersion == null) {
+                try {
+                    exec("insert into escalation_policies (id, team_id, version, doc) values (?, ?, ?, ?)", policy.id, policy.teamId, policy.version, doc)
+                } catch (e: java.sql.SQLException) {
+                    if (e.sqlState == "23505") throw Conflict("Escalation policy exists") else throw e
+                }
+            } else {
+                val n = exec("update escalation_policies set version = ?, doc = ? where id = ? and version = ?", policy.version, doc, policy.id, expectedVersion)
+                if (n == 0) throw Conflict("The escalation policy changed. Reload and try again.")
+            }
+        }
+    }
+
+    val escalations = object : EscalationRepository {
+        private val ser = Escalation.serializer()
+        override suspend fun get(id: String) = query("select doc from escalations where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun save(escalation: Escalation, expectedVersion: Long?) {
+            val e = escalation
+            val doc = JsonDoc(enc(ser, e))
+            if (expectedVersion == null) {
+                try {
+                    exec("insert into escalations (id, policy_id, status, next_at, version, doc) values (?, ?, ?, ?, ?, ?)",
+                        e.id, e.policyId, e.status.name, e.nextAt, e.version, doc)
+                } catch (x: java.sql.SQLException) {
+                    if (x.sqlState == "23505") throw Conflict("Escalation exists") else throw x
+                }
+            } else {
+                val n = exec("update escalations set policy_id = ?, status = ?, next_at = ?, version = ?, doc = ? where id = ? and version = ?",
+                    e.policyId, e.status.name, e.nextAt, e.version, doc, e.id, expectedVersion)
+                if (n == 0) throw Conflict("The escalation changed")
+            }
+        }
+        override suspend fun due(at: Instant, limit: Int) = query(
+            "select doc from escalations where status = 'ACTIVE' and next_at <= ? order by next_at, id limit ?", at, limit,
+        ) { dec(ser, it) }
+        override suspend fun activeByPolicy(policyId: String) =
+            query("select doc from escalations where policy_id = ? and status = 'ACTIVE'", policyId) { dec(ser, it) }
     }
 
     private val groupsT = DocTable("directory_groups", DirectoryGroup.serializer())

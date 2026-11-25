@@ -300,6 +300,14 @@ class OnCallService(
         }
     }
 
+    /** The person on call for the schedule at [at], or null. No access check: for other bounded contexts. */
+    suspend fun onCallFor(scheduleId: String, at: Instant): String? {
+        val s = schedules.get(scheduleId) ?: return null
+        return compute(s, at, at.plusSeconds(1)).firstOrNull()?.userId
+    }
+
+    suspend fun exists(scheduleId: String): Boolean = schedules.get(scheduleId) != null
+
     /** A person who leaves a team leaves its rotations, and their future overrides of that team end. */
     override suspend fun membershipRemoved(teamId: String, userId: String) {
         val now = clock.now()

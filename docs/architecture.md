@@ -30,6 +30,7 @@ flowchart LR
     IDN[Identity and access]
     DIR[Directory]
     ONC[On-call]
+    ESC[Escalation]
     PRV[Provisioning]
     REP[Reporting]
   end
@@ -55,6 +56,9 @@ flowchart LR
   IDN -- GroupMembershipSync --> PRV
   PRV -- team links, team roles --> DIR
   TOOLS --> ONC
+  ALR -- AlertLifecycle port --> ESC
+  ESC -- who is on call --> ONC
+  ESC -- PolicyReader --> POL
   IDN -- AuditTrail --> AUD
   POL -- AuditTrail --> AUD
   AGT -- AuditTrail --> AUD
@@ -71,6 +75,7 @@ flowchart LR
 | Identity and access | `mayday.identity` | Users, roles, tokens, principals, on-behalf-of | [identity.md](domains/identity.md) |
 | Directory | `mayday.directory` | Projects, teams, identity provider group links | [directory.md](domains/directory.md) |
 | On-call | `mayday.oncall` | Schedules, rotations, overrides, who is on call | [oncall.md](domains/oncall.md) |
+| Escalation | `mayday.escalation` | Escalation policies, paging, acknowledgement timeouts | [escalation.md](domains/escalation.md) |
 | Provisioning | `mayday.provisioning` | Teams from identity provider groups: groups claim and SCIM 2.0 | [provisioning.md](domains/provisioning.md) |
 | Reporting | `mayday.reporting` | Metrics over incidents and alerts | [reporting.md](domains/reporting.md) |
 | Tools | `mayday.tools` | Use cases as tools for MCP and the built-in agent | [mcp.md](domains/mcp.md) |
@@ -119,7 +124,7 @@ flowchart TB
 
 | Port | Defined in | Adapters |
 |---|---|---|
-| `*Repository` (16 ports) | each context | `MemoryStore`, `PostgresStore` |
+| `*Repository` (18 ports) | each context | `MemoryStore`, `PostgresStore` |
 | `EventBus` | `shared` | `InProcessEventBus`, `PgEventBus` |
 | `LlmProvider`, `LlmProviderFactory` | `agents` | `LlmProviders` → `AnthropicProvider` (official SDK) or `OpenAiProvider` (Chat Completions); tests use `FakeLlm` |
 | `CredentialProvider`, `CredentialProviderFactory` | `agents` | `Credentials` (static key, OAuth 2.0 / workload identity, token file); see [gateway-identity.md](domains/gateway-identity.md) |
@@ -128,6 +133,8 @@ flowchart TB
 | `ToolCatalog` | `agents` | `MaydayTools`, `McpGateway`, `CompositeCatalog` |
 | `AgentIdentityLookup` | `identity` | `AgentService` |
 | `AlertAutomation` | `alerting` | `AgentService` |
+| `AlertLifecycle` | `alerting` | `EscalationService` (an alert opened, acknowledged or resolved) |
+| `Pager` | `escalation` | `WebhookPager` (`MAYDAY_PAGING_WEBHOOK_URL`); default `Pager.none`; tests use `RecordingPager` |
 | `PolicyReader` | `policy` | `PolicyService` |
 | `TeamMembershipListener` | `identity` | `OnCallService` (a person who leaves a team leaves its rotations) |
 | `GroupMembershipSync` | `identity` | `GroupSync` (groups of a sign-in become team roles) |

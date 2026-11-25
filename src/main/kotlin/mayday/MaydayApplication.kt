@@ -61,7 +61,15 @@ data class MaydayProperties(
     val telemetry: TelemetrySettings = TelemetrySettings(),
     val groups: Groups = Groups(),
     val audit: Audit = Audit(),
+    val paging: Paging = Paging(),
 ) {
+    /** Delivery of escalation pages. See docs/domains/escalation.md. */
+    data class Paging(val webhookUrl: String = "", val webhookSecret: String = "", val webhookHeaders: String = "") {
+        fun pager(): mayday.escalation.Pager = webhookUrl.takeIf { it.isNotBlank() }?.let {
+            mayday.adapters.paging.WebhookPager(it.trim(), webhookSecret, webhookHeaders.takeIf { h -> h.isNotBlank() }?.let { h -> parsePairs(h, "MAYDAY_PAGING_WEBHOOK_HEADERS") }.orEmpty())
+        } ?: mayday.escalation.Pager.none
+    }
+
     /** Audit stream. See docs/domains/audit.md. */
     data class Audit(
         val sinks: String = "stdout",
@@ -237,6 +245,7 @@ class Wiring {
             llm = LlmProviders.withTelemetry(telemetry),
             dispatcher = WebhookDispatcher(telemetry = telemetry),
             audit = props.audit.sinkConfig().build(credentials),
+            pager = props.paging.pager(),
         )
     }
 
@@ -282,6 +291,23 @@ class Wiring {
                 while (isActive) {
                     delay(Duration.ofMinutes(5).toMillis())
                     runCatching { app.agents.reapStale(Duration.ofMinutes(30)) }
+                }
+            }
+        }
+
+        override fun destroy() = scope.cancel()
+    }
+
+    /** Pages the next level of escalations that nobody acknowledged in time. */
+    @Bean
+    fun escalationTicker(app: App) = object : DisposableBean {
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+        init {
+            scope.launch {
+                while (isActive) {
+                    delay(Duration.ofSeconds(15).toMillis())
+                    runCatching { while (app.escalation.tick() >= 500) Unit }
                 }
             }
         }

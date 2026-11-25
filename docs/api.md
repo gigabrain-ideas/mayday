@@ -17,6 +17,7 @@ gRPC reflection and the standard gRPC health service (`grpc.health.v1.Health`) a
 | `identity.proto` | `UserService` | `ListUsers`, `CreateUser`, `UpdateUser`, `ListTokens`, `IssueToken` (the secret is in this response only), `RevokeToken`, `SetAgentAdmin` (the caller's own `allow_agent_admin`; agents get `PERMISSION_DENIED`) |
 | `directory.proto` | `DirectoryService` | `ListProjects`, `CreateProject`, `UpdateProject`, `DeleteProject`, `ListTeams`, `CreateTeam`, `UpdateTeam` (`replace_groups` sets `member_groups` and `owner_groups`, administrators), `DeleteTeam`, `ListTeamMembers`, `SetTeamMember` (team owners; role unspecified removes; `conflict` when identity provider groups manage the team) |
 | `oncall.proto` | `OnCallService` | `ListSchedules`, `GetSchedule`, `CreateSchedule`, `UpdateSchedule` (with `version`), `DeleteSchedule`, `ListOverrides`, `CreateOverride`, `DeleteOverride`, `ListShifts` (rotation with overrides, window at most 93 days), `GetOnCall`. See [oncall.md](domains/oncall.md) |
+| `escalation.proto` | `EscalationService` | `ListPolicies`, `GetPolicy`, `CreatePolicy`, `UpdatePolicy` (with `version`), `DeletePolicy` (team owners), `GetEscalation` (by alert id), `EscalateNow` (WRITE). See [escalation.md](domains/escalation.md) |
 | `incidents.proto` | `IncidentService` | `ListIncidents` (keyset: `cursor`, `next_cursor`), `DeclareIncident`, `GetIncident` (`ref` = key, number or id), `UpdateIncident` (with `version`), `ListTimeline`, `AddTimelineEntry`, `SavePostmortem`, `SaveResolution`, `SaveRunbook` |
 | `alerting.proto` | `AlertService` | `ListAlerts`, `IngestAlert`, `GetAlert`, `AcknowledgeAlert`, `ResolveAlert`, `AddAlertUpdate`, `LinkAlert` |
 | `reporting.proto` | `ReportService` | `GetReport` |
@@ -24,7 +25,7 @@ gRPC reflection and the standard gRPC health service (`grpc.health.v1.Health`) a
 | `agents.proto` | `AgentService` | `ListAgents`, `ListEligibleAgents`, `GetAgent`, `CreateAgent`, `UpdateAgent`, `DeleteAgent`, `RotateAgentCredentials` (secrets in the response only), `GetLlm`, `UpdateLlm`, `ListMcpServers`, `SaveMcpServer`, `DeleteMcpServer` |
 | `agents.proto` | `AgentRunService` | `ListRuns`, `GetRun`, `StartRun`, `CancelRun`, `ClaimRuns`, `ReportProgress`, `CompleteRun` |
 | `audit.proto` | `AuditService` | `GetAuditStatus` (administrators): instance, reads switch, accepted and lost records, per sink delivered, pending, failures, lost and last error. See [audit.md](domains/audit.md) |
-| `events.proto` | `EventService` | `Subscribe` (server stream): `incident.*`, `alert.*`, `agent_run.updated`, `setting.changed`, `oncall.changed`, and `ping` every 25 seconds |
+| `events.proto` | `EventService` | `Subscribe` (server stream): `incident.*`, `alert.*`, `agent_run.updated`, `setting.changed`, `oncall.changed`, `escalation.changed`, `alert.paged`, `alert.escalation_exhausted`, and `ping` every 25 seconds |
 
 Conventions (`common.proto`):
 
@@ -166,6 +167,20 @@ The receiver must:
 2. Answer 2xx quickly. Mayday makes up to three attempts on network errors, 429 and 5xx.
 3. Use `delegatedToken` (when present) for MCP and gRPC calls. Otherwise use its own agent token. The delegated token has the scopes `read` and `write` and stops working when the run is finished.
 4. Report with the MCP tool `report_agent_run`, or with `AgentRunService.ReportProgress` and `AgentRunService.CompleteRun` `{id, success, output, error}`.
+
+## Page webhook
+
+With `MAYDAY_PAGING_WEBHOOK_URL`, Mayday sends `POST <url>` for each escalation page that reaches at least one person. Headers: `X-Mayday-Event: alert.paged`, `X-Mayday-Timestamp`, `X-Mayday-Signature` (with `MAYDAY_PAGING_WEBHOOK_SECRET`, computed as for the agent webhook) and the headers of `MAYDAY_PAGING_WEBHOOK_HEADERS`.
+
+```json
+{
+  "alertId": "...", "alertTitle": "CheckoutHighErrorRate", "alertUrl": "https://mayday.example.com/alerts/...", "severity": "SEV2",
+  "teamId": "...", "policyId": "...", "policyName": "Default", "level": 2, "cycle": 0, "manual": false,
+  "recipients": [{ "id": "...", "name": "Lee Backend", "email": "lee@example.com" }]
+}
+```
+
+Mayday sends each page once and does not retry it. A failed delivery does not stop the escalation: the next level is paged on time. The receiver answers 2xx and delivers the message (chat, SMS, push, phone call).
 
 ## Pull agents
 

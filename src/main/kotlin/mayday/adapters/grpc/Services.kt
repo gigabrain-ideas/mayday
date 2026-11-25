@@ -205,6 +205,29 @@ class OnCallGrpc(private val auth: Authenticator, private val app: App) : OnCall
 }
 
 @Service
+class EscalationGrpc(private val auth: Authenticator, private val app: App) : EscalationServiceGrpcKt.EscalationServiceCoroutineImplBase() {
+    private val escalation get() = app.escalation
+
+    override suspend fun listPolicies(request: ListEscalationPoliciesRequest): EscalationPolicies =
+        escalation.policies(auth.caller(), request.teamId).itemsInto(EscalationPolicies.newBuilder()).build()
+
+    override suspend fun getPolicy(request: IdRequest): EscalationPolicy = escalation.policy(auth.caller(), request.id).into(EscalationPolicy.newBuilder()).build()
+
+    override suspend fun createPolicy(request: SaveEscalationPolicyRequest): EscalationPolicy =
+        escalation.create(auth.caller(), request.decode<mayday.escalation.EscalationPolicyInput>()).into(EscalationPolicy.newBuilder()).build()
+
+    override suspend fun updatePolicy(request: SaveEscalationPolicyRequest): EscalationPolicy = escalation.update(
+        auth.caller(), request.id, request.decode<mayday.escalation.EscalationPolicyInput>(), if (request.hasVersion()) request.version else null,
+    ).into(EscalationPolicy.newBuilder()).build()
+
+    override suspend fun deletePolicy(request: IdRequest): Empty = EMPTY.also { escalation.delete(auth.caller(), request.id) }
+
+    override suspend fun getEscalation(request: IdRequest): Escalation = escalation.escalation(auth.caller(), request.id).into(Escalation.newBuilder()).build()
+
+    override suspend fun escalateNow(request: IdRequest): Escalation = escalation.escalateNow(auth.caller(), request.id).into(Escalation.newBuilder()).build()
+}
+
+@Service
 class IncidentGrpc(private val auth: Authenticator, private val app: App) : IncidentServiceGrpcKt.IncidentServiceCoroutineImplBase() {
     private val incidents get() = app.incidents
 

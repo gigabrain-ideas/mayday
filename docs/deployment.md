@@ -39,6 +39,8 @@ Mayday is one process: a Spring Boot jar (`build/libs/mayday.jar`). It needs Jav
 | `MAYDAY_SESSION_HOURS` | 12 | Session lifetime |
 | `MAYDAY_MAX_LIVE_CONNECTIONS` | 100000 | Live event streams (`EventService.Subscribe`) per instance |
 | `MAYDAY_AGENT_CONCURRENCY` | 16 | Parallel built-in agent runs per instance |
+| `MAYDAY_PAGING_WEBHOOK_URL` | – | Escalation pages as signed JSON to a chat bridge, SMS gateway or push service. Empty: pages show only in Mayday and on the event stream. See [api.md](api.md#page-webhook) |
+| `MAYDAY_PAGING_WEBHOOK_SECRET`, `MAYDAY_PAGING_WEBHOOK_HEADERS` | – | HMAC secret of `X-Mayday-Signature`; extra headers `name=value,name2=value2` |
 | `MAYDAY_WEB_DIR` | – | Serve the interface from a directory instead of the built-in copy |
 
 ### Built-in agent (LLM provider)

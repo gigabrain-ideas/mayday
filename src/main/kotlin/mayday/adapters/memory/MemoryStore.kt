@@ -43,6 +43,11 @@ import mayday.oncall.OverrideRepository
 import mayday.oncall.Schedule
 import mayday.oncall.ScheduleOverride
 import mayday.oncall.ScheduleRepository
+import mayday.escalation.Escalation
+import mayday.escalation.EscalationPolicy
+import mayday.escalation.EscalationPolicyRepository
+import mayday.escalation.EscalationRepository
+import mayday.escalation.EscalationStatus
 import mayday.provisioning.DirectoryGroup
 import mayday.provisioning.GroupRepository
 import mayday.shared.Conflict
@@ -140,8 +145,10 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
     private val schedulesC = Coll("schedules", Schedule.serializer(), journal)
     private val overridesC = Coll("schedule_overrides", ScheduleOverride.serializer(), journal)
     private val groupsC = Coll("directory_groups", DirectoryGroup.serializer(), journal)
+    private val escalationPoliciesC = Coll("escalation_policies", EscalationPolicy.serializer(), journal)
+    private val escalationsC = Coll("escalations", Escalation.serializer(), journal)
     private val all = listOf(projectsC, teamsC, usersC, tokensC, settingsC, requestsC, incidentsC, timelineC, alertsC, agentsC, runsC, mcpC, configC,
-        schedulesC, overridesC, groupsC)
+        schedulesC, overridesC, groupsC, escalationPoliciesC, escalationsC)
 
     private val incidentOrder = ConcurrentSkipListMap<Long, String>(reverseOrder())
     private val counter = AtomicLong(0)
@@ -376,6 +383,33 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
             overridesC.map.values.filter { it.teamId == teamId && it.userId == userId && it.endsAt > after }
         override suspend fun deleteBySchedule(scheduleId: String) =
             overridesC.map.values.filter { it.scheduleId == scheduleId }.forEach { overridesC.remove(it.id) }
+    }
+
+    val escalationPolicies = object : EscalationPolicyRepository {
+        override suspend fun get(id: String) = escalationPoliciesC.map[id]
+        override suspend fun byTeam(teamId: String) = escalationPoliciesC.map.values.filter { it.teamId == teamId }
+        override suspend fun delete(id: String) = escalationPoliciesC.remove(id)
+        override suspend fun save(policy: EscalationPolicy, expectedVersion: Long?) = synchronized(this) {
+            val cur = escalationPoliciesC.map[policy.id]
+            if (expectedVersion == null && cur != null) throw Conflict("Escalation policy exists")
+            if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The escalation policy changed. Reload and try again.")
+            escalationPoliciesC.put(policy.id, policy)
+        }
+    }
+
+    val escalations = object : EscalationRepository {
+        override suspend fun get(id: String) = escalationsC.map[id]
+        override suspend fun save(escalation: Escalation, expectedVersion: Long?) = synchronized(this) {
+            val cur = escalationsC.map[escalation.id]
+            if (expectedVersion == null && cur != null) throw Conflict("Escalation exists")
+            if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The escalation changed")
+            escalationsC.put(escalation.id, escalation)
+        }
+        override suspend fun due(at: Instant, limit: Int) = escalationsC.map.values.asSequence()
+            .filter { it.status == EscalationStatus.ACTIVE && it.nextAt != null && it.nextAt <= at }
+            .sortedWith(compareBy({ it.nextAt }, { it.id })).take(limit).toList()
+        override suspend fun activeByPolicy(policyId: String) =
+            escalationsC.map.values.filter { it.policyId == policyId && it.status == EscalationStatus.ACTIVE }
     }
 
     val groups = object : GroupRepository {

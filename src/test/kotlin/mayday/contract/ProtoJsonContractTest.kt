@@ -127,6 +127,21 @@ class ProtoJsonContractTest {
     }
 
     @Test
+    fun `escalation policy and escalation`() {
+        val target = { k: mayday.escalation.TargetKind, id: String -> mayday.escalation.EscalationTarget(k, id) }
+        val p = mayday.escalation.EscalationPolicy("p1", "t1", "Default", "d", listOf(
+            mayday.escalation.EscalationLevel(5, listOf(target(mayday.escalation.TargetKind.SCHEDULE, "s1"))),
+            mayday.escalation.EscalationLevel(10, listOf(target(mayday.escalation.TargetKind.USER, "u1"), target(mayday.escalation.TargetKind.USER, "u2"))),
+        ), 2, true, t0, t1, 4)
+        assertEquals(p, roundTrip(p, mayday.api.v1.EscalationPolicy.newBuilder()))
+        val e = mayday.escalation.Escalation("a1", "t1", "p1", mayday.escalation.EscalationStatus.ACTIVE, 1, 2, t1,
+            listOf(mayday.escalation.EscalationPage(t0, 1, 0, listOf("u1")), mayday.escalation.EscalationPage(t1, 2, 0, emptyList(), true)), t0, t1, 3)
+        assertEquals(e, roundTrip(e, mayday.api.v1.Escalation.newBuilder()))
+        val done = e.copy(status = mayday.escalation.EscalationStatus.EXHAUSTED, nextAt = null)
+        assertEquals(done, roundTrip(done, mayday.api.v1.Escalation.newBuilder()))
+    }
+
+    @Test
     fun `on-call schedule, override, shift and on-call entry`() {
         val s = mayday.oncall.Schedule("s1", "t1", "Primary", "Europe/Berlin", t0, 2, mayday.oncall.ShiftUnit.DAYS, listOf("u1", "u2"), "d", t0, t1, 3)
         assertEquals(s, roundTrip(s, mayday.api.v1.Schedule.newBuilder()))
@@ -300,6 +315,8 @@ class ProtoJsonContractTest {
         Strictness.entries.toTypedArray() to mayday.api.v1.Strictness.getDescriptor(),
         ChangeRequestStatus.entries.toTypedArray() to mayday.api.v1.ChangeRequestStatus.getDescriptor(),
         mayday.oncall.ShiftUnit.entries.toTypedArray() to mayday.api.v1.ShiftUnit.getDescriptor(),
+        mayday.escalation.TargetKind.entries.toTypedArray() to mayday.api.v1.TargetKind.getDescriptor(),
+        mayday.escalation.EscalationStatus.entries.toTypedArray() to mayday.api.v1.EscalationStatus.getDescriptor(),
     )
 
     @Test
@@ -339,6 +356,11 @@ class ProtoJsonContractTest {
         serializer<mayday.oncall.Shift>() to mayday.api.v1.Shift.getDescriptor(),
         serializer<mayday.oncall.OnCall>() to mayday.api.v1.OnCall.getDescriptor(),
         serializer<mayday.oncall.OverrideInput>() to mayday.api.v1.CreateOverrideRequest.getDescriptor(),
+        serializer<mayday.escalation.EscalationPolicy>() to mayday.api.v1.EscalationPolicy.getDescriptor(),
+        serializer<mayday.escalation.EscalationLevel>() to mayday.api.v1.EscalationLevel.getDescriptor(),
+        serializer<mayday.escalation.EscalationTarget>() to mayday.api.v1.EscalationTarget.getDescriptor(),
+        serializer<mayday.escalation.Escalation>() to mayday.api.v1.Escalation.getDescriptor(),
+        serializer<mayday.escalation.EscalationPage>() to mayday.api.v1.EscalationPage.getDescriptor(),
         serializer<mayday.directory.Team>() to mayday.api.v1.Team.getDescriptor(),
         serializer<mayday.identity.TeamMember>() to mayday.api.v1.TeamMember.getDescriptor(),
     )

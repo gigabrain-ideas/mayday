@@ -46,6 +46,7 @@ flowchart LR
 | `PolicyReplicaTest` | `DomainTest.kt` | Two instances on one store and event bus: direct changes and approved change requests clear the settings cache of the other instance |
 | `PolicyTest`, `IncidentTest`, `AlertTest`, `IdentityTest`, `AgentTest` | `DomainTest.kt` | The rules in each product brief, including negative cases |
 | `RotationTest`, `OnCallTest`, `TeamMembersTest` | `OnCallTest.kt` | Rotation math (order, wrap, before start, daylight saving, windows), override precedence and cuts, schedule and override RBAC (owners vs members), integrity rules, leaving a team |
+| `EscalationTest` | `EscalationTest.kt` | Policy RBAC (owners vs members), validation, administrator limit on the delay, one default per team, paging the person on call and overrides, next level after the delay, repeat and exhaustion, severity threshold, a level that reaches nobody, "Escalate now", reopen, policy deletion, parallel ticks send each page once |
 | `GroupClaimTest`, `GroupSyncTest`, `ProvisioningTest` | `GroupSyncTest.kt` | Groups claim parsing (list, nested path, string, missing claim, overage), automatic teams with filter and owner suffix, reconcile rules, manual changes locked by links, rotation exit on group loss, SCIM groups and users |
 | `DelegationLimitsTest`, `UntrustedSubjectDataTest`, `AlertIngestScopeTest`, `AgentAdminExchangeTest`, `AgentAdminOptInResetTest` | `SecurityTest.kt` | Delegated run tokens have no ADMIN scope and stop when the run is finished; token exchange keeps ADMIN only with the organization setting and the user's opt-in, agents cannot opt in for the user, and turning the organization setting off clears every opt-in; alert content reaches the model only as untrusted data, apart from the task; ingest-only tokens send alerts only for the teams of their owner |
 | `AgentIndependenceTest`, `BudgetExhaustedTest`, `GatewaySettingsTest` | `AgentGatewayTest.kt` | Alerts and incidents work with no agent, a hanging agent or a failing agent; 429 makes one call and pauses the agent; settings and identity headers |
@@ -53,7 +54,7 @@ flowchart LR
 
 `ServerContract` (`contract/ServerSupport.kt`) starts the real Spring Boot application on random HTTP and gRPC ports, with memory storage, `FakeLlm` and `RecordingDispatcher`. Both servers listen on `127.0.0.1` only. On a wildcard address, another local server (an IDE, a fake gateway in another test) could bind `127.0.0.1` on the same port and receive the test calls; the gRPC client then failed with "First received frame was not SETTINGS". Each subclass runs the check `no other loopback listener can take the ports of the test servers`. Test HTTP calls have a 30 s timeout, so a broken server fails a test instead of stopping the run. Each subclass sets its own `spring.grpc.server.inprocess.name`.
 
-Test doubles (`TestSupport.kt`): `FakeLlm` (scripted tool calls and answers), `RecordingDispatcher` (records webhooks, can fail on request) and `RecordingSink` (keeps every audit batch; `ServerContract` and `Fixture` use it).
+Test doubles (`TestSupport.kt`): `FakeLlm` (scripted tool calls and answers), `RecordingDispatcher` (records webhooks, can fail on request), `RecordingPager` (records escalation pages), `TestClock` (moved by hand) and `RecordingSink` (keeps every audit batch; `ServerContract` and `Fixture` use it).
 
 ## Run
 

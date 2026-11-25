@@ -57,3 +57,9 @@ export function useSession() {
   if (!c) throw new Error("SessionProvider missing");
   return c;
 }
+
+/** Team owners: team role ADMIN, project admin of the team's project, or administrator. */
+export function useTeamOwner() {
+  const { me, isAdmin } = useSession();
+  return (team?: Team) => !!team && (isAdmin || me.user.teams[team.id] === "ADMIN" || (!!team.projectId && me.user.projectAdmin.includes(team.projectId)));
+}

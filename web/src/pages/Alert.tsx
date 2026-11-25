@@ -9,6 +9,7 @@ import { ago, dateTime } from "@/lib/utils";
 import { Badge, Button, Card, CardHeader, Empty, Input, Spinner, Textarea } from "@/components/ui";
 import { ActorIcon, ActorName, AlertStatusBadge, DictateButton, SeverityBadge } from "@/components/common";
 import { AgentActions, AgentRuns } from "@/components/AgentPanel";
+import { AlertEscalation } from "@/pages/Escalation";
 
 export function AlertPage() {
   const { id = "" } = useParams();
@@ -76,6 +77,7 @@ export function AlertPage() {
           </Card>
         </div>
         <div className="space-y-5">
+          <AlertEscalation alert={a} />
           <AgentActions subject={{ kind: "ALERT", ref: a.id }} actions={["ANALYZE", "REMEDIATE"]} />
           <Card>
             <CardHeader title="Incident" />
