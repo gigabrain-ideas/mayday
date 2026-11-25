@@ -15,12 +15,14 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 | Deduplication | A firing signal with the fingerprint of an open alert increments `count` and keeps the worst severity. A resolved alert that fires again inside `alerts.dedup_window_minutes` reopens. Otherwise Mayday creates a new alert. |
 | Resolve signal | Resolves the open alert. With no open alert, it does nothing (or records a resolved alert when the fingerprint is new). |
 | Automatic incident | A new alert at or worse than `alerts.auto_incident_min_severity` opens an incident for its team and links both. |
+| Alert for a declared incident | A person or an agent declares an incident: Mayday raises one alert for each responder team. Source `mayday`, title `<key>: <incident title>`, the incident severity, label `incident=<key>`, linked to the incident. Escalation pages for these alerts as for any new alert. They start no agent automation, because the incident already does. Mayday saves the alerts first and then the incident with its links, in one write (version 1). A failed alert for one team does not stop the alerts for the other teams; the failure is on the trace. The raised alerts follow the incident: the first status other than INVESTIGATING acknowledges them (the escalation stops), RESOLVED or CLOSED resolves them. A reopen does not fire them again. Teams added to the incident later get no alert. An incident that an alert opens raises no second alert. |
 
 ## Ports
 
 - `AlertRepository`: `get`, `latestByFingerprint`, `save(expectedVersion)`, keyset `list`, `scan`.
 - `AlertAutomation`: called after a new alert. The agents context implements it.
 - `AlertLifecycle`: `opened` after a new alert and after a reopened alert, `closed` after acknowledge and resolve. The escalation context implements it ([escalation.md](escalation.md)). A failure there never blocks the alert.
+- Implements `IncidentAlerts` (incidents context): raises the alerts for a declared incident and makes them follow its status.
 
 ## Interfaces
 
@@ -33,6 +35,8 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 
 - Alertmanager sends the same alert every minute. Mayday keeps one alert and counts the repeats.
 - A critical alert fires. Mayday opens an incident, adds an ALERT entry to its timeline and starts the analysis agent.
+- A member declares an incident for Checkout and SRE. Both teams get a firing alert linked to the incident, and the timeline shows two ALERT entries.
+- The commander sets the incident to IDENTIFIED. The raised alerts are acknowledged and nobody is paged again. At RESOLVED they are resolved.
 - A responder adds an update to an alert that has an incident. The update also appears on the incident timeline (when `timeline.auto_populate` is on).
 
 ## Negative use cases
@@ -41,6 +45,8 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 - A token with only `alerts_ingest` sends an alert for a team that its owner is not in (not a team member, not admin of the team's project, not an administrator): `forbidden`. A leaked ingest token cannot open incidents for other teams. Agent tokens and tokens with `write` are not limited. For one Alertmanager that serves many teams, an administrator creates the token.
 - A signal for an unknown team: `not_found`.
 - A flapping alert inside the window does not create a new incident each time.
+- A critical alert opens an incident. The incident does not raise a second alert.
+- A viewer tries to declare an incident: `forbidden`, and no alert is raised.
 
 ## Rebuild checklist
 

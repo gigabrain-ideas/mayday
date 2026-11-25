@@ -24,6 +24,7 @@ An incident records a disruption from detection to postmortem. It is the place w
 - `IncidentRepository`: `nextNumber()` (never reuses a number), `get`, `byNumber`, `save(expectedVersion)`, keyset `list`, streaming `scan`.
 - `TimelineRepository`: `append`, `list`.
 - Uses `PolicyReader` (policy context) and `DirectoryService` (team validation).
+- `IncidentAlerts`: used by `declare` (not by `declareFromAlert`) and by `update`. `raiseFor` saves one alert for each responder team before the incident is saved, so the incident is written once with its alert links. `raised` runs after the save and announces the alerts (escalation starts). `statusChanged` runs after each status change: the raised alerts are acknowledged when the incident leaves INVESTIGATING and resolved when it closes. The alerting context implements it. A failure in the listener does not stop the declaration.
 
 ## Use cases
 
@@ -31,7 +32,7 @@ An incident records a disruption from detection to postmortem. It is the place w
 
 ## Positive use cases
 
-- A member declares a SEV1 for the Checkout team. Mayday gives it the next key, marks the postmortem as mandatory and records the declaration.
+- A member declares a SEV1 for the Checkout team. Mayday gives it the next key, marks the postmortem as mandatory and records the declaration and raises a linked alert for Checkout.
 - A responder sets the status to RESOLVED. Mayday sets the resolution time, the impact end and the postmortem due date.
 - A responder dictates the resolution notes. They press "Generate runbook". An agent writes the runbook in ASD-STE100 and saves it.
 - An agent adds a timeline entry with an earlier event time. The timeline shows it at the correct place.

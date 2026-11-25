@@ -9,6 +9,10 @@ import mayday.escalation.EscalationPolicyInput
 import mayday.escalation.EscalationStatus
 import mayday.escalation.EscalationTarget
 import mayday.escalation.TargetKind
+import mayday.alerting.AlertStatus
+import mayday.incidents.IncidentPatch
+import mayday.incidents.IncidentStatus
+import mayday.incidents.NewIncident
 import mayday.oncall.OverrideInput
 import mayday.oncall.ScheduleInput
 import mayday.oncall.ShiftUnit
@@ -95,6 +99,30 @@ class EscalationTest {
         assertFalse(esc.policy(f.viewer, a.id).teamDefault)
         assertTrue(esc.policy(f.viewer, b.id).teamDefault)
         assertEquals(b.id, esc.policies(f.viewer, f.team.id).first().id)
+    }
+
+    @Test
+    fun `raised alerts stop paging when the incident is acknowledged and resolve with it`() = suspendTest {
+        twoLevels()
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        val alertId = inc.alertIds.single()
+        f.app.incidents.update(f.member, inc.key, IncidentPatch(status = IncidentStatus.IDENTIFIED))
+        assertEquals(AlertStatus.ACKNOWLEDGED, f.app.alerts.get(f.viewer, alertId).status)
+        assertEquals(EscalationStatus.ACKNOWLEDGED, esc.escalation(f.viewer, alertId).status)
+        clock.advance(Duration.ofHours(1))
+        esc.tick()
+        assertEquals(1, f.pager.pages.size)
+        f.app.incidents.update(f.member, inc.key, IncidentPatch(status = IncidentStatus.RESOLVED))
+        assertEquals(AlertStatus.RESOLVED, f.app.alerts.get(f.viewer, alertId).status)
+    }
+
+    @Test
+    fun `a declared incident pages the person on call through its raised alert`() = suspendTest {
+        twoLevels()
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        val e = esc.escalation(f.viewer, inc.alertIds.single())
+        assertEquals(EscalationStatus.ACTIVE, e.status)
+        assertEquals(listOf(f.teamAdminUser.id), f.pager.pages.single().recipients.map { it.id })
     }
 
     @Test

@@ -6,6 +6,10 @@ import mayday.identity.Access
 import mayday.identity.Principal
 import mayday.identity.TokenScope
 import mayday.incidents.EntryKind
+import mayday.incidents.Incident
+import mayday.incidents.IncidentAlerts
+import mayday.incidents.IncidentStatus
+import mayday.incidents.RaisedAlert
 import mayday.incidents.IncidentService
 import mayday.incidents.NewIncident
 import mayday.policy.Keys
@@ -119,7 +123,7 @@ class AlertService(
     private val events: EventPublisher,
     private val clock: Clock,
     private val telemetry: Telemetry = Telemetry.noop,
-) {
+) : IncidentAlerts {
     @Volatile var automation: AlertAutomation = object : AlertAutomation { override suspend fun onAlertCreated(alert: Alert) = Unit }
     @Volatile var lifecycle: AlertLifecycle = AlertLifecycle.none
 
@@ -216,6 +220,53 @@ class AlertService(
         return IngestResult(result, true, incidentKey)
     }
 
+    /** One alert for each responder team, linked to the incident. Escalation pages as for any new alert. No agent automation: the incident already starts agent work. */
+    override suspend fun raiseFor(incident: Incident): List<RaisedAlert> =
+        telemetry.span("alert.raise_for_incident", mapOf("mayday.incident.id" to incident.id)) { span ->
+            incident.teamIds.mapNotNull { teamId ->
+                runCatching { raiseOne(incident, teamId) }.onFailure { span.fail("No alert for team $teamId", it) }.getOrNull()
+            }
+        }
+
+    private suspend fun raiseOne(incident: Incident, teamId: String): RaisedAlert {
+        val now = clock.now()
+        val a = Alert(
+            id = Ids.new(),
+            fingerprint = "incident:${incident.id}:$teamId",
+            source = INCIDENT_SOURCE,
+            title = "${incident.key}: ${incident.title}",
+            description = incident.description,
+            severity = incident.severity,
+            teamId = teamId,
+            labels = mapOf("incident" to incident.key),
+            incidentId = incident.id,
+            firstSeenAt = now,
+            lastSeenAt = now,
+            updates = listOf(AlertUpdate(now, incident.createdBy, "Raised for incident ${incident.key}.")),
+        )
+        alerts.save(a, null)
+        return RaisedAlert(a.id, "Alert raised for ${directory.team(teamId).name}: ${a.title}")
+    }
+
+    override suspend fun raised(incident: Incident, alertIds: List<String>) {
+        for (id in alertIds) {
+            val a = alerts.get(id) ?: continue
+            publish("alert.created", a)
+            runCatching { lifecycle.opened(a) }
+        }
+    }
+
+    override suspend fun statusChanged(incident: Incident, actor: Actor) {
+        if (incident.status == IncidentStatus.INVESTIGATING) return
+        for (id in incident.alertIds) {
+            val a = alerts.get(id)?.takeIf { it.source == INCIDENT_SOURCE && it.labels["incident"] == incident.key } ?: continue
+            when {
+                !incident.status.open && a.status != AlertStatus.RESOLVED -> resolveInternal(a, actor, "Incident ${incident.key} is ${incident.status.name.lowercase()}.")
+                a.status == AlertStatus.FIRING -> acknowledgeInternal(a, actor)
+            }
+        }
+    }
+
     private suspend fun createAlert(signal: AlertSignal, fp: String, teamId: String, now: Instant): Alert {
         val a = Alert(
             id = Ids.new(),
@@ -238,10 +289,14 @@ class AlertService(
         Access.requireWrite(by)
         val cur = get(by, id)
         if (cur.status != AlertStatus.FIRING) return cur
+        return acknowledgeInternal(cur, by.actor)
+    }
+
+    private suspend fun acknowledgeInternal(cur: Alert, actor: Actor): Alert {
         val next = cur.copy(
             status = AlertStatus.ACKNOWLEDGED,
-            acknowledgedBy = by.actor,
-            updates = cur.updates + AlertUpdate(clock.now(), by.actor, "Acknowledged."),
+            acknowledgedBy = actor,
+            updates = cur.updates + AlertUpdate(clock.now(), actor, "Acknowledged."),
             version = cur.version + 1,
         )
         alerts.save(next, cur.version)
@@ -305,6 +360,7 @@ class AlertService(
 
     companion object {
         private const val OUTCOME = "mayday.alert.outcome"
+        private const val INCIDENT_SOURCE = "mayday"
 
         fun fingerprint(source: String, title: String, teamId: String, labels: Map<String, String>): String {
             val canonical = buildString {

@@ -10,6 +10,7 @@ import mayday.agents.AgentTrigger
 import mayday.agents.Delivery
 import mayday.agents.RunStatus
 import mayday.agents.SubjectKind
+import mayday.alerting.AlertFilter
 import mayday.alerting.AlertSignal
 import mayday.alerting.AlertStatus
 import mayday.identity.OrgRole
@@ -133,7 +134,7 @@ class IncidentTest {
         svc.update(f.member, i.key, IncidentPatch(severity = Severity.SEV2, status = IncidentStatus.IDENTIFIED, title = "Y"))
         svc.addEntry(f.member, i.key, "Rolled back")
         val kinds = svc.timeline(f.viewer, i.key).map { it.kind }
-        assertEquals(listOf(EntryKind.STATUS, EntryKind.STATUS, EntryKind.SEVERITY, EntryKind.FIELD, EntryKind.NOTE), kinds)
+        assertEquals(listOf(EntryKind.STATUS, EntryKind.ALERT, EntryKind.STATUS, EntryKind.SEVERITY, EntryKind.FIELD, EntryKind.NOTE), kinds)
     }
 
     @Test
@@ -181,6 +182,35 @@ class AlertTest {
         val again = svc.ingest(f.member, AlertSignal("Flappy", Severity.SEV3, "checkout", fingerprint = "fp1"))
         assertEquals(a.id, again.alert.id)
         assertEquals(AlertStatus.FIRING, again.alert.status)
+    }
+
+    @Test
+    fun `a declared incident raises one linked alert for each responder team`() = suspendTest {
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", "5xx on pay", Severity.SEV2, listOf(f.team.id, f.other.id)))
+        val raised = svc.list(f.admin, AlertFilter(), null, 100).items
+        assertEquals(setOf(f.team.id, f.other.id), raised.map { it.teamId }.toSet())
+        assertEquals(raised.map { it.id }.toSet(), inc.alertIds.toSet())
+        raised.forEach {
+            assertEquals(inc.id, it.incidentId)
+            assertEquals(AlertStatus.FIRING, it.status)
+            assertEquals(Severity.SEV2, it.severity)
+            assertEquals("mayday", it.source)
+            assertEquals("${inc.key}: Checkout returns errors", it.title)
+        }
+        assertEquals(2, f.app.incidents.timeline(f.admin, inc.key).count { it.kind == EntryKind.ALERT })
+    }
+
+    @Test
+    fun `an incident that an alert opens raises no second alert`() = suspendTest {
+        val r = svc.ingest(f.member, AlertSignal("DB down", Severity.SEV1, "checkout"))
+        assertEquals(listOf(r.alert.id), svc.list(f.admin, AlertFilter(), null, 100).items.map { it.id })
+        assertEquals(listOf(r.alert.id), f.app.incidents.get(f.admin, r.incidentKey!!).alertIds)
+    }
+
+    @Test
+    fun `a refused declaration raises no alert`() = suspendTest {
+        assertFailsWith<Forbidden> { f.app.incidents.declare(f.viewer, NewIncident("x", severity = Severity.SEV2, teamIds = listOf(f.team.id))) }
+        assertTrue(svc.list(f.admin, AlertFilter(), null, 100).items.isEmpty())
     }
 
     @Test

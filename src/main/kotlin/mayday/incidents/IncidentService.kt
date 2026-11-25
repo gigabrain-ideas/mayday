@@ -59,6 +59,8 @@ class IncidentService(
     private val clock: Clock,
     private val telemetry: Telemetry = Telemetry.noop,
 ) {
+    @Volatile var alerts: IncidentAlerts = IncidentAlerts.none
+
     private val keyPattern = Regex("^([A-Za-z0-9]+)-(\\d+)$")
 
     /** Accepts an id, a key (INC-42) or a number (42). */
@@ -80,23 +82,23 @@ class IncidentService(
 
     suspend fun declare(by: Principal, input: NewIncident): Incident = traced("incident.declare", input, by.actor.kind.name, "manual") {
         Access.requireWrite(by)
-        create(by.actor, input)
+        create(by.actor, input, raiseAlerts = true)
     }
 
     /** Used by the alerting context; the trigger is a policy decision, not a user action. */
-    suspend fun declareFromAlert(input: NewIncident): Incident = traced("incident.declare", input, ActorKind.SYSTEM.name, "alert") { create(Actor.system, input) }
+    suspend fun declareFromAlert(input: NewIncident): Incident = traced("incident.declare", input, ActorKind.SYSTEM.name, "alert") { create(Actor.system, input, raiseAlerts = false) }
 
     private suspend fun traced(name: String, input: NewIncident, actor: String, trigger: String, block: suspend () -> Incident): Incident =
         telemetry.span(name, mapOf("mayday.incident.severity" to input.severity.name, "mayday.actor.kind" to actor, "mayday.incident.trigger" to trigger)) { span ->
             block().also { span.set("mayday.incident.id", it.id); span.set("mayday.incident.key", it.key) }
         }
 
-    private suspend fun create(actor: Actor, input: NewIncident): Incident {
+    private suspend fun create(actor: Actor, input: NewIncident, raiseAlerts: Boolean): Incident {
         val teams = input.teamIds.distinct().map { directory.team(it).id }
         val now = clock.now()
         val number = incidents.nextNumber()
         val prefix = policy.string(Keys.INCIDENT_PREFIX)
-        val incident = Incident(
+        val draft = Incident(
             id = Ids.new(),
             number = number,
             key = "$prefix-$number",
@@ -115,9 +117,13 @@ class IncidentService(
             createdAt = now,
             updatedAt = now,
         )
+        val raised = if (raiseAlerts) runCatching { alerts.raiseFor(draft) }.getOrDefault(emptyList()) else emptyList()
+        val incident = draft.copy(alertIds = draft.alertIds + raised.map { it.alertId })
         incidents.save(incident, null)
         record(incident, EntryKind.STATUS, actor, "Incident declared as ${incident.severity} with status ${incident.status}.")
+        raised.forEach { record(incident, EntryKind.ALERT, Actor.system, it.note, null, mapOf("alertId" to it.alertId)) }
         publish("incident.created", incident)
+        if (raised.isNotEmpty()) runCatching { alerts.raised(incident, raised.map { it.alertId }) }
         return incident
     }
 
@@ -192,6 +198,7 @@ class IncidentService(
         }
         if (fields.isNotEmpty()) record(next, EntryKind.FIELD, by.actor, "Updated ${fields.joinToString(", ")}.")
         publish("incident.updated", next)
+        if (next.status != cur.status) runCatching { alerts.statusChanged(next, by.actor) }
         return next
     }
 

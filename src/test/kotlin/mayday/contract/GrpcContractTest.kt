@@ -149,6 +149,7 @@ class GrpcContractTest : ServerContract() {
     fun `incident updates follow patch semantics`() = suspendTest {
         val i = incidents.declareIncident(declare("Patch ${unique()}", labels = mapOf("env" to "prod")).toBuilder().setDescription("desc").build(), auth("member"))
         assertEquals(1, i.version)
+        assertEquals(1, i.alertIdsCount, "a declared incident raises an alert for its team")
 
         val renamed = incidents.updateIncident(patch(i.key) { title = "Renamed" }, auth("member"))
         assertEquals("Renamed", renamed.title)

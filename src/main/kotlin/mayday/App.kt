@@ -172,6 +172,7 @@ class App(val settings: AppSettings, val ports: Ports) {
         mcp = McpServer(AuditedCatalog(maydayTools, audit), VERSION, ports.telemetry, audit)
         alerts.automation = agents
         alerts.lifecycle = escalation
+        incidents.alerts = alerts
         policy.listener = identity
         ports.events.subscribe { if (it.type == "setting.changed") policy.invalidate() }
     }

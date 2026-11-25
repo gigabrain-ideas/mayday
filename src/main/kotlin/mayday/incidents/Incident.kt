@@ -104,6 +104,28 @@ data class IncidentFilter(
     val to: Instant? = null,
 )
 
+/** Port that the alerting context implements: a declared incident raises alerts for its responder teams, and they follow its status. */
+interface IncidentAlerts {
+    /** Saves the alerts for a new incident before the incident is saved, so the incident is written once with its links. */
+    suspend fun raiseFor(incident: Incident): List<RaisedAlert>
+
+    /** After the incident is saved: announce the raised alerts and start their escalation. */
+    suspend fun raised(incident: Incident, alertIds: List<String>)
+
+    /** After a status change: acknowledge the raised alerts when the incident leaves INVESTIGATING, resolve them when it closes. */
+    suspend fun statusChanged(incident: Incident, actor: Actor)
+
+    companion object {
+        val none = object : IncidentAlerts {
+            override suspend fun raiseFor(incident: Incident) = emptyList<RaisedAlert>()
+            override suspend fun raised(incident: Incident, alertIds: List<String>) = Unit
+            override suspend fun statusChanged(incident: Incident, actor: Actor) = Unit
+        }
+    }
+}
+
+data class RaisedAlert(val alertId: String, val note: String)
+
 interface IncidentRepository {
     /** Allocate the next monotonic incident number. Never reuses a number. */
     suspend fun nextNumber(): Long
