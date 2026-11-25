@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { Bot, FileText, GitPullRequest, ListChecks, ScrollText, Search, Wrench } from "lucide-react";
-import { ACTION_LABEL, ApiError, items, rpc, type AgentAction, type AgentConfig, type AgentRun, type Page } from "@/lib/api";
+import { ACTION_LABEL, ApiError, FINISHED_RUN, items, rpc, type AgentAction, type AgentConfig, type AgentRun, type Page } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -144,13 +144,48 @@ export function AgentRuns({ subject, subjectId }: { subject: Subject; subjectId:
               {r.output && <Markdown text={r.output} />}
               {r.error && <p className="text-destructive">{r.error}</p>}
               <RunTrace traceId={r.traceId} />
-              {canWrite && !["SUCCEEDED", "FAILED", "CANCELLED"].includes(r.status) && (
+              {r.approvedBy && <p className="text-muted-foreground">Approved by {r.approvedBy.name}{r.approvedAt && ` · ${ago(r.approvedAt)}`}</p>}
+              {canWrite && r.status === "AWAITING_APPROVAL" && <PatchDecision run={r} onDone={reload} />}
+              {canWrite && !FINISHED_RUN.includes(r.status) && (
                 <Button size="sm" variant="ghost" onClick={() => rpc.agentRuns.cancelRun({ id: r.id }).then(reload).catch(toast.error)}>Cancel run</Button>
               )}
             </div>
           </details>
         );
       })}
+    </div>
+  );
+}
+
+/** Policy agents.patch_requires_approval: the patch is not done until a person approves it. */
+function PatchDecision({ run, onDone }: { run: AgentRun; onDone: () => void }) {
+  const toast = useToast();
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const act = (call: Promise<unknown>) => {
+    setBusy(true);
+    call.then(onDone).catch(toast.error).finally(() => setBusy(false));
+  };
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <p>Review the patch of {run.agentName}. Nobody may apply it before you approve it.</p>
+      {rejecting ? (
+        <>
+          <Field label="Reason for the rejection">
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} autoFocus />
+          </Field>
+          <div className="flex gap-2">
+            <Button size="sm" variant="destructive" disabled={busy || !reason.trim()} onClick={() => act(rpc.agentRuns.rejectRun({ id: run.id, reason }))}>Reject patch</Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setRejecting(false)}>Back</Button>
+          </div>
+        </>
+      ) : (
+        <div className="flex gap-2">
+          <Button size="sm" disabled={busy} onClick={() => act(rpc.agentRuns.approveRun({ id: run.id }))}>Approve patch</Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => setRejecting(true)}>Reject</Button>
+        </div>
+      )}
     </div>
   );
 }

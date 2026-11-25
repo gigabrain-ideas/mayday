@@ -55,7 +55,7 @@ flowchart LR
 | `token` | `token.issued`, `token.revoked` (user and agent tokens; prefix, scopes, requested scopes, expiry), `token.delegated` (run token), `token.exchanged` (RFC 8693; scopes, `adminKept`) | The person, the administrator, or the agent with `onBehalfOf` |
 | `identity` | `user.provisioned`, `user.created`, `user.updated` (role, disabled, team and project admin changes as before and after), `team_member.added`, `.removed`, `.role_changed`, `team_roles.synced`, `team.created_from_groups`, `agent_admin.enabled`, `.disabled`, `.cleared` | The administrator, team owner, or the identity provider (`system`) |
 | `policy` | `setting.set` (value, previous value, enforcement), `setting.removed`, `change_request.created`, `.approved`, `.rejected` | The person who changed it |
-| `agent` | `agent.created`, `.updated`, `.deleted`, `.credentials_rotated`, `run.started`, `run.claimed`, `run.succeeded`, `run.failed`, `run.cancelled` | The administrator, the person who started the run, the agent, or `system` (automatic runs, stale runs) |
+| `agent` | `agent.created`, `.updated`, `.deleted`, `.credentials_rotated`, `run.started`, `run.claimed`, `run.awaiting_approval`, `run.approved`, `run.rejected`, `run.succeeded`, `run.failed`, `run.cancelled` | The administrator, the person who started the run, the agent, or `system` (automatic runs, stale runs) |
 | `configuration` | `llm.updated` (changed field names, never values), `mcp_server.created`, `.updated`, `.deleted` | The administrator |
 | `system` | `audit.started` (version, sinks, reads), `audit.stopped`, `audit.dropped` (count of lost records) | `system` |
 

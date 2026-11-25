@@ -15,7 +15,7 @@ Agents are an add-on. Without an agent, Mayday is a complete incident management
 | `AgentConfig` | `kind` INTERNAL (one, id `mayday`) or EXTERNAL. `delivery` PUSH (webhook) or PULL (the agent claims runs). `actions` it can do. `triggers` for automatic runs. `role` of its own identity. `enabled`. `instructions` (built-in only). |
 | `AgentAction` | ANALYZE, REMEDIATE, PATCH, TIMELINE, POSTMORTEM, RUNBOOK. REMEDIATE and PATCH are write actions. |
 | `AgentTrigger` | Event ALERT_CREATED, minimum severity, optional teams, action. |
-| `AgentRun` | Status QUEUED → DISPATCHED/RUNNING → SUCCEEDED, FAILED or CANCELLED. `trigger` AUTO or MANUAL. `onBehalfOf` = the person for manual runs. |
+| `AgentRun` | Status QUEUED → DISPATCHED/RUNNING → SUCCEEDED, FAILED or CANCELLED. A patch with `requiresApproval` goes RUNNING → AWAITING_APPROVAL → SUCCEEDED (approved) or REJECTED. `trigger` AUTO or MANUAL. `onBehalfOf` = the person for manual runs. `requiresApproval`, `approvedBy`, `approvedAt`. |
 | `LlmConfig` | `provider` = API protocol (`anthropic` or `openai`), model (default `claude-opus-5-5`), effort, base URL, enabled, and the gateway identity: `authStyle` (API_KEY = `x-api-key`, BEARER = `Authorization: Bearer`; default from the provider), `credential` (NONE, STATIC, OAUTH2, FILE) with its fields (encrypted API key; for OAUTH2 issuer or token URL, grant, client authentication, client ID, encrypted client secret, assertion file, scope, token parameters; token file), custom `headers` (for example an agent registry id). |
 | `LlmEnvironment` | `MAYDAY_LLM_*` values. A set value overrides the stored value and is read-only in the UI (`managedFields`). |
 | `GatewayAuth` | Headers for one call to the AI gateway or the tools gateway: custom headers, then the credential in the `authStyle` header. Built per call, because the token rotates. |
@@ -27,6 +27,7 @@ Agents are an add-on. Without an agent, Mayday is a complete incident management
 
 - Manual run: only a person (not an agent, not a viewer) can start it. Mayday mints a delegated token: `sub` = user, `act.sub` = `agent:<id>`, `run` = run id, 1 hour, scopes READ and WRITE. RBAC of the user applies, but never admin rights: an administrator who starts a run gives the agent no ADMIN scope. The token stops working when the run is finished (SUCCEEDED, FAILED or CANCELLED). The built-in agent uses the same scopes for manual runs.
 - Untrusted data: the built-in agent receives the task and the subject data in two separate blocks. The task text has no alert content (an alert is "the alert in the subject data"; an incident is its key). The subject data is JSON inside `<subject_data>`, with `<` and `>` escaped, so the data cannot close the tag. The system prompt says that subject data and tool results are untrusted and that the agent must not follow instructions in them.
+- Patch approval (`agents.patch_requires_approval`, default true, strictest team wins): Mayday resolves the policy for the teams of the subject when a PATCH run starts and stores it in `requiresApproval`. The run and the webhook payload carry it, and the built-in agent is told not to apply the patch. When the agent reports success, the run goes to AWAITING_APPROVAL, not SUCCEEDED, and the timeline says that the patch waits for approval. The delegated token stops working, the agent cannot report again (`conflict`) and the reaper does not touch the run. A person with write access approves (`ApproveRun` → SUCCEEDED, `approvedBy`, `approvedAt`) or rejects with a reason (`RejectRun` → REJECTED). Agents, delegated tokens and the system cannot decide (`forbidden`). A second decision is a `conflict`. Each decision goes to the timeline and the audit stream. Other actions never wait for approval. Mayday does not merge or deploy patches itself: the gate is the run state and the audit record. The agent and the code host must not apply a patch of a run that is not SUCCEEDED.
 - Automatic run: only from triggers, and only if the team policy allows it (`agents.auto_analysis` for read actions, `agents.auto_remediation` for write actions). It uses the agent's own identity and role.
 - The built-in agent is available only when the LLM provider is ready: enabled, and the credential source has its fields (STATIC: key; OAUTH2: issuer or token URL, plus client ID and secret or assertion file for client credentials, or an assertion file for token exchange; FILE: token file; NONE: nothing). Without it, buttons explain how to configure one.
 - Every LLM call and every tools-gateway call with `useAgentIdentity` sends the `GatewayAuth` headers. On HTTP 401 the adapter drops the cached token and tries once more.
@@ -57,7 +58,7 @@ Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider
 ## Positive use cases
 
 - A SEV2 alert fires at 03:00. The built-in agent analyzes it with the Grafana and GitHub MCP servers and posts its findings on the incident timeline before the on-call engineer opens the laptop.
-- An engineer presses "Create patch". The external coding agent receives a webhook with a delegated token, opens a pull request in the engineer's name and reports the link.
+- An engineer presses "Create patch". The external coding agent receives a webhook with a delegated token, opens a pull request in the engineer's name and reports the link. The run waits for approval. A teammate reviews the pull request and presses "Approve patch". The audit stream shows who approved what and when.
 - A pull agent behind a firewall claims queued runs every few seconds over gRPC or MCP (outbound connections only).
 - After resolution, an engineer presses "Draft postmortem". The agent fills all sections with `set_postmortem`.
 - In Kubernetes, Helm sets `MAYDAY_LLM_BASE_URL` to the company AI gateway, `MAYDAY_LLM_CREDENTIAL=oauth2`, the issuer and `MAYDAY_LLM_HEADERS=x-company-agent-id=...`. Mayday gets a token with workload identity from the company identity provider, refreshes it before it expires and sends the custom header on every call. The UI shows these fields as "Set by the environment".
@@ -76,6 +77,8 @@ Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider
 - The delegated user is a member. The agent tries `set_setting` (admin): the tool is not offered and the call fails.
 - During an automatic analysis, the built-in agent finds a second problem and tries `create_incident`: the tool is not offered, the call fails with `not_found`, and no incident is declared.
 - An agent tries to complete a run of another agent: `forbidden`. It completes a finished run: `conflict`.
+- An agent reports "PR #12 opened" for a patch while `agents.patch_requires_approval` is true. The run shows "Needs approval". The agent tries to report again or to use its delegated token: `conflict` and `unauthenticated`. The agent tries `ApproveRun` with its own token: `forbidden`.
+- A team turns `agents.patch_requires_approval` off, but the incident also belongs to a team where it is on: the patch waits for approval.
 - Remediation triggers exist, but `agents.auto_remediation` is false (default, and locked in the demo): no run starts.
 - The webhook endpoint is down: the run becomes FAILED with the reason on the timeline.
 - No LLM key: `unavailable` with a clear message.
@@ -86,8 +89,8 @@ Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider
 
 ## Audit
 
-Agents record `agent.created`, `.updated`, `.deleted`, `.credentials_rotated`, `run.started`, `run.claimed`, `run.succeeded`, `run.failed`, `run.cancelled`, `llm.updated` (field names only) and `mcp_server.*` to the audit stream. Each tool call of the built-in agent is recorded with the agent, the person it acts for and the run (channel `internal-agent`). See [audit.md](audit.md).
+Agents record `agent.created`, `.updated`, `.deleted`, `.credentials_rotated`, `run.started`, `run.claimed`, `run.awaiting_approval`, `run.approved`, `run.rejected` (with the reason), `run.succeeded`, `run.failed`, `run.cancelled`, `llm.updated` (field names only) and `mcp_server.*` to the audit stream. Each tool call of the built-in agent is recorded with the agent, the person it acts for and the run (channel `internal-agent`). See [audit.md](audit.md).
 
 ## Rebuild checklist
 
-Pass `AgentTest`, `DelegationLimitsTest`, `UntrustedSubjectDataTest`, `AgentIndependenceTest`, `BudgetExhaustedTest`, `GatewaySettingsTest`, `IdentityTest` (delegation), `WebhookContractTest`, `LlmProviderContractTest`, `CredentialsContractTest`, the agent and run parts of `GrpcContractTest`, and the run part of `StoreContract`.
+Pass `AgentTest`, `PatchApprovalTest`, `DelegationLimitsTest`, `UntrustedSubjectDataTest`, `AgentIndependenceTest`, `BudgetExhaustedTest`, `GatewaySettingsTest`, `IdentityTest` (delegation), `WebhookContractTest`, `LlmProviderContractTest`, `CredentialsContractTest`, the agent and run parts of `GrpcContractTest`, and the run part of `StoreContract`.

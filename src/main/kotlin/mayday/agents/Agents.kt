@@ -53,9 +53,12 @@ data class AgentConfig(
     val updatedAt: Ts,
 )
 
+/** [active]: the agent works on the run, so its delegated token is valid and the reaper watches it. */
 @Serializable
-enum class RunStatus(val terminal: Boolean) {
-    QUEUED(false), DISPATCHED(false), RUNNING(false), SUCCEEDED(true), FAILED(true), CANCELLED(true)
+enum class RunStatus(val terminal: Boolean, val active: Boolean) {
+    QUEUED(false, true), DISPATCHED(false, true), RUNNING(false, true),
+    AWAITING_APPROVAL(false, false),
+    SUCCEEDED(true, false), FAILED(true, false), CANCELLED(true, false), REJECTED(true, false),
 }
 
 @Serializable
@@ -84,6 +87,10 @@ data class AgentRun(
     val startedAt: Ts? = null,
     val finishedAt: Ts? = null,
     val traceId: String = "",
+    /** Policy `agents.patch_requires_approval` when the run started. A successful run then waits in AWAITING_APPROVAL. */
+    val requiresApproval: Boolean = false,
+    val approvedBy: Actor? = null,
+    val approvedAt: Ts? = null,
     val version: Long = 1,
 )
 

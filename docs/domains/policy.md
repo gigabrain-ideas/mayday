@@ -27,7 +27,7 @@ Policy holds the configurable rules: postmortem obligations, alert behavior, pag
 | `alerts.dedup_window_minutes` | 60 | none |
 | `agents.auto_analysis` | true | none |
 | `agents.auto_remediation` | false | false |
-| `agents.patch_requires_approval` | true | true |
+| `agents.patch_requires_approval` | true. A patch run of an agent waits in AWAITING_APPROVAL until a person approves or rejects it ([agents.md](agents.md)). | true |
 | `timeline.auto_populate` | true | none |
 | `mcp.write_enabled` | false | false |
 | `agents.exchange_admin` | false (organization only). Turning it off clears every user's opt-in, see [identity.md](identity.md). | false |

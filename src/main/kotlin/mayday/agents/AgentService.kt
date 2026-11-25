@@ -193,7 +193,7 @@ class AgentService(
     override suspend fun find(agentId: String): AgentIdentity? =
         agents.get(agentId)?.let { AgentIdentity(it.id, it.name, it.role, it.enabled) }
 
-    override suspend fun runActive(runId: String): Boolean = runs.get(runId)?.status?.terminal == false
+    override suspend fun runActive(runId: String): Boolean = runs.get(runId)?.status?.active == true
 
     suspend fun ensureInternalAgent() {
         if (agents.get(INTERNAL_AGENT_ID) != null) return
@@ -563,7 +563,7 @@ class AgentService(
         if (agent.kind == AgentKind.INTERNAL) currentPause()?.let {
             throw Unavailable("The AI gateway budget of ${agent.name} is used up. Try again after ${it.until} or use another agent.")
         }
-        val (subjectId, label) = subject(by, subjectKind, subjectRef)
+        val (subjectId, label, teams) = subject(by, subjectKind, subjectRef)
         val run = AgentRun(
             id = Ids.new(),
             agentId = agent.id,
@@ -576,6 +576,7 @@ class AgentService(
             requestedBy = by.actor,
             onBehalfOf = user.id,
             prompt = prompt.take(8000),
+            requiresApproval = approvalRequired(action, teams),
             createdAt = clock.now(),
         )
         runs.save(run, null)
@@ -594,7 +595,7 @@ class AgentService(
     }
 
     private suspend fun startTriggered(alert: Alert) {
-        val teams = listOf(alert.teamId)
+        val alertTeams = listOf(alert.teamId)
         for (agent in agents.list()) {
             if (!agent.enabled) continue
             if (agent.kind == AgentKind.INTERNAL && !internalReady()) continue
@@ -603,12 +604,13 @@ class AgentService(
                 if (t.event != TriggerEvent.ALERT_CREATED) continue
                 if (!alert.severity.atLeast(t.minSeverity)) continue
                 if (t.teamIds.isNotEmpty() && alert.teamId !in t.teamIds) continue
-                val allowed = if (t.action.writes) policy.bool(Keys.AGENT_AUTO_REMEDIATION, teams) else policy.bool(Keys.AGENT_AUTO_ANALYSIS, teams)
+                val allowed = if (t.action.writes) policy.bool(Keys.AGENT_AUTO_REMEDIATION, alertTeams) else policy.bool(Keys.AGENT_AUTO_ANALYSIS, alertTeams)
                 if (!allowed) continue
-                val (kind, id, label) = if (alert.incidentId != null) {
+                val (kind, subject) = if (alert.incidentId != null) {
                     val inc = incidents.get(Principal.system, alert.incidentId)
-                    Triple(SubjectKind.INCIDENT, inc.id, inc.key)
-                } else Triple(SubjectKind.ALERT, alert.id, alert.title.take(80))
+                    SubjectKind.INCIDENT to Subject(inc.id, inc.key, inc.teamIds)
+                } else SubjectKind.ALERT to Subject(alert.id, alert.title.take(80), alertTeams)
+                val (id, label, teams) = subject
                 val run = AgentRun(
                     id = Ids.new(),
                     agentId = agent.id,
@@ -619,10 +621,11 @@ class AgentService(
                     subjectLabel = label,
                     trigger = RunTrigger.AUTO,
                     requestedBy = Actor.system,
+                    requiresApproval = approvalRequired(t.action, teams),
                     createdAt = clock.now(),
                 )
                 runs.save(run, null)
-                audit.record(AuditCategory.AGENT, "run.started", AuditActor.system, run.target(), run.auditDetails(), teams)
+                audit.record(AuditCategory.AGENT, "run.started", AuditActor.system, run.target(), run.auditDetails(), alertTeams)
                 note(run, "${agent.name} started automatically: ${t.action.label}.")
                 start(agent, run)
             }
@@ -680,14 +683,14 @@ class AgentService(
         if (!by.isAgent) throw Forbidden("Only the agent that owns the run can complete it")
         val run = runs.get(runId) ?: throw NotFound("Agent run")
         if (run.agentId != by.actor.id) throw Forbidden("This run belongs to another agent")
-        if (run.status.terminal) throw Conflict("The run is already finished")
+        if (!run.status.active) throw Conflict("The run is already finished")
         return finish(runId, if (success) RunStatus.SUCCEEDED else RunStatus.FAILED, output, error, by.audit())
     }
 
     suspend fun progress(by: Principal, runId: String, text: String): AgentRun {
         val run = runs.get(runId) ?: throw NotFound("Agent run")
         if (run.agentId != by.actor.id) throw Forbidden("This run belongs to another agent")
-        if (run.status.terminal) throw Conflict("The run is already finished")
+        if (!run.status.active) throw Conflict("The run is already finished")
         val next = transition(runId) { it.copy(status = RunStatus.RUNNING, startedAt = it.startedAt ?: clock.now()) }
         if (text.isNotBlank()) note(run, text.trim(), Actor(ActorKind.AGENT, run.agentId, run.agentName, run.onBehalfOf))
         return next
@@ -699,6 +702,36 @@ class AgentService(
         if (run.status.terminal) return run
         return finish(runId, RunStatus.CANCELLED, run.output, "Cancelled by ${by.actor.name}", by.audit())
     }
+
+    /**
+     * A person accepts the patch of an agent. Only then the run is SUCCEEDED. Agents, delegated tokens and system calls cannot approve,
+     * so the decision is always a recorded human decision.
+     */
+    suspend fun approve(by: Principal, runId: String): AgentRun {
+        val run = awaitingDecision(by, runId)
+        val done = transition(runId) { decided(it).copy(status = RunStatus.SUCCEEDED, approvedBy = by.actor, approvedAt = clock.now(), finishedAt = clock.now()) }
+        audit.record(AuditCategory.AGENT, "run.approved", by.audit(), done.target(), done.auditDetails())
+        note(done, "${by.actor.name} approved the patch of ${run.agentName}.", by.actor)
+        return done
+    }
+
+    suspend fun reject(by: Principal, runId: String, reason: String): AgentRun {
+        val run = awaitingDecision(by, runId)
+        val why = reason.trim().take(2000)
+        val done = transition(runId) { decided(it).copy(status = RunStatus.REJECTED, error = "Rejected by ${by.actor.name}: $why".take(4000), finishedAt = clock.now()) }
+        audit.record(AuditCategory.AGENT, "run.rejected", by.audit(), done.target(), done.auditDetails() + ("reason" to why))
+        note(done, "${by.actor.name} rejected the patch of ${run.agentName}: $why", by.actor)
+        return done
+    }
+
+    private suspend fun awaitingDecision(by: Principal, runId: String): AgentRun {
+        Access.requireWrite(by)
+        if (by.user == null || by.isAgent || by.isDelegated) throw Forbidden("Only a person can approve or reject a patch")
+        val run = runs.get(runId) ?: throw NotFound("Agent run")
+        return decided(run)
+    }
+
+    private fun decided(run: AgentRun) = run.takeIf { it.status == RunStatus.AWAITING_APPROVAL } ?: throw Conflict("The run does not wait for approval")
 
     /** Mark runs that stopped reporting as failed so the queue does not grow without bound. */
     suspend fun reapStale(maxAge: Duration) {
@@ -766,12 +799,16 @@ class AgentService(
     }
 
     private suspend fun finish(runId: String, status: RunStatus, output: String, error: String, by: AuditActor? = null): AgentRun {
-        val done = transition(runId) { it.copy(status = status, output = output.take(100_000), error = error.take(4000), finishedAt = clock.now()) }
-        audit.record(AuditCategory.AGENT, "run.${status.name.lowercase()}", by ?: done.agentActor(), done.target(), done.auditDetails(),
+        val done = transition(runId) {
+            val next = if (status == RunStatus.SUCCEEDED && it.requiresApproval) RunStatus.AWAITING_APPROVAL else status
+            it.copy(status = next, output = output.take(100_000), error = error.take(4000), finishedAt = if (next.terminal) clock.now() else null)
+        }
+        audit.record(AuditCategory.AGENT, "run.${done.status.name.lowercase()}", by ?: done.agentActor(), done.target(), done.auditDetails(),
             outcome = if (status == RunStatus.FAILED) AuditOutcome.FAILURE else AuditOutcome.SUCCESS)
         val agentActor = Actor(ActorKind.AGENT, done.agentId, done.agentName, done.onBehalfOf)
-        when (status) {
+        when (done.status) {
             RunStatus.SUCCEEDED -> if (output.isNotBlank()) note(done, output.take(20_000), agentActor)
+            RunStatus.AWAITING_APPROVAL -> note(done, "${output.take(20_000)}\n\nThis patch waits for approval. A person must approve or reject it in Mayday.".trimStart(), agentActor)
             RunStatus.FAILED -> note(done, "${done.agentName} failed: ${error.take(500)}", agentActor)
             else -> Unit
         }
@@ -799,10 +836,15 @@ class AgentService(
         }
     }
 
-    private suspend fun subject(by: Principal, kind: SubjectKind, ref: String): Pair<String, String> = when (kind) {
-        SubjectKind.INCIDENT -> incidents.get(by, ref).let { it.id to it.key }
-        SubjectKind.ALERT -> alerts.get(by, ref).let { it.id to it.title.take(80) }
+    private data class Subject(val id: String, val label: String, val teamIds: List<String>)
+
+    private suspend fun subject(by: Principal, kind: SubjectKind, ref: String): Subject = when (kind) {
+        SubjectKind.INCIDENT -> incidents.get(by, ref).let { Subject(it.id, it.key, it.teamIds) }
+        SubjectKind.ALERT -> alerts.get(by, ref).let { Subject(it.id, it.title.take(80), listOf(it.teamId)) }
     }
+
+    private suspend fun approvalRequired(action: AgentAction, teams: List<String>) =
+        action == AgentAction.PATCH && policy.bool(Keys.AGENT_PATCH_APPROVAL, teams)
 
     private suspend fun snapshot(run: AgentRun): JsonObject = when (run.subjectKind) {
         SubjectKind.INCIDENT -> {
@@ -835,5 +877,7 @@ private fun AgentRun.auditDetails() = buildMap {
     put("agent", agentId); put("action", action.name); put("trigger", trigger.name)
     put("subject", "${subjectKind.name.lowercase()}:$subjectId"); put("subjectLabel", subjectLabel)
     onBehalfOf?.let { put("onBehalfOf", it) }
+    if (requiresApproval) put("requiresApproval", "true")
+    approvedBy?.let { put("approvedBy", it.id) }
 }
 private fun AgentRun.agentActor() = AuditActor(AuditParty("agent", agentId, agentName), onBehalfOf?.let { AuditParty("user", it) }, runId = id)

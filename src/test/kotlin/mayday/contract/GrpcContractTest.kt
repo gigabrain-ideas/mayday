@@ -586,7 +586,16 @@ class GrpcContractTest : ServerContract() {
         eventually { runs.getRun(id(run.id), auth("viewer")).status == RunStatus.RUN_STATUS_DISPATCHED }
 
         val done = runs.completeRun(CompleteRunRequest.newBuilder().setId(run.id).setSuccess(true).setOutput("PR #12").build(), bearer(creds.token.secret))
-        assertEquals(RunStatus.RUN_STATUS_SUCCEEDED, done.status)
+        assertTrue(run.requiresApproval)
+        assertEquals(RunStatus.RUN_STATUS_AWAITING_APPROVAL, done.status)
+        assertStatus(Status.Code.UNAUTHENTICATED, null) { authn.whoAmI(empty, bearer(obo)) }
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { runs.approveRun(id(run.id), bearer(creds.token.secret)) }
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { runs.approveRun(id(run.id), auth("viewer")) }
+        val approved = runs.approveRun(id(run.id), auth("member"))
+        assertEquals(RunStatus.RUN_STATUS_SUCCEEDED, approved.status)
+        assertEquals(userOf("member").id, approved.approvedBy.id)
+        assertTrue(approved.hasApprovedAt())
+        assertStatus(Status.Code.ABORTED, "conflict") { runs.rejectRun(RejectRunRequest.newBuilder().setId(run.id).setReason("late").build(), auth("member")) }
         val listed = runs.listRuns(ListRunsRequest.newBuilder().setSubjectKind(SubjectKind.SUBJECT_KIND_INCIDENT).setSubjectRef(i.key).build(), auth("viewer"))
         assertEquals(listOf(run.id), listed.itemsList.map { it.id })
         assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") {

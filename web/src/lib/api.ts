@@ -34,7 +34,8 @@ export const ACTION_LABEL: Record<AgentAction, string> = {
   POSTMORTEM: "Draft postmortem",
   RUNBOOK: "Generate runbook",
 };
-export type RunStatus = "QUEUED" | "DISPATCHED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+export type RunStatus = "QUEUED" | "DISPATCHED" | "RUNNING" | "AWAITING_APPROVAL" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "REJECTED";
+export const FINISHED_RUN: RunStatus[] = ["SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"];
 export type Scope = "ORG" | "PROJECT" | "TEAM";
 export type Enforcement = "NONE" | "MINIMUM" | "LOCKED";
 
@@ -107,6 +108,7 @@ export interface AgentRun {
   id: string; agentId: string; agentName: string; action: AgentAction; subjectKind: "INCIDENT" | "ALERT"; subjectId: string;
   subjectLabel: string; status: RunStatus; trigger: "AUTO" | "MANUAL"; requestedBy: Actor; onBehalfOf?: string; prompt: string;
   output: string; error: string; createdAt: string; startedAt?: string; finishedAt?: string; traceId?: string;
+  requiresApproval: boolean; approvedBy?: Actor; approvedAt?: string;
 }
 export type LlmProvider = "anthropic" | "openai";
 export type AuthStyle = "API_KEY" | "BEARER";

@@ -23,7 +23,7 @@ gRPC reflection and the standard gRPC health service (`grpc.health.v1.Health`) a
 | `reporting.proto` | `ReportService` | `GetReport` |
 | `policy.proto` | `PolicyService` | `GetSettings`, `SetSetting`, `ClearSetting`, `ListChangeRequests`, `RequestChange`, `DecideChange` |
 | `agents.proto` | `AgentService` | `ListAgents`, `ListEligibleAgents`, `GetAgent`, `CreateAgent`, `UpdateAgent`, `DeleteAgent`, `RotateAgentCredentials` (secrets in the response only), `GetLlm`, `UpdateLlm`, `ListMcpServers`, `SaveMcpServer`, `DeleteMcpServer` |
-| `agents.proto` | `AgentRunService` | `ListRuns`, `GetRun`, `StartRun`, `CancelRun`, `ClaimRuns`, `ReportProgress`, `CompleteRun` |
+| `agents.proto` | `AgentRunService` | `ListRuns`, `GetRun`, `StartRun`, `CancelRun`, `ClaimRuns`, `ReportProgress`, `CompleteRun`, `ApproveRun`, `RejectRun` |
 | `audit.proto` | `AuditService` | `GetAuditStatus` (administrators): instance, reads switch, accepted and lost records, per sink delivered, pending, failures, lost and last error. See [audit.md](domains/audit.md) |
 | `events.proto` | `EventService` | `Subscribe` (server stream): `incident.*`, `alert.*`, `agent_run.updated`, `setting.changed`, `oncall.changed`, `escalation.changed`, `alert.paged`, `alert.escalation_exhausted`, and `ping` every 25 seconds |
 
@@ -153,7 +153,7 @@ Body:
 ```json
 {
   "event": "agent_run.requested",
-  "run": { "id": "...", "action": "PATCH", "subjectKind": "INCIDENT", "subjectLabel": "INC-42", "prompt": "...", "onBehalfOf": "<user id>" },
+  "run": { "id": "...", "action": "PATCH", "subjectKind": "INCIDENT", "subjectLabel": "INC-42", "prompt": "...", "onBehalfOf": "<user id>", "requiresApproval": true },
   "maydayUrl": "https://mayday.example.com",
   "mcpUrl": "https://mayday.example.com/mcp",
   "delegatedToken": "<JWT or null for automatic runs>",
@@ -167,6 +167,7 @@ The receiver must:
 2. Answer 2xx quickly. Mayday makes up to three attempts on network errors, 429 and 5xx.
 3. Use `delegatedToken` (when present) for MCP and gRPC calls. Otherwise use its own agent token. The delegated token has the scopes `read` and `write` and stops working when the run is finished.
 4. Report with the MCP tool `report_agent_run`, or with `AgentRunService.ReportProgress` and `AgentRunService.CompleteRun` `{id, success, output, error}`.
+5. When `run.requiresApproval` is true (policy `agents.patch_requires_approval`), do not merge or deploy the patch. A successful report moves the run to `AWAITING_APPROVAL` and ends the delegated token. A person approves (`AgentRunService.ApproveRun`) or rejects (`AgentRunService.RejectRun {id, reason}`) it in Mayday. Apply the patch only after the run is `SUCCEEDED` with `approvedBy` set.
 
 ## Page webhook
 

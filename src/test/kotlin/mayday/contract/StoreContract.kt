@@ -247,6 +247,16 @@ abstract class StoreContract {
     }
 
     @Test
+    fun `runs that wait for approval or are finished are not active`() = suspendTest {
+        val working = run("a1", now); val waiting = run("a1", now).copy(status = RunStatus.AWAITING_APPROVAL, requiresApproval = true)
+        val done = run("a1", now).copy(status = RunStatus.REJECTED)
+        listOf(working, waiting, done).forEach { p.runs.save(it, null) }
+        assertEquals(listOf(working.id), p.runs.active().map { it.id })
+        assertEquals(RunStatus.AWAITING_APPROVAL, p.runs.get(waiting.id)!!.status)
+        assertTrue(p.runs.get(waiting.id)!!.requiresApproval)
+    }
+
+    @Test
     fun `concurrent claims never hand out a run twice`() = suspendTest {
         repeat(40) { p.runs.save(run("a1", now.minusSeconds(it.toLong())), null) }
         val got = java.util.concurrent.ConcurrentLinkedQueue<String>()

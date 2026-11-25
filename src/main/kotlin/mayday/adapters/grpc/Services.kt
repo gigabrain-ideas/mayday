@@ -458,6 +458,11 @@ class AgentRunGrpc(private val auth: Authenticator, private val app: App) : Agen
 
     override suspend fun completeRun(request: CompleteRunRequest): AgentRun =
         agents.complete(auth.caller(), request.id, request.success, request.output, request.error).into(AgentRun.newBuilder()).build()
+
+    override suspend fun approveRun(request: IdRequest): AgentRun = agents.approve(auth.caller(), request.id).into(AgentRun.newBuilder()).build()
+
+    override suspend fun rejectRun(request: RejectRunRequest): AgentRun =
+        agents.reject(auth.caller(), request.id, request.reason).into(AgentRun.newBuilder()).build()
 }
 
 @Serializable private data class AuditStatusView(

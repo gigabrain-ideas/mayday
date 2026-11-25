@@ -28,7 +28,7 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 | Route | Content |
 |---|---|
 | `/incidents` | Open or all, filters by severity and team, search, keyset "load more", "Declare incident" |
-| `/incidents/:key` | Status, severity and teams; tabs Timeline, Resolution, Postmortem, Runbook, Agent runs; agent buttons; details with editable times; linked alerts |
+| `/incidents/:key` | Status, severity and teams; tabs Timeline, Resolution, Postmortem, Runbook, Agent runs (a patch that needs approval shows "Approve patch" and "Reject" with a reason); agent buttons; details with editable times; linked alerts |
 | `/alerts`, `/alerts/:id` | Alert list and detail with acknowledge, resolve, updates, link to incident, agent buttons, escalation (status, pages per level, time of the next level, "Escalate now") |
 | `/oncall?team=<slug>` | Who is on call now for each schedule; for one team: schedules with a 14-day plan (overrides in yellow, nobody on call in red), overrides (add, remove), members (team owners add, remove and promote; locked when identity provider groups manage the team). Team members can add only themselves as override. Escalation policies of the team: levels with schedules and people, minutes to acknowledge, repeat, team default (team owners create, change and delete). |
 | `/reports` | Period presets and custom range, multi-select teams and severities, stat tiles, chart, team table, longest incidents |

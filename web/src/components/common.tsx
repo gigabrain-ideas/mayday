@@ -30,6 +30,8 @@ export function RunStatusBadge({ status }: { status: RunStatus }) {
   if (status === "SUCCEEDED") return <Badge tone="success"><CircleCheck />Done</Badge>;
   if (status === "FAILED") return <Badge tone="critical"><CircleAlert />Failed</Badge>;
   if (status === "CANCELLED") return <Badge tone="outline">Cancelled</Badge>;
+  if (status === "REJECTED") return <Badge tone="outline">Rejected</Badge>;
+  if (status === "AWAITING_APPROVAL") return <Badge tone="warning"><CircleDot />Needs approval</Badge>;
   return <Badge tone="warning"><CircleDot className="animate-pulse" />{titleCase(status)}</Badge>;
 }
 

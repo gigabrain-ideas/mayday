@@ -346,7 +346,7 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
 
         override suspend fun bySubject(subjectId: String) = runsC.map.values.filter { it.subjectId == subjectId }
         override suspend fun recent(limit: Int) = runsC.map.values.sortedByDescending { it.createdAt }.take(limit)
-        override suspend fun active() = runsC.map.values.filter { !it.status.terminal }
+        override suspend fun active() = runsC.map.values.filter { it.status.active }
 
         override suspend fun claim(agentId: String, limit: Int, at: Instant): List<AgentRun> = synchronized(this) {
             runsC.map.values.filter { it.agentId == agentId && it.status == RunStatus.QUEUED }

@@ -46,6 +46,9 @@ enum RunStatus {
   RUN_STATUS_SUCCEEDED = 4;
   RUN_STATUS_FAILED = 5;
   RUN_STATUS_CANCELLED = 6;
+  // The agent reported a patch. Policy agents.patch_requires_approval holds it until a person approves or rejects it.
+  RUN_STATUS_AWAITING_APPROVAL = 7;
+  RUN_STATUS_REJECTED = 8;
 }
 
 enum RunTrigger {
@@ -138,6 +141,10 @@ message AgentRun {
   google.protobuf.Timestamp finished_at = 17;
   // OpenTelemetry trace of the run. Empty when tracing is off.
   string trace_id = 18;
+  // Policy agents.patch_requires_approval when the run started. Agents must not apply the patch before approval.
+  bool requires_approval = 19;
+  optional Actor approved_by = 20;
+  google.protobuf.Timestamp approved_at = 21;
 }
 
 message AgentRuns {
@@ -177,6 +184,11 @@ message ClaimedRuns {
 message RunProgressRequest {
   string id = 1;
   string text = 2;
+}
+
+message RejectRunRequest {
+  string id = 1;
+  string reason = 2;
 }
 
 message CompleteRunRequest {
@@ -339,4 +351,7 @@ service AgentRunService {
   rpc ClaimRuns(ClaimRunsRequest) returns (ClaimedRuns);
   rpc ReportProgress(RunProgressRequest) returns (AgentRun);
   rpc CompleteRun(CompleteRunRequest) returns (AgentRun);
+  // A person only. The run must be AWAITING_APPROVAL.
+  rpc ApproveRun(IdRequest) returns (AgentRun);
+  rpc RejectRun(RejectRunRequest) returns (AgentRun);
 }

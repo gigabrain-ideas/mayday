@@ -439,7 +439,8 @@ class AgentTest {
         assertEquals(f.memberUser.id, p.user!!.id)
         assertEquals(run.id, p.runId)
         f.app.agents.complete(f.app.identity.authenticate(creds.token!!.secret), run.id, true, "PR #12 opened", "")
-        assertEquals(RunStatus.SUCCEEDED, f.app.agents.run(f.viewer, run.id).status)
+        assertEquals(RunStatus.AWAITING_APPROVAL, f.app.agents.run(f.viewer, run.id).status)
+        assertEquals(RunStatus.SUCCEEDED, f.app.agents.approve(f.member, run.id).status)
     }
 
     @Test
