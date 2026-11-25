@@ -245,6 +245,18 @@ class GrpcContractTest : ServerContract() {
     }
 
     @Test
+    fun `the firing count is exact and follows ingest and acknowledge`() = suspendTest {
+        val firing = ListAlertsRequest.newBuilder().addStatus(AlertStatus.ALERT_STATUS_FIRING).addTeam("checkout").build()
+        val before = alerts.countAlerts(firing, auth("viewer")).count
+        val a = alerts.ingestAlert(AlertSignal.newBuilder().setTitle("Queue lag ${unique()}").setSeverity(Severity.SEVERITY_SEV4).setTeam("checkout").build(), auth("member")).alert
+        assertEquals(before + 1, alerts.countAlerts(firing, auth("viewer")).count)
+        alerts.acknowledgeAlert(id(a.id), auth("member"))
+        assertEquals(before, alerts.countAlerts(firing, auth("viewer")).count)
+        assertStatus(Status.Code.UNAUTHENTICATED, "unauthenticated") { alerts.countAlerts(firing) }
+        assertStatus(Status.Code.NOT_FOUND, "not_found") { alerts.countAlerts(firing.toBuilder().addTeam("no-such-team").build(), auth("viewer")) }
+    }
+
+    @Test
     fun `severe alerts open an incident`() = suspendTest {
         val r = alerts.ingestAlert(AlertSignal.newBuilder().setTitle("DB down ${unique()}").setSeverity(Severity.SEVERITY_SEV1).setTeam("checkout").build(), auth("member"))
         assertTrue(r.hasIncidentKey())

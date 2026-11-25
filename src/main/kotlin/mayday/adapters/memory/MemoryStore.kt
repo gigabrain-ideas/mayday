@@ -314,6 +314,8 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
         override suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit) =
             alertOrder.values.asSequence().mapNotNull { alertsC.map[it] }.filter { matches(it, filter) }.forEach(consumer)
 
+        override suspend fun count(filter: AlertFilter) = alertsC.map.values.count { matches(it, filter) }.toLong()
+
         private fun matches(a: Alert, f: AlertFilter): Boolean {
             if (f.statuses.isNotEmpty() && a.status !in f.statuses) return false
             if (f.severities.isNotEmpty() && a.severity !in f.severities) return false

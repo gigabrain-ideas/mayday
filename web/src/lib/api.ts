@@ -292,11 +292,17 @@ export const items = <T>(p: Promise<{ items: T[] }>) => p.then((r) => r.items);
 
 export interface LiveEvent { type: string; subjectId: string; at?: string; teamIds: string[]; data: Record<string, string> }
 
-/** Live domain events. Pings are dropped. The iteration ends when the stream ends or the signal aborts. */
+/**
+ * Live domain events. The first ping of each stream becomes "live.connected": events sent while the stream was down are lost,
+ * so pages reload on it. Other pings are dropped. The iteration ends when the stream ends or the signal aborts.
+ */
 export async function* subscribeEvents(signal: AbortSignal): AsyncGenerator<LiveEvent> {
   const client = createClient(EventService, transport);
+  let connected = false;
   for await (const e of client.subscribe({}, { signal })) {
     if (e.type !== "ping") yield fromMessage<LiveEvent>(EventSchema, e);
+    else if (!connected) yield { type: "live.connected", subjectId: "", teamIds: [], data: {} };
+    connected = true;
   }
 }
 

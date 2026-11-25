@@ -13,7 +13,10 @@ function ensureLive() {
       try {
         for await (const e of subscribeEvents(ctl.signal)) listeners.forEach((l) => l(e));
       } catch { /* reconnect below */ }
-      if (!ctl.signal.aborted) await new Promise((r) => setTimeout(r, 3000));
+      if (ctl.signal.aborted) break;
+      const down: LiveEvent = { type: "live.disconnected", subjectId: "", teamIds: [], data: {} };
+      listeners.forEach((l) => l(down));
+      await new Promise((r) => setTimeout(r, 3000));
     }
   })();
 }

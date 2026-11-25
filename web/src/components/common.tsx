@@ -61,6 +61,18 @@ export function DictateButton({ onText }: { onText: (t: string) => void }) {
   );
 }
 
+/** A load that failed. Never show an empty list in its place: the data is unknown, not empty. */
+export function LoadFailed({ what, error, onRetry }: { what: string; error?: { message: string }; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-6 py-10 text-center" role="alert">
+      <CircleAlert className="size-6 text-destructive" />
+      <div className="font-medium">Mayday could not load the {what}</div>
+      <p className="max-w-md text-[12px] text-muted-foreground">{error?.message || "The server did not answer."} Mayday tries again when the connection is back.</p>
+      <Button size="sm" variant="outline" onClick={onRetry}>Try again</Button>
+    </div>
+  );
+}
+
 export function PageHeader({ title, eyebrow, actions, children }: { title: React.ReactNode; eyebrow?: React.ReactNode; actions?: React.ReactNode; children?: React.ReactNode }) {
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">

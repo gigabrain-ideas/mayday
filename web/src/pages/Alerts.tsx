@@ -5,7 +5,7 @@ import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { ago } from "@/lib/utils";
 import { Card, Empty, MultiSelect, Spinner, Table, Td, Th } from "@/components/ui";
-import { AlertStatusBadge, PageHeader, SeverityBadge } from "@/components/common";
+import { AlertStatusBadge, LoadFailed, PageHeader, SeverityBadge } from "@/components/common";
 
 export function AlertsPage() {
   const [params, setParams] = useSearchParams();
@@ -14,8 +14,8 @@ export function AlertsPage() {
   const status = (params.get("status")?.split(",").filter(Boolean) ?? ["FIRING", "ACKNOWLEDGED"]) as AlertStatus[];
   const severity = (params.get("severity")?.split(",").filter(Boolean) ?? []) as Severity[];
   const team = params.get("team")?.split(",").filter(Boolean) ?? [];
-  const { data, loading, reload } = useQuery(() => rpc.alerts.listAlerts<Page<Alert>>({ status, severity, team, limit: 100 }), [status.join(), severity.join(), team.join()]);
-  useLive((t) => t.startsWith("alert."), reload);
+  const { data, error, loading, reload } = useQuery(() => rpc.alerts.listAlerts<Page<Alert>>({ status, severity, team, limit: 100 }), [status.join(), severity.join(), team.join()]);
+  useLive((t) => t.startsWith("alert.") || t === "live.connected", reload);
   const set = (k: string, v: string[]) => {
     const n = new URLSearchParams(params);
     n.set(k, v.join(","));
@@ -24,7 +24,7 @@ export function AlertsPage() {
 
   return (
     <>
-      <PageHeader title="Alerts" eyebrow={`${data?.items.length ?? 0} shown`} />
+      <PageHeader title="Alerts" eyebrow={error ? "Not loaded" : data ? `${data.items.length} shown` : "Loading"} />
       <div className="mb-4 flex flex-wrap gap-2">
         <MultiSelect label="Status" value={status} onChange={(v) => set("status", v)}
           options={(["FIRING", "ACKNOWLEDGED", "RESOLVED"] as AlertStatus[]).map((s) => ({ value: s, label: s.charAt(0) + s.slice(1).toLowerCase() }))} />
@@ -32,7 +32,7 @@ export function AlertsPage() {
         <MultiSelect label="Team" value={team} onChange={(v) => set("team", v)} options={teams.map((t) => ({ value: t.slug, label: t.name }))} />
       </div>
       <Card>
-        {loading && !data ? <div className="flex justify-center p-10"><Spinner /></div> : !data?.items.length ? (
+        {error ? <LoadFailed what="alerts" error={error} onRetry={reload} /> : loading && !data ? <div className="flex justify-center p-10"><Spinner /></div> : !data?.items.length ? (
           <Empty icon={<BellOff />} title="No alerts">Send alerts with the API, the Alertmanager webhook or the MCP tool <code>send_alert</code>.</Empty>
         ) : (
           <Table>

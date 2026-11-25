@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router";
 import { BarChart3, Bell, CalendarClock, LifeBuoy, LogOut, Menu, Moon, Settings, Siren, Sun, X } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { useLive } from "@/lib/hooks";
-import { rpc, type Page, type Alert } from "@/lib/api";
+import { rpc } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 function useTheme() {
@@ -26,10 +26,12 @@ export function Layout({ children }: { children: ReactNode }) {
   const theme = useTheme();
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
-  const [firing, setFiring] = useState(0);
-  const loadFiring = () => rpc.alerts.listAlerts<Page<Alert>>({ status: ["FIRING"], limit: 100 }).then((p) => setFiring(p.items.length)).catch(() => {});
+  /** Exact number of firing alerts. Null when unknown (the server did not answer): never show a number that may be stale. */
+  const [firing, setFiring] = useState<number | null>(null);
+  const loadFiring = () => rpc.alerts.countAlerts<{ count: number | string }>({ status: ["FIRING"] }).then((r) => setFiring(Number(r.count)), () => setFiring(null));
   useEffect(() => { loadFiring(); }, []);
-  useLive((t) => t.startsWith("alert."), loadFiring);
+  useLive((t) => t.startsWith("alert.") || t === "live.connected", loadFiring);
+  useLive((t) => t === "live.disconnected", () => setFiring(null));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -75,7 +77,7 @@ export function Layout({ children }: { children: ReactNode }) {
         >
           <i.icon className="size-5" strokeWidth={2} />
           <span className="flex-1">{i.label}</span>
-          {!!i.count && <span className="rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-white">{i.count}</span>}
+          {!!i.count && <span className="rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-white" aria-label={`${i.count} firing`}>{i.count.toLocaleString()}</span>}
         </NavLink>
       ))}
       <div className="mt-auto space-y-1 border-t pt-3">

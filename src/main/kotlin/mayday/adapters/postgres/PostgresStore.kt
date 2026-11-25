@@ -103,6 +103,7 @@ class PostgresStore(val pool: Pool) {
             s.execute("create index if not exists alerts_fp on alerts (fingerprint, first_seen_at desc)")
             s.execute("create index if not exists alerts_order on alerts (first_seen_at desc, id desc)")
             s.execute("create index if not exists alerts_team on alerts (team_id, first_seen_at desc)")
+            s.execute("create index if not exists alerts_status on alerts (status, team_id)")
             s.execute("""create table if not exists agent_runs (
                 id text primary key, agent_id text not null, subject_id text not null, status text not null,
                 created_at timestamptz not null, version bigint not null, doc jsonb not null)""")
@@ -356,6 +357,12 @@ class PostgresStore(val pool: Pool) {
         override suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit) {
             val args = mutableListOf<Any?>()
             stream("select doc from alerts where ${alertWhere(filter, args)}", args, ser, consumer)
+        }
+
+        override suspend fun count(filter: AlertFilter): Long {
+            val args = mutableListOf<Any?>()
+            val where = alertWhere(filter, args)
+            return query("select count(*) from alerts where $where", *args.toTypedArray()) { it.getLong(1) }.first()
         }
     }
 

@@ -294,17 +294,23 @@ class AlertGrpc(private val auth: Authenticator, private val app: App) : AlertSe
 
     override suspend fun listAlerts(request: ListAlertsRequest): AlertPage {
         val p = auth.caller()
-        val filter = mayday.alerting.AlertFilter(
-            statuses = request.statusList.mapNotNull { it.toDomain<DAlertStatus>() }.toSet(),
-            severities = request.severityList.mapNotNull { it.toDomain<DSeverity>() }.toSet(),
-            teamIds = request.teamList.map { app.directory.team(it).id }.toSet(),
-            query = if (request.hasQ()) request.q else null,
-            from = request.from.instant(request.hasFrom()),
-            to = request.to.instant(request.hasTo()),
-        )
-        return alerts.list(p, filter, if (request.hasCursor()) request.cursor else null, request.limit.orDefault(50))
+        return alerts.list(p, filter(request), if (request.hasCursor()) request.cursor else null, request.limit.orDefault(50))
             .into(AlertPage.newBuilder()).build()
     }
+
+    override suspend fun countAlerts(request: ListAlertsRequest): AlertCount {
+        val p = auth.caller()
+        return AlertCount.newBuilder().setCount(alerts.count(p, filter(request))).build()
+    }
+
+    private suspend fun filter(request: ListAlertsRequest) = mayday.alerting.AlertFilter(
+        statuses = request.statusList.mapNotNull { it.toDomain<DAlertStatus>() }.toSet(),
+        severities = request.severityList.mapNotNull { it.toDomain<DSeverity>() }.toSet(),
+        teamIds = request.teamList.map { app.directory.team(it).id }.toSet(),
+        query = if (request.hasQ()) request.q else null,
+        from = request.from.instant(request.hasFrom()),
+        to = request.to.instant(request.hasTo()),
+    )
 
     override suspend fun ingestAlert(request: AlertSignal): IngestResult {
         val signal = request.decode<mayday.alerting.AlertSignal>().let { it.copy(source = it.source.ifBlank { "api" }) }

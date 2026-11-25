@@ -78,6 +78,10 @@ message ListAlertsRequest {
   int32 limit = 8;
 }
 
+message AlertCount {
+  int64 count = 1;
+}
+
 message AlertTextRequest {
   string id = 1;
   string text = 2;
@@ -91,6 +95,8 @@ message LinkAlertRequest {
 
 service AlertService {
   rpc ListAlerts(ListAlertsRequest) returns (AlertPage);
+  // Exact number of alerts that match the filter. cursor and limit are ignored.
+  rpc CountAlerts(ListAlertsRequest) returns (AlertCount);
   rpc IngestAlert(AlertSignal) returns (IngestResult);
   rpc GetAlert(IdRequest) returns (Alert);
   rpc AcknowledgeAlert(IdRequest) returns (Alert);

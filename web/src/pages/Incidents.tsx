@@ -7,7 +7,7 @@ import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { ago, between, cn, fromLocalInput } from "@/lib/utils";
 import { Button, Card, Dialog, DialogContent, Empty, Field, Input, MultiSelect, NativeSelect, Spinner, Table, Td, Textarea, Th } from "@/components/ui";
-import { DictateButton, IncidentStatusBadge, PageHeader, SeverityBadge } from "@/components/common";
+import { DictateButton, IncidentStatusBadge, LoadFailed, PageHeader, SeverityBadge } from "@/components/common";
 
 export function IncidentsPage() {
   const [params, setParams] = useSearchParams();
@@ -21,8 +21,8 @@ export function IncidentsPage() {
   const [cursor, setCursor] = useState<string | undefined>();
   const filter = { open: scope === "open", severity, team, q: params.get("q") || undefined, limit: 50 };
   const list = (cursor?: string) => rpc.incidents.listIncidents<Page<Incident>>({ ...filter, cursor });
-  const { data, loading, reload } = useQuery(() => list(), [JSON.stringify(filter)]);
-  useLive((t) => t.startsWith("incident."), () => { setExtra([]); reload(); });
+  const { data, error, loading, reload } = useQuery(() => list(), [JSON.stringify(filter)]);
+  useLive((t) => t.startsWith("incident.") || t === "live.connected", () => { setExtra([]); reload(); });
 
   const set = (k: string, v: string | string[]) => {
     const n = new URLSearchParams(params);
@@ -60,7 +60,7 @@ export function IncidentsPage() {
         </form>
       </div>
       <Card>
-        {loading && !data ? (
+        {error ? <LoadFailed what="incidents" error={error} onRetry={reload} /> : loading && !data ? (
           <div className="flex justify-center p-10"><Spinner /></div>
         ) : items.length === 0 ? (
           <Empty icon={<Siren />} title={scope === "open" ? "No open incidents" : "No incidents match"}>

@@ -19,7 +19,7 @@ gRPC reflection and the standard gRPC health service (`grpc.health.v1.Health`) a
 | `oncall.proto` | `OnCallService` | `ListSchedules`, `GetSchedule`, `CreateSchedule`, `UpdateSchedule` (with `version`), `DeleteSchedule`, `ListOverrides`, `CreateOverride`, `DeleteOverride`, `ListShifts` (rotation with overrides, window at most 93 days), `GetOnCall`. See [oncall.md](domains/oncall.md) |
 | `escalation.proto` | `EscalationService` | `ListPolicies`, `GetPolicy`, `CreatePolicy`, `UpdatePolicy` (with `version`), `DeletePolicy` (team owners), `GetEscalation` (by alert id), `EscalateNow` (WRITE). See [escalation.md](domains/escalation.md) |
 | `incidents.proto` | `IncidentService` | `ListIncidents` (keyset: `cursor`, `next_cursor`), `DeclareIncident`, `GetIncident` (`ref` = key, number or id), `UpdateIncident` (with `version`), `ListTimeline`, `AddTimelineEntry`, `SavePostmortem`, `SaveResolution`, `SaveRunbook` |
-| `alerting.proto` | `AlertService` | `ListAlerts`, `IngestAlert`, `GetAlert`, `AcknowledgeAlert`, `ResolveAlert`, `AddAlertUpdate`, `LinkAlert` |
+| `alerting.proto` | `AlertService` | `ListAlerts`, `CountAlerts` (exact number for the same filter; the sidebar badge), `IngestAlert`, `GetAlert`, `AcknowledgeAlert`, `ResolveAlert`, `AddAlertUpdate`, `LinkAlert` |
 | `reporting.proto` | `ReportService` | `GetReport` |
 | `policy.proto` | `PolicyService` | `GetSettings`, `SetSetting`, `ClearSetting`, `ListChangeRequests`, `RequestChange`, `DecideChange` |
 | `agents.proto` | `AgentService` | `ListAgents`, `ListEligibleAgents`, `GetAgent`, `CreateAgent`, `UpdateAgent`, `DeleteAgent`, `RotateAgentCredentials` (secrets in the response only), `GetLlm`, `UpdateLlm`, `ListMcpServers`, `SaveMcpServer`, `DeleteMcpServer` |

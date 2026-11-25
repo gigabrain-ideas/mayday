@@ -160,6 +160,18 @@ abstract class StoreContract {
     }
 
     @Test
+    fun `alerts count exactly with the filter, beyond one page`() = suspendTest {
+        val firing = (0 until 130).map { alert("c$it", now.minusSeconds(it.toLong()), team = if (it % 2 == 0) "a" else "b") }
+        firing.forEach { p.alerts.save(it, null) }
+        listOf(AlertStatus.ACKNOWLEDGED, AlertStatus.RESOLVED).forEach { s -> p.alerts.save(alert("x$s", now).copy(status = s), null) }
+        assertEquals(130, p.alerts.count(AlertFilter(statuses = setOf(AlertStatus.FIRING))))
+        assertEquals(65, p.alerts.count(AlertFilter(statuses = setOf(AlertStatus.FIRING), teamIds = setOf("a"))))
+        assertEquals(131, p.alerts.count(AlertFilter(statuses = setOf(AlertStatus.FIRING, AlertStatus.ACKNOWLEDGED))))
+        assertEquals(132, p.alerts.count(AlertFilter()))
+        assertEquals(0, p.alerts.count(AlertFilter(teamIds = setOf("none"))))
+    }
+
+    @Test
     fun `users are unique by email and found by external id`() = suspendTest {
         val u = User(Ids.new(), "a@example.com", "A", externalId = "idp|1", createdAt = now)
         p.users.save(u)

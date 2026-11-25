@@ -84,6 +84,7 @@ interface AlertRepository {
     suspend fun save(alert: Alert, expectedVersion: Long?)
     suspend fun list(filter: AlertFilter, cursor: String?, limit: Int): Page<Alert>
     suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit)
+    suspend fun count(filter: AlertFilter): Long
 }
 
 /** Port that the agents context implements to react to new alerts. */
@@ -126,6 +127,8 @@ class AlertService(
 
     suspend fun list(by: Principal, filter: AlertFilter, cursor: String?, limit: Int) =
         Access.requireRead(by).let { alerts.list(filter, cursor, limit.coerceIn(1, 200)) }
+
+    suspend fun count(by: Principal, filter: AlertFilter): Long = Access.requireRead(by).let { alerts.count(filter) }
 
     suspend fun ingest(by: Principal, signal: AlertSignal): IngestResult =
         telemetry.span("alert.ingest", mapOf("mayday.alert.source" to signal.source, "mayday.alert.severity" to signal.severity.name, "mayday.alert.status" to signal.status.name)) { span ->

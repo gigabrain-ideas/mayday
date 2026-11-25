@@ -26,7 +26,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 
 - `POST /api/v1/alerts` with `AlertSignal` JSON (plain HTTP, for monitoring tools).
 - `POST /api/v1/integrations/alertmanager` (Prometheus Alertmanager webhook format). The team comes from the `team` label or the `?team=` parameter. The `severity` label maps: critical/page/fatal/p1/sev1 → SEV1, high/error/major/p2/sev2 → SEV2, warning/warn/medium/p3/sev3 → SEV3, low/minor/p4/sev4 → SEV4, info/informational/p5/sev5 → SEV5, other or none → SEV3.
-- gRPC `AlertService` (`IngestAlert`, list, acknowledge, resolve, updates, link). See [api.md](../api.md).
+- gRPC `AlertService` (`IngestAlert`, list, exact count with the same filter, acknowledge, resolve, updates, link). See [api.md](../api.md).
 - MCP tool `send_alert`.
 
 ## Positive use cases

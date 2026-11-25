@@ -36,7 +36,9 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 
 ## Behavior
 
-- Live updates: one `EventService.Subscribe` stream per browser tab. It reconnects when the stream ends. Pages reload only the data an event concerns. `ping` events keep the connection open.
+- Live updates: one `EventService.Subscribe` stream per browser tab. It reconnects when the stream ends. Pages reload only the data an event concerns. `ping` events keep the connection open. The client adds two signals: `live.connected` (first ping of each stream; events sent while it was down are lost, so lists and counts reload) and `live.disconnected`.
+- The Alerts badge in the sidebar is the exact number of firing alerts (`CountAlerts`), not the length of a page. When the server does not answer or the live stream is down, the badge shows no number: an unknown count is never shown as a stale one.
+- A list that fails to load shows "Mayday could not load the …" with the reason and "Try again". It never shows the empty state ("No alerts") in place of an error.
 - Voice: a microphone button on each long text field uses the Web Speech API. Stylus input (for example Apple Pencil Scribble) works in all text fields.
 - Keyboard: `g i`, `g a`, `g o`, `g r`, `g s` go to incidents, alerts, on-call, reports, settings. `Ctrl/⌘ + Enter` posts a timeline update.
 - Viewers see no write controls.
@@ -52,6 +54,8 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 - A responder opens a firing alert, sees that level 1 was paged 4 minutes ago and presses "Escalate now".
 
 ## Negative use cases
+
+- The server stops while a tab is open. The Alerts page shows "Mayday could not load the alerts" and the badge shows no number. When the server is back, the stream reconnects and both reload.
 
 - A session expires: the next call returns `UNAUTHENTICATED` and the login page appears.
 - The browser has no speech recognition: the microphone button is hidden.
