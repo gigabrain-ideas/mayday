@@ -7,10 +7,10 @@ On design matters that are not defined, first consult PRODUCT, then [Ztyle](http
 - Avoid comment bloat.
 - User must be able to start and run the software on their machine.
 - Performance is key. Optimize for speed and 50K-100K concurrent users scale, with 1000-10K incidents and alerts per day.
-- Use conventional commits. Full commit messages explain WHY something was done and use up to 10 bullet points to explain what was done.
+- Use conventional commits. Full commit messages explain WHY something was done and use up to 10 bullet points to explain what was done. Linear history on main ONLY.
 - ASD-STE100 for technical texts.
 - DO NOT modify top level Markdown files without prior approval. Exception: README.md
-- Create a README.md on the top level and always keep it short, up to date and start with the WHY of the product with its benefits, followed by an example workflow involving incident management with an agent, screenshots from the interface, and then installation / deployment instructions.
+- Keep the README.md on the top level short, up to date and start with the WHY of the product with its benefits, followed by an example workflow involving incident management with an agent, screenshots from the interface, and then installation / deployment instructions.
 - Mermaid for diagrams.
 - hexagonal architecture so the domain can be reconfigured and/or extended.
 - contract tests for testing. Always.
