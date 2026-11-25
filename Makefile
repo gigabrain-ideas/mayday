@@ -8,7 +8,7 @@ HAVE_NODE := $(shell command -v npm 2>/dev/null)
 HAVE_JAVA := $(shell command -v java 2>/dev/null)
 JAR := build/libs/mayday.jar
 
-.PHONY: web build test run demo image up down clean
+.PHONY: web build test e2e run demo image up down clean
 
 web:
 ifdef HAVE_NODE
@@ -30,6 +30,10 @@ ifdef HAVE_JAVA
 else
 	docker run --rm -v "$(CURDIR)":/src -v mayday-gradle:/home/gradle/.gradle -v /var/run/docker.sock:/var/run/docker.sock -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal --add-host=host.docker.internal:host-gateway -w /src gradle:9-jdk25 gradle --no-daemon test
 endif
+
+# Browser use-case tests (Playwright). Headless; `make e2e HEADED=1` shows the browser, SLOWMO=<ms> sets the delay per action.
+e2e: web
+	MAYDAY_E2E_HEADED=$(if $(filter 1 true yes,$(HEADED)),true,false) MAYDAY_E2E_SLOWMO=$(SLOWMO) $(GRADLE) e2e
 
 run: build
 ifdef HAVE_JAVA

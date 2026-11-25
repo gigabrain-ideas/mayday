@@ -41,6 +41,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.opentelemetry:opentelemetry-sdk-testing")
     testImplementation("org.testcontainers:testcontainers-postgresql")
+    testImplementation("com.microsoft.playwright:playwright:1.65.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -76,6 +77,20 @@ tasks.bootJar { archiveFileName.set("mayday.jar") }
 tasks.jar { enabled = false }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform { excludeTags("e2e") }
     testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+}
+
+// Browser use-case tests against the built web interface (web/dist). MAYDAY_E2E_HEADED=true shows the browser.
+val e2e by tasks.registering(Test::class) {
+    description = "Runs the Playwright use-case tests."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("e2e") }
+    systemProperty("mayday.e2e.web-dir", file("web/dist").absolutePath)
+    systemProperty("mayday.e2e.artifacts", layout.buildDirectory.dir("e2e").get().asFile.absolutePath)
+    outputs.upToDateWhen { false }
+    doFirst { delete(layout.buildDirectory.dir("e2e")) }
+    testLogging { events("passed", "failed", "skipped"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
 }

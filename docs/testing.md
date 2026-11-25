@@ -19,6 +19,7 @@ flowchart LR
   ALC[AuditLogContractTest] --> AL[AuditLog: queue, chain, retries]
   AST[AuditStreamContractTest] --> AE[Real server: gRPC, gRPC-Web, HTTP, MCP, agent records]
   DT[Domain tests] --> S[Services with fakes]
+  UC[UseCaseTest] --> UI[Web interface in Chromium<br/>against the real server]
 ```
 
 ## Suites
@@ -52,6 +53,7 @@ flowchart LR
 | `DelegationLimitsTest`, `UntrustedSubjectDataTest`, `AlertIngestScopeTest`, `AgentAdminExchangeTest`, `AgentAdminOptInResetTest` | `SecurityTest.kt` | Delegated run tokens have no ADMIN scope and stop when the run is finished; token exchange keeps ADMIN only with the organization setting and the user's opt-in, agents cannot opt in for the user, and turning the organization setting off clears every opt-in; alert content reaches the model only as untrusted data, apart from the task; ingest-only tokens send alerts only for the teams of their owner |
 | `AgentIndependenceTest`, `BudgetExhaustedTest`, `GatewaySettingsTest` | `AgentGatewayTest.kt` | Alerts and incidents work with no agent, a hanging agent or a failing agent; 429 makes one call and pauses the agent; settings and identity headers |
 | `TracingTest`, `TracingServerTest` | `TracingTest.kt` | Agent run trace tree and stored trace ID; server spans for HTTP, gRPC and gRPC-Web; no export without an endpoint |
+| `UseCaseTest` | `e2e/UseCaseTest.kt` | The main flows of work in the web interface. See [Use-case tests](#use-case-tests). |
 
 `ServerContract` (`contract/ServerSupport.kt`) starts the real Spring Boot application on random HTTP and gRPC ports, with memory storage, `FakeLlm` and `RecordingDispatcher`. Both servers listen on `127.0.0.1` only. On a wildcard address, another local server (an IDE, a fake gateway in another test) could bind `127.0.0.1` on the same port and receive the test calls; the gRPC client then failed with "First received frame was not SETTINGS". Each subclass runs the check `no other loopback listener can take the ports of the test servers`. Test HTTP calls have a 30 s timeout, so a broken server fails a test instead of stopping the run. Each subclass sets its own `spring.grpc.server.inprocess.name`.
 
@@ -72,6 +74,40 @@ make test
 | `MAYDAY_TEST_KEYCLOAK_IMAGE` | Container image for `OidcGroupSyncContractTest` (default `quay.io/keycloak/keycloak:26.0.7`). The realm is `src/test/resources/keycloak/mayday-realm.json`. |
 
 Without Docker and without `MAYDAY_TEST_DATABASE_URL`, `PostgresStoreContractTest` fails. The contract is not optional.
+
+## Use-case tests
+
+`UseCaseTest` drives the built web interface (`web/dist`) in Chromium with [Playwright for Java](https://playwright.dev/java/). `BrowserContract` starts the real server like `ServerContract` does and serves `web/dist`. The tests have the JUnit tag `e2e`. `make test` does not run them.
+
+| # | Use case | Result |
+|---|---|---|
+| 1 | An administrator creates a team in Settings → Teams & projects. On-call for the team shows "No members". | Passes |
+| 2 | An administrator adds three users in Settings → Users, creates a team and adds the three users in On-call → Members. | Passes |
+| 3 | A monitoring tool sends an alert to `POST /api/v1/alerts` with a token. The alert is in Alerts as Firing, with its source. | Passes |
+| 4 | A member declares an incident. Mayday raises an alert for the incident. The incident shows it, and the alert links back to the incident. | Passes |
+| 5 | A responder sets the status of a new incident from Investigating to Identified. Details shows the Acknowledged time and the time to acknowledge, and the raised alert is acknowledged. | Passes |
+| 6 | On-call with "All teams" shows who is on call now for the schedules of every team. | Passes |
+
+Negative cases stay in the contract and domain tests. Use-case tests show that the flows work end to end.
+
+```bash
+make e2e
+```
+
+`make e2e` builds the web interface, then runs `./gradlew e2e`. After a first build, `./gradlew e2e` is enough. Needs Java. The first run downloads the Playwright browsers to the user cache.
+
+| Variable | Effect |
+|---|---|
+| `HEADED=1` (`MAYDAY_E2E_HEADED=true`) | Opens a visible browser, so you can see each step. |
+| `SLOWMO=<ms>` (`MAYDAY_E2E_SLOWMO`) | Delay before each browser action. Default 400 ms when headed, 0 when headless. |
+
+```bash
+make e2e HEADED=1 SLOWMO=800
+```
+
+A failed test keeps a Playwright trace with screenshots and DOM snapshots in `build/e2e/`. Open it at https://trace.playwright.dev or with `npx playwright show-trace <file>`.
+
+A new use case: add a test to `UseCaseTest` (or a new subclass of `BrowserContract` with its own `spring.grpc.server.inprocess.name`). Find elements by role, placeholder or text, as a user does. `card(title)` finds a card by its header title; the interface has no landmark role for cards.
 
 ## A new adapter
 

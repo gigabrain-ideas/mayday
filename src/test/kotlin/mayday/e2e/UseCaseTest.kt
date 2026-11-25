@@ -1,0 +1,152 @@
+package mayday.e2e
+
+import com.microsoft.playwright.Locator
+import com.microsoft.playwright.Page
+import com.microsoft.playwright.options.AriaRole
+import com.microsoft.playwright.options.RequestOptions
+import com.microsoft.playwright.options.SelectOption
+import kotlinx.coroutines.runBlocking
+import mayday.identity.TeamRole
+import mayday.oncall.ScheduleInput
+import mayday.oncall.ShiftUnit
+import org.springframework.test.context.TestPropertySource
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+/** The main flows of work, as a user does them in the web interface. See docs/testing.md#use-case-tests. */
+@TestPropertySource(properties = ["spring.grpc.server.inprocess.name=e2e-use-cases"])
+class UseCaseTest : BrowserContract() {
+
+    @Test
+    fun `1 an administrator creates a team with no people`() {
+        signIn()
+        val name = unique("Payments API")
+        createTeam(name)
+
+        openOnCall(name)
+        assertThat(card("Members").getByText("No members")).isVisible()
+    }
+
+    @Test
+    fun `2 an administrator creates a team with three people`() {
+        signIn()
+        val people = List(3) { unique("responder${it + 1}").replace(' ', '-') + "@example.com" }
+        page.navigate("/settings/users")
+        for (email in people) {
+            page.getByPlaceholder("email@company.com").fill(email)
+            button("Add user").click()
+            assertThat(page.getByRole(AriaRole.CELL, Page.GetByRoleOptions().setName(email))).isVisible()
+        }
+        val name = unique("Search")
+        createTeam(name)
+
+        openOnCall(name)
+        val members = card("Members")
+        for (email in people) {
+            members.getByRole(AriaRole.COMBOBOX, Locator.GetByRoleOptions().setName("Add member"))
+                .selectOption(SelectOption().setLabel("${email.substringBefore('@')} · $email"))
+            assertThat(members.getByText(email, Locator.GetByTextOptions().setExact(true))).isVisible()
+        }
+        assertThat(members.getByRole(AriaRole.COMBOBOX, Locator.GetByRoleOptions().setName(Regex("^Role of ").toPattern()))).hasCount(3)
+    }
+
+    @Test
+    fun `3 a monitoring tool raises an alert and responders see it`() {
+        signIn()
+        val title = unique("Disk 91% full on db-1")
+        val res = page.request().post("/api/v1/alerts", RequestOptions.create()
+            .setHeader("Authorization", "Bearer ${token("admin")}")
+            .setData(mapOf("title" to title, "severity" to "SEV4", "team" to "checkout", "source" to "prometheus")))
+        assertEquals(201, res.status(), res.text())
+
+        page.navigate("/alerts")
+        val row = page.getByRole(AriaRole.ROW).filter(Locator.FilterOptions().setHasText(title))
+        assertThat(row).containsText("Firing")
+        row.click()
+        assertThat(page.getByRole(AriaRole.HEADING, Page.GetByRoleOptions().setName(title))).isVisible()
+        assertThat(card("Details").getByText("prometheus")).isVisible()
+    }
+
+    @Test
+    fun `4 a declared incident raises an alert for the incident`() {
+        signIn()
+        val title = unique("Checkout returns errors")
+        declareIncident(title, "Checkout")
+
+        val linked = card("Alerts")
+        assertThat(linked).isVisible()
+        assertThat(linked.getByRole(AriaRole.LINK)).hasCount(1)
+        assertThat(linked.getByRole(AriaRole.LINK)).containsText("Firing")
+        linked.getByRole(AriaRole.LINK).click()
+        assertThat(card("Incident").getByText(title)).isVisible()
+    }
+
+    @Test
+    fun `5 a responder acknowledges an incident and it shows as acknowledged`() {
+        signIn()
+        declareIncident(unique("Login is slow"), "Checkout")
+        val details = card("Details")
+        assertThat(detailRow(details, "Acknowledged")).containsText("—")
+
+        page.getByRole(AriaRole.COMBOBOX, Page.GetByRoleOptions().setName("Status")).selectOption("IDENTIFIED")
+
+        assertThat(page.getByText("Identified", Page.GetByTextOptions().setExact(true)).first()).isVisible()
+        assertThat(detailRow(details, "Acknowledged")).not().containsText("—")
+        assertThat(detailRow(details, "Time to acknowledge")).not().containsText("—")
+        assertThat(page.getByText("Status changed", Page.GetByTextOptions().setExact(false)).first()).isVisible()
+
+        card("Alerts").getByRole(AriaRole.LINK).click()
+        assertThat(page.getByRole(AriaRole.BUTTON, Page.GetByRoleOptions().setName("Acknowledge"))).hasCount(0)
+        assertThat(card("Updates")).containsText("Acknowledged.")
+    }
+
+    @Test
+    fun `6 the on-call page shows who is on call in every team`() {
+        val sre = userOf("admin")
+        runBlocking {
+            val admin = principal("admin")
+            app.identity.setTeamMember(admin, other.id, sre.id, TeamRole.MEMBER)
+            val start = Instant.now().minus(1, ChronoUnit.HOURS)
+            app.onCall.create(admin, ScheduleInput(team.id, unique("Checkout primary"), rotationStart = start, shiftUnit = ShiftUnit.WEEKS, participants = listOf(userOf("lead").id)))
+            app.onCall.create(admin, ScheduleInput(other.id, unique("SRE primary"), rotationStart = start, shiftUnit = ShiftUnit.WEEKS, participants = listOf(sre.id)))
+        }
+        signIn()
+        page.navigate("/oncall")
+
+        assertThat(page.getByRole(AriaRole.COMBOBOX, Page.GetByRoleOptions().setName("Team"))).hasValue("")
+        assertThat(nowCard("Checkout · Checkout primary")).containsText("lead")
+        assertThat(nowCard("SRE · SRE primary")).containsText("admin")
+    }
+
+    private fun createTeam(name: String) {
+        page.navigate("/settings/directory")
+        page.getByPlaceholder("New team name").fill(name)
+        card("Teams").getByRole(AriaRole.BUTTON, Locator.GetByRoleOptions().setName("Add")).click()
+        assertThat(card("Teams").getByText(name, Locator.GetByTextOptions().setExact(true))).isVisible()
+    }
+
+    private fun openOnCall(team: String) {
+        page.navigate("/oncall")
+        page.getByRole(AriaRole.COMBOBOX, Page.GetByRoleOptions().setName("Team")).selectOption(SelectOption().setLabel(team))
+        assertThat(card("Members")).isVisible()
+    }
+
+    private fun declareIncident(title: String, team: String) {
+        page.navigate("/incidents")
+        button("Declare incident").click()
+        page.getByPlaceholder("Checkout returns errors").fill(title)
+        button("Teams").click()
+        page.getByRole(AriaRole.MENUITEMCHECKBOX, Page.GetByRoleOptions().setName(team)).click()
+        page.keyboard().press("Escape")
+        button("Declare", exact = true).click()
+        assertThat(page.getByRole(AriaRole.HEADING, Page.GetByRoleOptions().setName(title))).isVisible()
+    }
+
+    private fun detailRow(details: Locator, label: String): Locator =
+        details.locator("div.flex").filter(Locator.FilterOptions().setHas(page.locator("span.eyebrow").getByText(label, Locator.GetByTextOptions().setExact(true))))
+
+    private fun nowCard(eyebrow: String): Locator =
+        page.locator("section div.rounded-2xl").filter(Locator.FilterOptions().setHasText(eyebrow))
+}

@@ -73,6 +73,12 @@ make demo
 make test
 ```
 
+`make e2e` runs the use-case tests in a browser (headless). `make e2e HEADED=1` shows the browser so you can watch each step. See [docs/testing.md](docs/testing.md#use-case-tests).
+
+```bash
+make e2e HEADED=1
+```
+
 ### Production
 
 1. Set `MAYDAY_SECRET_KEY`, `MAYDAY_PUBLIC_URL`, single sign-on (`MAYDAY_OIDC_ISSUER`, `MAYDAY_OIDC_CLIENT_ID`, `MAYDAY_OIDC_CLIENT_SECRET`) and `MAYDAY_DATABASE_URL`.

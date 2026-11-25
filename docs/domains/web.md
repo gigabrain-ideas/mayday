@@ -63,4 +63,4 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 
 ## Rebuild checklist
 
-`npm run build` (it runs `npm run gen` first) must pass type checking. The server side of the browser protocol is in `GrpcWebContractTest`. Do not edit `src/gen`; change `proto/` and generate again.
+`npm run build` (it runs `npm run gen` first) must pass type checking. The server side of the browser protocol is in `GrpcWebContractTest`. The main flows in the browser are in `UseCaseTest` (`make e2e`). Do not edit `src/gen`; change `proto/` and generate again.
