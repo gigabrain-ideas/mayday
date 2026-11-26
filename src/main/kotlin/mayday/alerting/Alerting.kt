@@ -224,12 +224,32 @@ class AlertService(
     override suspend fun raiseFor(incident: Incident): List<RaisedAlert> =
         telemetry.span("alert.raise_for_incident", mapOf("mayday.incident.id" to incident.id)) { span ->
             incident.teamIds.mapNotNull { teamId ->
-                runCatching { raiseOne(incident, teamId) }.onFailure { span.fail("No alert for team $teamId", it) }.getOrNull()
+                runCatching { raiseOne(incident, teamId, incident.createdBy) }.onFailure { span.fail("No alert for team $teamId", it) }.getOrNull()
             }
         }
 
-    private suspend fun raiseOne(incident: Incident, teamId: String): RaisedAlert {
+    /**
+     * A team added to an open incident gets an alert only while nobody is on the incident: the incident is not acknowledged and none of its alerts is.
+     * When somebody already works on it, the added teams are not paged. A team that already has a linked alert gets no second one.
+     */
+    override suspend fun raiseForAddedTeams(incident: Incident, teamIds: List<String>, actor: Actor): List<RaisedAlert> =
+        telemetry.span("alert.raise_for_added_teams", mapOf("mayday.incident.id" to incident.id)) { span ->
+            val linked = incident.alertIds.mapNotNull { alerts.get(it) }
+            val somebodyOnIt = incident.acknowledgedAt != null || linked.any { it.acknowledgedBy != null }
+            span.set("mayday.incident.acknowledged", somebodyOnIt.toString())
+            if (somebodyOnIt || !incident.status.open) {
+                emptyList()
+            } else {
+                val covered = linked.map { it.teamId }.toSet()
+                teamIds.filterNot { it in covered }.mapNotNull { teamId ->
+                    runCatching { raiseOne(incident, teamId, actor) }.onFailure { span.fail("No alert for team $teamId", it) }.getOrNull()
+                }
+            }
+        }
+
+    private suspend fun raiseOne(incident: Incident, teamId: String, actor: Actor): RaisedAlert {
         val now = clock.now()
+        val team = directory.team(teamId).name
         val a = Alert(
             id = Ids.new(),
             fingerprint = "incident:${incident.id}:$teamId",
@@ -242,10 +262,19 @@ class AlertService(
             incidentId = incident.id,
             firstSeenAt = now,
             lastSeenAt = now,
-            updates = listOf(AlertUpdate(now, incident.createdBy, "Raised for incident ${incident.key}.")),
+            updates = listOf(AlertUpdate(now, actor, "Raised for incident ${incident.key}.")),
         )
         alerts.save(a, null)
-        return RaisedAlert(a.id, "Alert raised for ${directory.team(teamId).name}: ${a.title}")
+        return RaisedAlert(a.id, "Alert raised for $team: ${a.title}")
+    }
+
+    override suspend fun withdraw(alertIds: List<String>, actor: Actor) {
+        for (id in alertIds) {
+            val a = alerts.get(id)?.takeIf { it.source == INCIDENT_SOURCE && it.status != AlertStatus.RESOLVED } ?: continue
+            val now = clock.now()
+            alerts.save(a.copy(status = AlertStatus.RESOLVED, resolvedAt = now, version = a.version + 1,
+                updates = a.updates + AlertUpdate(now, actor, "Withdrawn: the incident update that raised this alert did not save.")), a.version)
+        }
     }
 
     override suspend fun raised(incident: Incident, alertIds: List<String>) {

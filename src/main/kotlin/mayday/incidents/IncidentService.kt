@@ -1,5 +1,6 @@
 package mayday.incidents
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import mayday.directory.DirectoryService
 import mayday.identity.Access
@@ -9,6 +10,7 @@ import mayday.policy.PolicyReader
 import mayday.shared.Actor
 import mayday.shared.ActorKind
 import mayday.shared.Clock
+import mayday.shared.Conflict
 import mayday.shared.DomainEvent
 import mayday.shared.EventPublisher
 import mayday.shared.Ids
@@ -157,7 +159,7 @@ class IncidentService(
             reopened -> null
             else -> cur.resolvedAt
         }
-        val next = cur.copy(
+        val updated = cur.copy(
             title = patch.title?.trim() ?: cur.title,
             description = patch.description ?: cur.description,
             severity = severity,
@@ -177,7 +179,19 @@ class IncidentService(
             updatedAt = now,
             version = cur.version + 1,
         )
-        incidents.save(next, patch.version ?: cur.version)
+        val expected = patch.version ?: cur.version
+        val added = updated.teamIds - cur.teamIds.toSet()
+        if (added.isNotEmpty() && expected != cur.version) throw Conflict("The incident changed. Reload and try again.")
+        val raised = if (added.isEmpty()) emptyList() else runCatching { alerts.raiseForAddedTeams(updated, added, by.actor) }
+            .onFailure { if (it is CancellationException) throw it; span.fail("No alerts for the added teams", it) }.getOrDefault(emptyList())
+        val next = updated.copy(alertIds = updated.alertIds + raised.map { it.alertId })
+        try {
+            incidents.save(next, expected)
+        } catch (e: Conflict) {
+            // A concurrent update won. The new alerts are not linked and nobody was paged: withdraw them so none stays firing.
+            if (raised.isNotEmpty()) runCatching { alerts.withdraw(raised.map { it.alertId }, by.actor) }.onFailure { span.fail("Raised alerts not withdrawn", it) }
+            throw e
+        }
         if (next.status != cur.status) {
             span.set("mayday.incident.status.from", cur.status.name)
             span.set("mayday.incident.status.to", next.status.name)
@@ -197,7 +211,9 @@ class IncidentService(
             if (next.commanderId != cur.commanderId) add("commander")
         }
         if (fields.isNotEmpty()) record(next, EntryKind.FIELD, by.actor, "Updated ${fields.joinToString(", ")}.")
+        raised.forEach { record(next, EntryKind.ALERT, Actor.system, it.note, null, mapOf("alertId" to it.alertId)) }
         publish("incident.updated", next)
+        if (raised.isNotEmpty()) runCatching { alerts.raised(next, raised.map { it.alertId }) }
         if (next.status != cur.status) runCatching { alerts.statusChanged(next, by.actor) }
         return next
     }

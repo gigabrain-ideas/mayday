@@ -117,6 +117,16 @@ class EscalationTest {
     }
 
     @Test
+    fun `a team added before anybody acknowledges is paged`() = suspendTest {
+        twoLevels()
+        val inc = f.app.incidents.declare(f.member, NewIncident("Payments slow", severity = Severity.SEV2, teamIds = listOf(f.other.id)))
+        assertTrue(f.pager.pages.isEmpty(), "SRE has no escalation policy")
+        val next = f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.other.id, f.team.id)))
+        assertEquals(EscalationStatus.ACTIVE, esc.escalation(f.viewer, next.alertIds.last()).status)
+        assertEquals(listOf(f.teamAdminUser.id), f.pager.pages.single().recipients.map { it.id })
+    }
+
+    @Test
     fun `a declared incident pages the person on call through its raised alert`() = suspendTest {
         twoLevels()
         val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))

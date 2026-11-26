@@ -24,7 +24,7 @@ An incident records a disruption from detection to postmortem. It is the place w
 - `IncidentRepository`: `nextNumber()` (never reuses a number), `get`, `byNumber`, `save(expectedVersion)`, keyset `list`, streaming `scan`.
 - `TimelineRepository`: `append`, `list`.
 - Uses `PolicyReader` (policy context) and `DirectoryService` (team validation).
-- `IncidentAlerts`: used by `declare` (not by `declareFromAlert`) and by `update`. `raiseFor` saves one alert for each responder team before the incident is saved, so the incident is written once with its alert links. `raised` runs after the save and announces the alerts (escalation starts). `statusChanged` runs after each status change: the raised alerts are acknowledged when the incident leaves INVESTIGATING and resolved when it closes. The alerting context implements it. A failure in the listener does not stop the declaration.
+- `IncidentAlerts`: used by `declare` (not by `declareFromAlert`) and by `update`. `raiseFor` saves one alert for each responder team before the incident is saved, so the incident is written once with its alert links. `raiseForAddedTeams` runs in `update` when the patch adds responder teams, before the save: alerting decides if nobody is on the incident and saves the alerts, so the update is still one write. When the patch has a stale version, `update` answers `conflict` before any alert is raised. `raised` runs after the save and announces the alerts (escalation starts). `statusChanged` runs after each status change: the raised alerts are acknowledged when the incident leaves INVESTIGATING and resolved when it closes. The alerting context implements it. A failure in the listener does not stop the declaration.
 
 ## Use cases
 

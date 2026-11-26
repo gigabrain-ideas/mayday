@@ -201,6 +201,89 @@ class AlertTest {
     }
 
     @Test
+    fun `a team added before anybody acknowledges gets a linked alert`() = suspendTest {
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        val next = f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.team.id, f.other.id)))
+        assertEquals(2, next.version, "the incident is written once with the new link")
+        val added = svc.list(f.admin, AlertFilter(), null, 100).items.single { it.teamId == f.other.id }
+        assertEquals(inc.alertIds + added.id, next.alertIds)
+        assertEquals(AlertStatus.FIRING, added.status)
+        assertEquals(inc.id, added.incidentId)
+        assertEquals(2, f.app.incidents.timeline(f.admin, inc.key).count { it.kind == EntryKind.ALERT })
+    }
+
+    @Test
+    fun `a team added after the incident is acknowledged gets no alert`() = suspendTest {
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        f.app.incidents.update(f.member, inc.key, IncidentPatch(status = IncidentStatus.IDENTIFIED))
+        val next = f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.team.id, f.other.id)))
+        assertEquals(inc.alertIds, next.alertIds)
+        assertTrue(svc.list(f.admin, AlertFilter(), null, 100).items.none { it.teamId == f.other.id })
+    }
+
+    @Test
+    fun `a team added after one of the incident alerts is acknowledged gets no alert`() = suspendTest {
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        svc.acknowledge(f.member, inc.alertIds.single())
+        val next = f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.team.id, f.other.id)))
+        assertEquals(inc.alertIds, next.alertIds)
+    }
+
+    @Test
+    fun `a team removed and added again gets no second alert`() = suspendTest {
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id, f.other.id)))
+        f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.team.id)))
+        val next = f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.team.id, f.other.id)))
+        assertEquals(inc.alertIds, next.alertIds)
+        assertEquals(2, svc.list(f.admin, AlertFilter(), null, 100).items.size)
+    }
+
+    @Test
+    fun `a team added in the same change that acknowledges the incident gets no alert`() = suspendTest {
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        val next = f.app.incidents.update(f.member, inc.key, IncidentPatch(status = IncidentStatus.IDENTIFIED, teamIds = listOf(f.team.id, f.other.id)))
+        assertEquals(inc.alertIds, next.alertIds)
+    }
+
+    @Test
+    fun `a team added to a closed incident gets no alert`() = suspendTest {
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        f.app.incidents.update(f.member, inc.key, IncidentPatch(status = IncidentStatus.RESOLVED))
+        val next = f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.team.id, f.other.id)))
+        assertEquals(inc.alertIds, next.alertIds)
+    }
+
+    @Test
+    fun `a team added with a stale version gets a conflict and no alert`() = suspendTest {
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        f.app.incidents.update(f.member, inc.key, IncidentPatch(title = "Checkout returns 500"))
+        assertFailsWith<mayday.shared.Conflict> { f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.team.id, f.other.id), version = inc.version)) }
+        assertTrue(svc.list(f.admin, AlertFilter(), null, 100).items.none { it.teamId == f.other.id })
+    }
+
+    @Test
+    fun `alerts raised by an update that loses a race are withdrawn`() = suspendTest {
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        val real = f.app.incidents.alerts
+        f.app.incidents.alerts = object : mayday.incidents.IncidentAlerts by real {
+            override suspend fun raiseForAddedTeams(incident: mayday.incidents.Incident, teamIds: List<String>, actor: mayday.shared.Actor) =
+                real.raiseForAddedTeams(incident, teamIds, actor).also { f.app.incidents.update(f.lead, inc.key, IncidentPatch(title = "Concurrent change")) }
+        }
+        assertFailsWith<mayday.shared.Conflict> { f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.team.id, f.other.id))) }
+        val orphan = svc.list(f.admin, AlertFilter(), null, 100).items.single { it.teamId == f.other.id }
+        assertEquals(AlertStatus.RESOLVED, orphan.status, "no alert stays firing without a link")
+        assertEquals(inc.alertIds, f.app.incidents.get(f.admin, inc.key).alertIds)
+    }
+
+    @Test
+    fun `a team added to an incident that an alert opened gets a linked alert`() = suspendTest {
+        val r = svc.ingest(f.member, AlertSignal("DB down", Severity.SEV1, "checkout"))
+        val next = f.app.incidents.update(f.member, r.incidentKey!!, IncidentPatch(teamIds = listOf(f.team.id, f.other.id)))
+        assertEquals(2, next.alertIds.size)
+        assertEquals(f.other.id, svc.get(f.admin, next.alertIds.last()).teamId)
+    }
+
+    @Test
     fun `an incident that an alert opens raises no second alert`() = suspendTest {
         val r = svc.ingest(f.member, AlertSignal("DB down", Severity.SEV1, "checkout"))
         assertEquals(listOf(r.alert.id), svc.list(f.admin, AlertFilter(), null, 100).items.map { it.id })

@@ -109,6 +109,15 @@ interface IncidentAlerts {
     /** Saves the alerts for a new incident before the incident is saved, so the incident is written once with its links. */
     suspend fun raiseFor(incident: Incident): List<RaisedAlert>
 
+    /**
+     * Before an update that adds responder teams is saved: raise alerts for the added teams while nobody is on the incident.
+     * Raises none when the incident or one of its alerts is acknowledged, or when the incident is closed.
+     */
+    suspend fun raiseForAddedTeams(incident: Incident, teamIds: List<String>, actor: Actor): List<RaisedAlert>
+
+    /** When the update that raised alerts fails to save: resolve those alerts. They were never linked or announced. */
+    suspend fun withdraw(alertIds: List<String>, actor: Actor)
+
     /** After the incident is saved: announce the raised alerts and start their escalation. */
     suspend fun raised(incident: Incident, alertIds: List<String>)
 
@@ -118,6 +127,8 @@ interface IncidentAlerts {
     companion object {
         val none = object : IncidentAlerts {
             override suspend fun raiseFor(incident: Incident) = emptyList<RaisedAlert>()
+            override suspend fun raiseForAddedTeams(incident: Incident, teamIds: List<String>, actor: Actor) = emptyList<RaisedAlert>()
+            override suspend fun withdraw(alertIds: List<String>, actor: Actor) = Unit
             override suspend fun raised(incident: Incident, alertIds: List<String>) = Unit
             override suspend fun statusChanged(incident: Incident, actor: Actor) = Unit
         }
