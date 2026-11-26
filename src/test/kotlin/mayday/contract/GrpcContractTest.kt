@@ -570,6 +570,7 @@ class GrpcContractTest : ServerContract() {
     @Test
     fun `an agent that follows an approved runbook resolves its alert and paging stops, other agent resolves keep paging`() = suspendTest {
         val source = "prom-${unique()}"
+        policy.setSetting(SetSettingRequest.newBuilder().setScope(Scope.SCOPE_TEAM).setScopeId("checkout").setKey(Keys.AGENT_AUTO_REMEDIATION).setValue("true").build(), auth("admin"))
         val s = newSchedule()
         val p = escalation.createPolicy(SaveEscalationPolicyRequest.newBuilder().setTeamId("checkout").setName("Runbook ${unique()}").setTeamDefault(true)
             .addLevels(level(5, TargetKind.TARGET_KIND_SCHEDULE to s.id)).build(), auth("lead"))
@@ -603,6 +604,7 @@ class GrpcContractTest : ServerContract() {
         } finally {
             agents.deleteAgent(id(creds.agent.id), auth("admin"))
             escalation.deletePolicy(id(p.id), auth("lead"))
+            policy.clearSetting(ClearSettingRequest.newBuilder().setScope(Scope.SCOPE_TEAM).setScopeId("checkout").setKey(Keys.AGENT_AUTO_REMEDIATION).build(), auth("admin"))
             oncall.deleteSchedule(id(s.id), auth("lead"))
         }
     }

@@ -600,7 +600,7 @@ class AgentService(
 
     private suspend fun startTriggered(alert: Alert) {
         val alertTeams = listOf(alert.teamId)
-        val runbook = runCatching { runbooks?.matchFor(alert) }.getOrNull()
+        val runbook = if (policy.bool(Keys.AGENT_AUTO_REMEDIATION, alertTeams)) runCatching { runbooks?.matchFor(alert) }.getOrNull() else null
         for (agent in agents.list()) {
             if (!agent.enabled) continue
             if (agent.kind == AgentKind.INTERNAL && !internalReady()) continue
@@ -761,8 +761,8 @@ class AgentService(
             val run = transition(runId) { it.copy(status = RunStatus.RUNNING, startedAt = clock.now(), traceId = span.traceId) }
             try {
                 val principal = principalFor(agent, run)
-                val runbook = run.runbookId?.let { followed(run) ?: throw IllegalStateException("The runbook \"${run.runbookTitle}\" is no longer approved") }
-                val catalog = runbook?.let { rb -> RunbookScope(tools(), rb, { runbooks?.approved(rb.id) != null }, { reason -> raiseToHuman(run.id, reason) }) } ?: tools()
+                val runbook = run.runbookId?.let { followed(run) ?: throw IllegalStateException("The runbook \"${run.runbookTitle}\" is no longer approved for autonomous work") }
+                val catalog = runbook?.let { rb -> RunbookScope(tools(), rb, { followed(run) != null }, { reason -> raiseToHuman(run.id, reason) }) } ?: tools()
                 val result = InternalAgent(llmProvider(), catalog, clock, telemetry, llm.model).run(agent, run, principal, snapshot(run), runbook)
                 finish(runId, RunStatus.SUCCEEDED, result, "")
                 span.set("mayday.run.status", RunStatus.SUCCEEDED.name)
@@ -881,10 +881,11 @@ class AgentService(
         }
     }
 
-    /** The runbook of the run, when it is still approved and still covers the alert of the run. */
+    /** The runbook of the run, when it is still approved, still covers the alert of the run, and the alert team allows autonomous work. */
     private suspend fun followed(run: AgentRun): Runbook? {
         val rb = run.runbookId?.let { runbooks?.approved(it) } ?: return null
         val alert = run.alertId?.let { runCatching { alerts.get(Principal.system, it) }.getOrNull() } ?: return null
+        if (!policy.bool(Keys.AGENT_AUTO_REMEDIATION, listOf(alert.teamId))) return null
         return rb.takeIf { it.covers(alert) }
     }
 

@@ -156,32 +156,41 @@ class UseCaseTest : BrowserContract() {
         assertThat(row.getByText("Draft", Locator.GetByTextOptions().setExact(true))).isVisible()
         row.getByRole(AriaRole.BUTTON, Locator.GetByRoleOptions().setName("Approve")).click()
         assertThat(row.getByText("Approved for agents")).isVisible()
+        val blocked = runbooks.getByRole(AriaRole.STATUS).filter(Locator.FilterOptions().setHasText("Agents cannot follow the approved runbooks of this team alone"))
+        assertThat(blocked).isVisible()
+        assertThat(blocked).containsText("Mayday starts no runbook run")
+        runBlocking { app.policy.set(principal("admin"), mayday.policy.Scope.TEAM, team.id, mayday.policy.Keys.AGENT_AUTO_REMEDIATION, "true", mayday.policy.Enforcement.NONE) }
+        try {
+            assertThat(blocked).hasCount(0)
 
-        val agent = mayday.shared.Actor(mayday.shared.ActorKind.AGENT, "mayday", "Mayday agent")
-        val agentPrincipal = mayday.identity.Principal(agent, null, mayday.identity.OrgRole.MEMBER, setOf(mayday.identity.TokenScope.READ, mayday.identity.TokenScope.WRITE), "run-e2e")
-        val (covered, other) = runBlocking {
-            val rb = app.runbooks.list(principal("viewer"), "checkout").single { it.title == title }
-            suspend fun fire(t: String, src: String) = app.alerts.ingest(principal("admin"), mayday.alerting.AlertSignal(t, mayday.shared.Severity.SEV3, "checkout", source = src)).alert
-            val covered = fire(unique("Disk 95% on db-1"), source)
-            app.ports.runs.save(mayday.agents.AgentRun(mayday.shared.Ids.new(), "mayday", "Mayday agent", mayday.agents.AgentAction.ANALYZE, mayday.agents.SubjectKind.ALERT,
-                covered.id, covered.title, mayday.agents.RunStatus.RUNNING, mayday.agents.RunTrigger.AUTO, mayday.shared.Actor.system, createdAt = Instant.now(),
-                alertId = covered.id, runbookId = rb.id), null)
-            app.alerts.resolve(agentPrincipal, covered.id, "Old logs deleted. Disk at 40%.")
-            val other = fire(unique("Latency high on api"), "grafana")
-            app.alerts.resolve(agentPrincipal, other.id, "Looks fine now.")
-            covered to other
+            val agent = mayday.shared.Actor(mayday.shared.ActorKind.AGENT, "mayday", "Mayday agent")
+            val agentPrincipal = mayday.identity.Principal(agent, null, mayday.identity.OrgRole.MEMBER, setOf(mayday.identity.TokenScope.READ, mayday.identity.TokenScope.WRITE), "run-e2e")
+            val (covered, other) = runBlocking {
+                val rb = app.runbooks.list(principal("viewer"), "checkout").single { it.title == title }
+                suspend fun fire(t: String, src: String) = app.alerts.ingest(principal("admin"), mayday.alerting.AlertSignal(t, mayday.shared.Severity.SEV3, "checkout", source = src)).alert
+                val covered = fire(unique("Disk 95% on db-1"), source)
+                app.ports.runs.save(mayday.agents.AgentRun(mayday.shared.Ids.new(), "mayday", "Mayday agent", mayday.agents.AgentAction.ANALYZE, mayday.agents.SubjectKind.ALERT,
+                    covered.id, covered.title, mayday.agents.RunStatus.RUNNING, mayday.agents.RunTrigger.AUTO, mayday.shared.Actor.system, createdAt = Instant.now(),
+                    alertId = covered.id, runbookId = rb.id), null)
+                app.alerts.resolve(agentPrincipal, covered.id, "Old logs deleted. Disk at 40%.")
+                val other = fire(unique("Latency high on api"), "grafana")
+                app.alerts.resolve(agentPrincipal, other.id, "Looks fine now.")
+                covered to other
+            }
+
+            page.navigate("/alerts/${covered.id}")
+            assertThat(page.getByText("Resolved under an approved runbook", Page.GetByTextOptions().setExact(true))).isVisible()
+            assertThat(page.getByRole(AriaRole.BUTTON, Page.GetByRoleOptions().setName("Acknowledge"))).hasCount(0)
+
+            page.navigate("/alerts/${other.id}")
+            val waiting = page.getByText("Resolved by an agent · waiting for a person", Page.GetByTextOptions().setExact(true))
+            assertThat(waiting).isVisible()
+            button("Acknowledge").click()
+            assertThat(waiting).hasCount(0)
+            assertThat(card("Updates")).containsText("Acknowledged.")
+        } finally {
+            runBlocking { app.policy.clear(principal("admin"), mayday.policy.Scope.TEAM, team.id, mayday.policy.Keys.AGENT_AUTO_REMEDIATION) }
         }
-
-        page.navigate("/alerts/${covered.id}")
-        assertThat(page.getByText("Resolved under an approved runbook", Page.GetByTextOptions().setExact(true))).isVisible()
-        assertThat(page.getByRole(AriaRole.BUTTON, Page.GetByRoleOptions().setName("Acknowledge"))).hasCount(0)
-
-        page.navigate("/alerts/${other.id}")
-        val waiting = page.getByText("Resolved by an agent · waiting for a person", Page.GetByTextOptions().setExact(true))
-        assertThat(waiting).isVisible()
-        button("Acknowledge").click()
-        assertThat(waiting).hasCount(0)
-        assertThat(card("Updates")).containsText("Acknowledged.")
     }
 
     private fun createTeam(name: String) {

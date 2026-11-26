@@ -61,6 +61,9 @@ class RunbookTest {
 
     private suspend fun approved(input: RunbookInput = input(), by: Principal = f.lead) = runbooks.create(f.member, input).let { runbooks.approve(by, it.id, it.version) }
 
+    private suspend fun autonomy(on: Boolean = true) =
+        f.app.policy.set(f.admin, Scope.ORG, "org", Keys.AGENT_AUTO_REMEDIATION, on.toString(), Enforcement.NONE)
+
     private suspend fun policy() {
         val s = f.app.onCall.create(f.lead, ScheduleInput(f.team.id, "Primary", "UTC", clock.now().minus(Duration.ofDays(1)), 1, ShiftUnit.WEEKS, listOf(f.teamAdminUser.id)))
         esc.create(f.lead, EscalationPolicyInput(f.team.id, "Default", levels = listOf(EscalationLevel(5, listOf(EscalationTarget(TargetKind.SCHEDULE, s.id))),
@@ -149,6 +152,7 @@ class RunbookTest {
     @Test
     fun `the built-in agent follows an approved runbook, resolves the alert and paging stops`() = suspendTest {
         policy()
+        autonomy()
         val rb = approved()
         f.enableLlm()
         f.llm.callOnSubjectAlert("resolve_alert")
@@ -175,8 +179,26 @@ class RunbookTest {
     }
 
     @Test
+    fun `an approved runbook needs the permission for autonomous work`() = suspendTest {
+        policy()
+        val rb = approved()
+        f.enableLlm()
+        f.llm.callOnSubjectAlert("resolve_alert")
+        f.llm.answer("Old logs deleted.")
+        val alert = fire()
+        val run = autoRun()
+        assertNull(run.runbookId, "with agents.auto_remediation off the run follows no runbook")
+        val done = f.app.alerts.get(f.viewer, alert.id)
+        assertNull(done.resolvedUnderRunbook)
+        assertTrue(done.waitsForHuman, "a person must confirm")
+        assertEquals(EscalationStatus.ACTIVE, esc.escalation(f.viewer, alert.id).status)
+        assertEquals(RunbookStatus.APPROVED, runbooks.get(f.viewer, rb.id).status)
+    }
+
+    @Test
     fun `an automated agent resolves with no runbook and paging goes on until a person acknowledges`() = suspendTest {
         policy()
+        autonomy()
         val alert = fire()
         val resolved = f.app.alerts.resolve(automaticAgent, alert.id, "Looks fine")
         assertEquals(AlertStatus.RESOLVED, resolved.status)
@@ -197,6 +219,7 @@ class RunbookTest {
     @Test
     fun `a person resolves after an automated agent and paging stops`() = suspendTest {
         policy()
+        autonomy()
         val alert = fire()
         f.app.alerts.resolve(automaticAgent, alert.id)
         val byPerson = f.app.alerts.resolve(f.member, alert.id, "Checked the dashboards")
@@ -207,6 +230,7 @@ class RunbookTest {
     @Test
     fun `the monitoring source confirms a resolve by an automated agent and paging stops`() = suspendTest {
         policy()
+        autonomy()
         val alert = fire()
         f.app.alerts.resolve(automaticAgent, alert.id)
         val r = f.app.alerts.ingest(f.admin, AlertSignal("Disk 95% on db-1", Severity.SEV2, "checkout", source = "prometheus", status = AlertStatus.RESOLVED))
@@ -219,6 +243,7 @@ class RunbookTest {
     @Test
     fun `a resolve after a person acknowledged needs no confirmation`() = suspendTest {
         policy()
+        autonomy()
         val alert = fire()
         f.app.alerts.acknowledge(f.member, alert.id)
         val r = f.app.alerts.resolve(automaticAgent, alert.id)
@@ -229,6 +254,7 @@ class RunbookTest {
     @Test
     fun `an automated agent closes a declared incident and its alerts keep paging`() = suspendTest {
         policy()
+        autonomy()
         val inc = f.app.incidents.declare(f.member, mayday.incidents.NewIncident("Checkout down", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
         f.app.incidents.update(automaticAgent, inc.key, mayday.incidents.IncidentPatch(status = mayday.incidents.IncidentStatus.RESOLVED))
         val alert = f.app.alerts.get(f.viewer, inc.alertIds.single())
@@ -240,6 +266,7 @@ class RunbookTest {
     @Test
     fun `only an active run of the same agent on the same alert, under a runbook that is still approved, covers a resolve`() = suspendTest {
         val rb = approved()
+        autonomy()
         val alert = fire(severity = Severity.SEV3)
         val agent = automaticAgent.actor
         suspend fun run(status: RunStatus, agentId: String = "mayday", alertId: String = alert.id) = AgentRun(Ids.new(), agentId, "Agent", AgentAction.ANALYZE,
@@ -250,6 +277,9 @@ class RunbookTest {
         run(RunStatus.RUNNING)
         assertEquals(rb.id, f.app.agents.runbookFor(alert, agent))
         assertNull(f.app.agents.runbookFor(alert, agent.copy(onBehalfOf = f.memberUser.id)), "an agent for a person needs no runbook")
+        autonomy(false)
+        assertNull(f.app.agents.runbookFor(alert, agent), "with no permission for autonomous work a runbook covers nothing")
+        autonomy()
         runbooks.revoke(f.lead, rb.id)
         assertNull(f.app.agents.runbookFor(alert, agent), "a revoked runbook covers nothing")
     }
@@ -257,6 +287,7 @@ class RunbookTest {
     @Test
     fun `a runbook without resolve_alert never lets the agent resolve alone`() = suspendTest {
         policy()
+        autonomy()
         approved(input(tools = listOf("add_alert_update")))
         val alert = fire(severity = Severity.SEV3)
         val r = AgentRun(Ids.new(), "mayday", "Mayday agent", AgentAction.ANALYZE, SubjectKind.ALERT, alert.id, "x", RunStatus.RUNNING, RunTrigger.AUTO, Actor.system,
@@ -270,6 +301,7 @@ class RunbookTest {
     @Test
     fun `an agent that leaves the runbook is refused and the alert pages a person`() = suspendTest {
         policy()
+        autonomy()
         f.app.policy.set(f.admin, Scope.ORG, "org", Keys.ESCALATION_MIN_SEVERITY, "SEV1", Enforcement.NONE)
         approved()
         f.enableLlm()
@@ -290,6 +322,7 @@ class RunbookTest {
     @Test
     fun `an agent raises a case that the runbook does not cover`() = suspendTest {
         policy()
+        autonomy()
         approved()
         f.enableLlm()
         synchronized(f.llm.script) {
@@ -307,6 +340,7 @@ class RunbookTest {
     @Test
     fun `a failed runbook run raises the alert to a person once`() = suspendTest {
         policy()
+        autonomy()
         approved()
         f.enableLlm()
         f.llm.fail(IllegalStateException("model unavailable"))
@@ -320,6 +354,7 @@ class RunbookTest {
     @Test
     fun `a raise after a resolve under the runbook makes a person confirm the resolve`() = suspendTest {
         policy()
+        autonomy()
         val rb = approved()
         val alert = fire(severity = Severity.SEV3)
         val r = AgentRun(Ids.new(), "mayday", "Mayday agent", AgentAction.ANALYZE, SubjectKind.ALERT, alert.id, "x", RunStatus.RUNNING, RunTrigger.AUTO, Actor.system,

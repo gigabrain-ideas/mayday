@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { BadgeCheck, Ban, ChevronDown, ChevronRight, Pencil, Plus, ScrollText } from "lucide-react";
-import { items, rpc, type AgentRunbook, type RunbookStatus, type Team } from "@/lib/api";
+import { Link } from "react-router";
+import { BadgeCheck, Ban, ChevronDown, ChevronRight, Pencil, Plus, ScrollText, TriangleAlert } from "lucide-react";
+import { items, rpc, type AgentRunbook, type EffectiveSetting, type RunbookStatus, type SettingsView, type Team } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession, useTeamOwner } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -26,6 +27,10 @@ export function TeamRunbooks({ team }: { team: Team }) {
   const list = useQuery(() => items(rpc.runbooks.listRunbooks<{ items: AgentRunbook[] }>({ teamId: team.id })), [team.id]);
   useLive((t) => t.startsWith("runbook."), list.reload);
   const [editing, setEditing] = useState<AgentRunbook | "new" | null>(null);
+  const settings = useQuery(() => rpc.policy.getSettings<SettingsView>({ scope: "TEAM", scopeId: team.id }), [team.id]);
+  useLive((t) => t === "setting.changed", settings.reload);
+  const autonomy = settings.data?.effective.find((s) => s.key === AUTO_REMEDIATION);
+  const showBlocked = !!autonomy && autonomy.value !== "true" && !!list.data?.some((rb) => rb.status === "APPROVED" || isOwner);
   const [open, setOpen] = useState<string | null>(null);
   const act = async (call: Promise<unknown>) => {
     try { await call; list.reload(); } catch (e) { toast.error(e); }
@@ -33,6 +38,7 @@ export function TeamRunbooks({ team }: { team: Team }) {
   return (
     <Card>
       <CardHeader title="Runbooks for agents" action={canWrite && <Button size="sm" variant="outline" onClick={() => setEditing("new")}><Plus /> New runbook</Button>} />
+      {showBlocked && autonomy && <AutonomyBlocked setting={autonomy} />}
       {!list.data ? <div className="flex justify-center p-6"><Spinner /></div> : list.data.length === 0 ? (
         <Empty icon={<ScrollText />} title="No runbooks">
           Write the procedure for a type of alert. When a team owner approves it, an agent follows it and closes these alerts alone.
@@ -106,5 +112,35 @@ function RunbookForm({ team, runbook, onDone }: { team: Team; runbook?: AgentRun
         <div className="flex justify-end"><Button type="submit">Save draft</Button></div>
       </form>
     </DialogContent>
+  );
+}
+
+const AUTO_REMEDIATION = "agents.auto_remediation";
+
+/** Approved runbooks act only when the team allows automatic agent remediation. */
+function AutonomyBlocked({ setting }: { setting: EffectiveSetting }) {
+  const locked = setting.enforcement === "LOCKED" && (setting.enforcedBy === "ORG" || setting.enforcedBy === "PROJECT");
+  const who = setting.enforcedBy === "PROJECT" ? "Project administrators" : "Organization administrators";
+  return (
+    <div role="status" className="mx-4 mb-3 flex gap-3 rounded-lg border border-warning/50 bg-warning-soft p-3 text-[13px]">
+      <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+      <div className="space-y-2">
+        <p className="font-medium">
+          {locked
+            ? `${who} turned off automatic agent remediation (${AUTO_REMEDIATION}) and locked it. Agents cannot follow the approved runbooks of this team alone.`
+            : `Automatic agent remediation (${AUTO_REMEDIATION}) is off for this team. Agents cannot follow the approved runbooks of this team alone.`}
+        </p>
+        <ul className="list-disc space-y-1 pl-4">
+          <li>When an alert fires that a runbook covers, Mayday starts no runbook run. Agents can only analyze the alert.</li>
+          <li>When an agent resolves the alert, the alert stays in the escalation and pages until a person acknowledges it.</li>
+          <li>When the built-in agent follows a runbook, Mayday refuses its next write step, and the agent raises the alert to a person.</li>
+          <li>The approvals stay valid. Agents follow the runbooks again as soon as automatic remediation is on.</li>
+        </ul>
+        <p className="text-muted-foreground">
+          {locked ? "To turn it on, ask an administrator to change it in " : "A team owner can turn it on for this team in "}
+          <Link className="underline" to="/settings/policies">Settings · Policies</Link>.
+        </p>
+      </div>
+    </div>
   );
 }
