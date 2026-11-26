@@ -8,6 +8,7 @@
 | [api.md](api.md) | gRPC services, gRPC-Web, HTTP endpoints, errors, webhook and pull contracts |
 | [testing.md](testing.md) | Contract tests (gRPC, gRPC-Web, HTTP edges, ProtoJson, store, webhook, audit stream and sinks) and domain tests |
 | [deployment.md](deployment.md) | Ports, configuration, probes, metrics, local run, Docker, Helm, Terraform, enterprise AI gateway, sizing |
+| [landing-page.md](landing-page.md) | Static landing page for GitHub Pages: sections, sources, deployment |
 | [observability.md](observability.md) | OpenTelemetry traces, agent run traces, metrics |
 
 Product briefs: [incidents](domains/incidents.md), [alerting](domains/alerting.md), [agents](domains/agents.md), [gateway identity](domains/gateway-identity.md), [policy](domains/policy.md), [identity](domains/identity.md), [directory](domains/directory.md), [on-call](domains/oncall.md), [escalation](domains/escalation.md), [provisioning](domains/provisioning.md), [reporting](domains/reporting.md), [tools and MCP](domains/mcp.md), [audit](domains/audit.md), [web interface](domains/web.md).

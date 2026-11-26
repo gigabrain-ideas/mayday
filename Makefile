@@ -8,7 +8,7 @@ HAVE_NODE := $(shell command -v npm 2>/dev/null)
 HAVE_JAVA := $(shell command -v java 2>/dev/null)
 JAR := build/libs/mayday.jar
 
-.PHONY: web build test e2e run demo image up down clean
+.PHONY: web build test e2e run demo image up down clean site-check
 
 web:
 ifdef HAVE_NODE
@@ -48,6 +48,15 @@ ifdef HAVE_JAVA
 else
 	MAYDAY_DEMO=true MAYDAY_DEV_LOGIN=true MAYDAY_DATA_DIR=none $(JAVA_DOCKER) -jar /opt/mayday/mayday.jar
 endif
+
+# The landing page is for customers. It must not show internal names: decision records, product briefs,
+# repository instruction files, test classes, source files, repository links. It must not mention factories or the shop floor.
+SITE_FORBIDDEN_WORDS := \badr[ _-]?[0-9]|docs/|decision records?|product briefs?|shop ?floor|factor(y|ies)|github\.com|__REPO__
+SITE_FORBIDDEN_NAMES := PRODUCT\.md|AGENTS\.md|CLAUDE\.md|\b[A-Z][A-Za-z]+Test\b|\.kt\b
+
+site-check:
+	@! grep -rnEi '$(SITE_FORBIDDEN_WORDS)' site --include='*.html' --include='*.js' --include='*.css' || { echo "site/ shows internal or forbidden names (see docs/landing-page.md)"; exit 1; }
+	@! grep -rnE '$(SITE_FORBIDDEN_NAMES)' site --include='*.html' --include='*.js' --include='*.css' || { echo "site/ shows internal file or test names (see docs/landing-page.md)"; exit 1; }
 
 image:
 	docker build -t mayday:local .

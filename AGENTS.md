@@ -17,3 +17,14 @@ On design matters that are not defined, first consult PRODUCT, then [Ztyle](http
 - bugs must be confirmed by providing hard evidence. No hard evidence (eg. a test that fails) = no bug.
 - Each section / domain must be fully documented in a concise manner as a sort of product brief (including positive and negative use-cases), so that the section can be completely deleted (as code) and regenerated / written anew with all the gained knowledge only using the product brief.
 - Keep documentation up to date. If some 2 sources disagree, complete all the work you can complete before raising it; never forget to raise the question so disagreement is curbed early on.
+
+## Customer-facing pages (landing page in `site/`)
+
+Mayday is a commercial product. The landing page sells a guided evaluation; see [docs/landing-page.md](docs/landing-page.md).
+
+- NEVER show internal names on customer-facing pages: decision record names or numbers (for example "ADR 0003"), "decision records", "product brief", repository files and paths (`PRODUCT.md`, `AGENTS.md`, `docs/…`), test class names, source file names, repository links. Name the capability in customer words; documents go to customers with the evaluation.
+- NEVER mention factories or the shop floor.
+- Positive statements only. Never pair a statement with its negative ("X, not Y", "without X", with/without comparisons).
+- Claim only what the docs back. No invented customers, testimonials, certifications, prices or SLAs. Scale numbers are a "design target".
+- Do not invite visitors to install Mayday alone. Calls to action are "Request an evaluation" and "Contact sales".
+- `make site-check` enforces the forbidden names and runs before every deploy. Do not weaken, bypass or shorten its list without prior approval.

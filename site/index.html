@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Mayday: AI-first, self-hosted incident management</title>
+  <meta name="description" content="Self-hosted incident management where AI agents act with a person's identity and rights, and every step goes to a verifiable audit chain.">
+  <meta property="og:title" content="Mayday: AI-first, self-hosted incident management">
+  <meta property="og:description" content="AI agents on every incident, with your rights and your audit trail. Self-hosted, open standards.">
+  <meta property="og:image" content="screenshots/incident.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="fonts/jetbrains-mono-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    document.documentElement.classList.replace("no-js", "js");
+    try {
+      var s = localStorage.getItem("mayday.theme");
+      if (s ? s === "dark" : matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");
+    } catch (e) {}
+  </script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-buoy" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="m4.93 4.93 4.24 4.24M14.83 9.17l4.24-4.24M14.83 14.83l4.24 4.24M9.17 14.83l-4.24 4.24"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-7-7 7 7-7 7"/></symbol>
+  <symbol id="i-pr" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M10 9H8m8 4H8m8 4H8"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5M9 8V2m6 6V2m3 6v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 19v3m7-12v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16M18 17V9m-5 8V5m-5 12v-3"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5M16 2v4M8 2v4M3 10h5"/><path d="M17.5 17.5 16 16.3V14"/><circle cx="16" cy="16" r="6"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></symbol>
+</svg>
+
+<header class="nav">
+  <div class="wrap">
+    <nav class="nav-in float" aria-label="Main">
+      <a class="brand" href="#top"><svg class="i i-lg"><use href="#i-buoy"/></svg>Mayday</a>
+      <div class="nav-links">
+        <a href="#security">Security</a>
+        <a href="#why">Why Mayday</a>
+        <a href="#lifecycle">Product</a>
+        <a href="#install">Architecture</a>
+        <a href="#evaluate">Evaluate</a>
+      </div>
+      <button class="btn btn-ghost btn-icon" id="theme" type="button" aria-label="Toggle theme">
+        <svg class="i"><use href="#i-moon"/></svg>
+      </button>
+      <a class="btn btn-outline btn-sm" href="#">Contact sales</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="badge badge-outline"><span class="pulse" aria-hidden="true"></span>Self-hosted · AI-first incident management</span>
+        <h1>AI agents on every incident, with your rights and your audit trail.</h1>
+        <p class="lead">Mayday opens the incident, pages the on-call person and lets an agent find the probable cause while the page rings. Each agent action carries a person's identity and goes to your audit stream and SIEM.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="#"><svg class="i"><use href="#i-arrow"/></svg>Request an evaluation</a>
+          <a class="btn btn-outline" href="#security"><svg class="i"><use href="#i-shield"/></svg>Read the security model</a>
+        </div>
+        <ul class="proof">
+          <li><svg class="i"><use href="#i-server"/></svg>Your cloud or bare metal</li>
+          <li><svg class="i"><use href="#i-users"/></svg>OIDC + SCIM 2.0</li>
+          <li><svg class="i"><use href="#i-user"/></svg>RFC 8693 delegation</li>
+          <li><svg class="i"><use href="#i-link"/></svg>HMAC-chained audit</li>
+          <li><svg class="i"><use href="#i-chart"/></svg>Design target: 100,000 concurrent users</li>
+        </ul>
+      </div>
+
+      <div class="stage">
+        <div class="shot card float">
+          <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i><span class="eyebrow">Incidents / INC-47</span></div>
+          <img src="screenshots/incident.png" width="1440" height="1000" alt="Mayday incident page: INC-47, a SEV1. The timeline shows the agent's summary, evidence and probable cause above the responders' notes.">
+        </div>
+        <div class="live card float" aria-label="Example live timeline">
+          <div class="card-h"><span class="eyebrow">Timeline · live</span><span class="badge badge-critical"><svg class="i"><use href="#i-alert"/></svg>SEV1</span></div>
+          <div class="live-body">
+            <div class="ev">
+              <span class="ev-ico critical"><svg class="i"><use href="#i-bell"/></svg></span>
+              <div><div class="ev-top">Alertmanager <span class="eyebrow">Alert</span><time>14:05</time></div><p>CheckoutHighErrorRate fires. INC-47 opens and pages the Checkout primary.</p></div>
+            </div>
+            <div class="ev">
+              <span class="ev-ico agent"><svg class="i"><use href="#i-bot"/></svg></span>
+              <div><div class="ev-top">Mayday agent <span class="eyebrow">Agent</span><time>14:07</time></div><p>Errors started 2 min after deploy v2024.11.4. Pool size went from 200 to 20.</p></div>
+            </div>
+            <div class="ev">
+              <span class="ev-ico success"><svg class="i"><use href="#i-pr"/></svg></span>
+              <div><div class="ev-top">Agent for Ana <span class="eyebrow">Patch</span><time>14:12</time></div><p>Pull request opened with Ana's rights: restore the pool size.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="strip">
+    <div class="wrap">
+      <div class="eyebrow">Connects to the stack you run today</div>
+      <div class="strip-list">
+        <span class="chip">Prometheus Alertmanager</span><span class="chip">Grafana</span><span class="chip">GitHub</span><span class="chip">Claude &amp; coding agents</span><span class="chip">Entra ID</span><span class="chip">Okta</span><span class="chip">Keycloak</span><span class="chip">Microsoft Sentinel</span><span class="chip">Grafana Loki</span><span class="chip">Splunk</span><span class="chip">Elastic</span><span class="chip">PostgreSQL</span><span class="chip">Kubernetes</span><span class="chip">OpenTelemetry</span><span class="chip">Any MCP server</span>
+      </div>
+    </div>
+  </div>
+
+  <section id="security">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="eyebrow">Security model</div>
+        <h2>An identity model built for your security review.</h2>
+        <p>Agents act inside a person's rights, for one run. Every step lands in an audit chain that your auditors verify with their own key.</p>
+      </div>
+
+      <div class="cards4">
+        <div class="card reveal"><h3><svg class="i i-lg"><use href="#i-users"/></svg>One token, two names</h3><p><code>sub</code> is the person. <code>act.sub</code> is the agent. Every request and every audit record names both.</p></div>
+        <div class="card reveal"><h3><svg class="i i-lg"><use href="#i-link"/></svg>Rights end with the run</h3><p>A delegated token lives one hour at most and expires when its run finishes. Runs get member rights, also when an administrator starts them.</p></div>
+        <div class="card reveal"><h3><svg class="i i-lg"><use href="#i-lock"/></svg>Admin rights need two opt-ins</h3><p>One from the organization and one from the person. When the organization switch turns off, every personal opt-in resets.</p></div>
+        <div class="card reveal"><h3><svg class="i i-lg"><use href="#i-file"/></svg>Alert text stays data</h3><p>The agent reads alert and tool content as escaped, untrusted data in its own block, apart from its task.</p></div>
+      </div>
+
+      <details class="token-box card reveal">
+        <summary><span class="eyebrow">See the delegated token</span><span class="badge">RFC 8693</span></summary>
+        <pre class="token"><code>{
+  "typ":   "obo",
+  "sub":   "user:ana",                <span class="c">// the person</span>
+  "act":   { "sub": "agent:coder" },  <span class="c">// the agent</span>
+  "run":   "run_8f2c",                <span class="c">// bound to one run</span>
+  "scope": "READ WRITE",              <span class="c">// member rights</span>
+  "exp":   "+1h"                      <span class="c">// or when the run ends</span>
+}</code></pre>
+      </details>
+
+      <div class="sec-grid" style="margin-top: 4rem">
+        <div class="reveal">
+          <h3 class="sub-h">Evidence your auditors can check.</h3>
+          <ul class="facts">
+            <li><svg class="i i-lg"><use href="#i-shield"/></svg><div><strong>The whole flow, recorded</strong><span>Alert intake, every authorization decision, token events, policy changes, tool calls and agent runs, for people and agents.</span></div></li>
+            <li><svg class="i i-lg"><use href="#i-link"/></svg><div><strong>A chain your auditors verify</strong><span>Each record links to the one before it with HMAC-SHA256. Auditors run <code>audit-verify</code> on an export with their own key.</span></div></li>
+            <li><svg class="i i-lg"><use href="#i-lock"/></svg><div><strong>Identifiers only</strong><span>Records hold actors, scopes and IDs. Secrets, prompts and incident text stay out of the stream.</span></div></li>
+            <li><svg class="i i-lg"><use href="#i-file"/></svg><div><strong>Mapped to ISO/IEC 27001:2022</strong><span>Evidence for A.5.15 to A.5.18, A.8.2 privileged access, A.8.15, A.8.16 and A.5.24 to A.5.28. Straight to Sentinel, Loki, Splunk, Elastic or any HTTP collector.</span></div></li>
+          </ul>
+        </div>
+        <div class="card float reveal">
+          <div class="card-h"><span class="eyebrow">Audit stream · INC-47</span><span class="badge badge-success"><svg class="i"><use href="#i-ok"/></svg>Chain verified</span></div>
+          <div class="chain">
+            <div class="chain-row"><span class="muted">14:05</span><span>alert.received <span class="muted">· alertmanager</span></span><code>a41f…09c2</code></div>
+            <div class="chain-row"><span class="muted">14:07</span><span>run.started <span class="muted">· system</span></span><code>3d07…b8e1</code></div>
+            <div class="chain-row"><span class="muted">14:07</span><span>tool:metrics.query <span class="muted">· agent:analyst</span></span><code>7be0…a113</code></div>
+            <div class="chain-row"><span class="muted">14:12</span><span>token.delegated <span class="muted">· sub ana · act coder</span></span><code>c92d…4e7f</code></div>
+            <div class="chain-row"><span class="muted">14:13</span><span>tool:create_patch <span class="muted">· coder for ana</span></span><code>18aa…f05b</code></div>
+            <div class="chain-row"><span class="muted">14:40</span><span>incident.status <span class="muted">· resolved by ana</span></span><code>e3c1…7d20</code></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top: 2.5rem">
+        <div class="eyebrow">Open standards</div>
+        <div class="strip-list">
+          <span class="chip">OAuth 2.0</span><span class="chip">OIDC with PKCE</span><span class="chip">RFC 8693 Token Exchange</span><span class="chip">JWT · JWKS</span><span class="chip">SCIM 2.0</span><span class="chip">HMAC-SHA256 audit chain</span><span class="chip">AES-256-GCM secrets at rest</span><span class="chip">OpenTelemetry</span><span class="chip">RFC 9110 Retry-After</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="budget" class="band">
+    <div class="wrap sec-grid">
+      <div class="reveal">
+        <div class="eyebrow">Budget-aware agents</div>
+        <h2 class="band-h">Agents respect your AI budget.</h2>
+        <p class="muted band-p">When your AI gateway reports that the budget is used up (HTTP 429), the agent pauses for the cooldown the gateway states, then continues with new work. Your LLM backend gets one call per pause. Alerts open incidents and page people during the pause, as always.</p>
+      </div>
+      <div class="card float reveal">
+        <div class="card-h"><span class="eyebrow">Built-in agent · AI gateway</span><span class="badge badge-warning"><svg class="i"><use href="#i-warn"/></svg>Paused until 14:46</span></div>
+        <ol class="tl budget">
+          <li><span class="ev-ico success"><svg class="i"><use href="#i-ok"/></svg></span><time>14:07</time><div><strong>200 OK</strong><p>INC-47 analysis complete.</p></div></li>
+          <li><span class="ev-ico"><svg class="i"><use href="#i-warn"/></svg></span><time>14:31</time><div><strong>429 · Retry-After: 900</strong><p>Budget used up. The agent pauses for 15 minutes.</p></div></li>
+          <li><span class="ev-ico"><svg class="i"><use href="#i-bell"/></svg></span><time>14:33</time><div><strong>Alert storm</strong><p>12 alerts open their incidents and page the on-call people.</p></div></li>
+          <li><span class="ev-ico agent"><svg class="i"><use href="#i-bot"/></svg></span><time>14:46</time><div><strong>Budget replenished</strong><p>The agent continues with the next alert.</p></div></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="why">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="eyebrow">Why Mayday</div>
+        <h2>One platform. Three reasons to choose it.</h2>
+      </div>
+      <div class="trio">
+        <div class="card reveal persona">
+          <div class="eyebrow">For the CISO</div>
+          <h3>Accountable AI in production.</h3>
+          <p>Each agent action carries a person's identity and stays inside that person's rights. The audit stream goes to your SIEM and gives evidence for ISO/IEC 27001 access and logging controls.</p>
+          <a class="more" href="#security">Security model <svg class="i"><use href="#i-arrow"/></svg></a>
+        </div>
+        <div class="card reveal persona">
+          <div class="eyebrow">For the engineering leader</div>
+          <h3>Faster recovery, every shift.</h3>
+          <p>The probable cause is on the timeline when the responder opens the page. Escalation pages the next level after the time to acknowledge. Reports show MTTA, MTTR and postmortem compliance per team.</p>
+          <a class="more" href="#example">A SEV1, step by step <svg class="i"><use href="#i-arrow"/></svg></a>
+        </div>
+        <div class="card reveal persona">
+          <div class="eyebrow">For the CTO</div>
+          <h3>Your infrastructure, your AI gateway.</h3>
+          <p>One service, many stateless replicas with PostgreSQL. Bring your own Anthropic or OpenAI-compatible gateway with workload identity. Mayday is complete on its own; add agents when you are ready.</p>
+          <a class="more" href="#install">Architecture <svg class="i"><use href="#i-arrow"/></svg></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="example">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="eyebrow">Example</div>
+        <h2>A SEV1 with an agent, step by step.</h2>
+        <p>Checkout returns HTTP 502 for card payments. Each step is also a record in the audit stream.</p>
+      </div>
+      <div class="card reveal" style="padding: 0.5rem 1.5rem">
+        <ol class="tl">
+          <li><span class="ev-ico critical"><svg class="i"><use href="#i-bell"/></svg></span><time>14:05</time><div><strong>The alert opens INC-47 and pages the on-call person.</strong><p>Alertmanager sends CheckoutHighErrorRate for team <code>checkout</code>. Mayday marks the postmortem as mandatory (organization policy). Ana is on the train, so after 5 minutes the page goes to Lee, who acknowledges.</p></div></li>
+          <li><span class="ev-ico agent"><svg class="i"><use href="#i-bot"/></svg></span><time>14:07</time><div><strong>The built-in agent posts the probable cause.</strong><p>It calls your AI gateway with its workload identity and queries metrics and deploy history through your tools gateway.</p><blockquote>Errors started 2 minutes after deploy v2024.11.4. The card-processor connection pool is exhausted. Probable cause: pool size reduced from 200 to 20.</blockquote></div></li>
+          <li><span class="ev-ico"><svg class="i"><use href="#i-pr"/></svg></span><time>14:12</time><div><strong>Ana presses Create patch.</strong><p>The coding agent receives a token that acts as Ana, for this run only. It opens a pull request and reports as "Mayday agent for Ana Responder".</p></div></li>
+          <li><span class="ev-ico success"><svg class="i"><use href="#i-ok"/></svg></span><time>14:40</time><div><strong>Resolved.</strong><p>The team rolls back. Ana dictates the resolution, then presses Generate runbook and Draft postmortem.</p></div></li>
+          <li><span class="ev-ico"><svg class="i"><use href="#i-chart"/></svg></span><time>Friday</time><div><strong>The director opens Reports.</strong><p>MTTA, MTTR and postmortem compliance for the Payments teams, this quarter.</p></div></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="lifecycle">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="eyebrow">From first alert to final fix</div>
+        <h2>One platform for the full incident lifecycle.</h2>
+        <p>Alerts, paging, investigation, response and learning share one timeline. People and agents write to the same record.</p>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="Incident lifecycle">
+        <button class="tab" role="tab" id="t-alert" aria-controls="p-alert" aria-selected="true"><span class="n">01</span>Alert &amp; page</button>
+        <button class="tab" role="tab" id="t-investigate" aria-controls="p-investigate" aria-selected="false" tabindex="-1"><span class="n">02</span>Investigate</button>
+        <button class="tab" role="tab" id="t-respond" aria-controls="p-respond" aria-selected="false" tabindex="-1"><span class="n">03</span>Respond</button>
+        <button class="tab" role="tab" id="t-learn" aria-controls="p-learn" aria-selected="false" tabindex="-1"><span class="n">04</span>Learn</button>
+      </div>
+
+      <div class="panel" role="tabpanel" id="p-alert" aria-labelledby="t-alert">
+        <div>
+          <h3>The next level gets the page.</h3>
+          <p>Alerts come in from Alertmanager or any webhook. Anyone in the organization can raise an alert for any team.</p>
+          <ul class="ticks">
+            <li><svg class="i"><use href="#i-check"/></svg><span>Severe alerts open an incident and link to it.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Escalation policies page the person on call, then the next level after the time to acknowledge.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Administrators set limits for all teams, for example "the next level after 15 minutes at most".</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Pages go to your chat, SMS or push service through one signed webhook.</span></li>
+          </ul>
+        </div>
+        <div class="shot card float"><img src="screenshots/alert-escalation.png" width="1440" height="1000" loading="lazy" alt="Alert with an active escalation: pages per level and the time of the next level."></div>
+      </div>
+
+      <div class="panel" role="tabpanel" id="p-investigate" aria-labelledby="t-investigate" hidden>
+        <div>
+          <h3>Agents start before you do.</h3>
+          <p>A configured agent analyzes the alert with your tools: metrics, logs, deploys and tickets through MCP. Its findings are on the timeline when you open the page.</p>
+          <ul class="ticks">
+            <li><svg class="i"><use href="#i-check"/></svg><span>Automatic analysis on alert, or one button: Analyze, Create patch, Remediate.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>The timeline fills itself from agent findings and updates.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Each agent run links to its OpenTelemetry trace: model turns, tool calls, tokens and errors.</span></li>
+          </ul>
+        </div>
+        <div class="shot card float"><img src="screenshots/incident.png" width="1440" height="1000" loading="lazy" alt="Incident page with the agent's summary, evidence, probable cause and next steps on the timeline."></div>
+      </div>
+
+      <div class="panel" role="tabpanel" id="p-respond" aria-labelledby="t-respond" hidden>
+        <div>
+          <h3>The right people, with the right rights.</h3>
+          <p>Teams come from your identity provider. Schedules, overrides and escalation live next to the incident. Agents act on behalf of the person who starts them.</p>
+          <ul class="ticks">
+            <li><svg class="i"><use href="#i-check"/></svg><span>A colleague covers a shift with one click, for a set period.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Claude, coding agents and your own bots connect through the built-in MCP server, webhooks or gRPC.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Live updates on every open browser.</span></li>
+          </ul>
+        </div>
+        <div class="shot card float"><img src="screenshots/oncall.png" width="1440" height="1000" loading="lazy" alt="On-call page: who responds now, a 14-day plan with an override, and team members."></div>
+      </div>
+
+      <div class="panel" role="tabpanel" id="p-learn" aria-labelledby="t-learn" hidden>
+        <div>
+          <h3>Less writing after the incident.</h3>
+          <p>Tell Mayday how you solved it: type it, write it with a stylus or dictate it. Agents turn it into a runbook and draft the postmortem from the timeline.</p>
+          <ul class="ticks">
+            <li><svg class="i"><use href="#i-check"/></svg><span>Runbooks in ASD-STE100 Simplified Technical English.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Policies that teams can make stricter, for example "postmortem mandatory from SEV2".</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Reports: MTTA, MTTR and postmortem compliance per team and period.</span></li>
+          </ul>
+        </div>
+        <div class="shot card float"><img src="screenshots/reports.png" width="1440" height="1000" loading="lazy" alt="Reports page with stat tiles, a chart by severity and a team table."></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="eyebrow">Architecture</div>
+        <h2>Built for the scale of your largest team.</h2>
+        <p>Design target: 50,000 to 100,000 concurrent users and 1,000 to 10,000 incidents and alerts a day. One service, from a single VM to many replicas.</p>
+      </div>
+
+      <div class="arch reveal">
+        <div><strong>Stateless replicas</strong><span>With PostgreSQL, sessions are signed cookies and live events reach every replica through LISTEN/NOTIFY.</span></div>
+        <div><strong>Fast at volume</strong><span>Keyset pagination, optimistic concurrency and bounded live streams per client.</span></div>
+        <div><strong>Kubernetes-ready</strong><span>The Helm chart runs two or more replicas with a PodDisruptionBudget and <code>/livez</code> and <code>/readyz</code> probes.</span></div>
+        <div><strong>One typed API</strong><span>gRPC with a protobuf contract for the web interface, scripts and agents.</span></div>
+      </div>
+
+      <div class="card table-wrap reveal" style="margin-top: 2rem">
+        <table class="modes">
+          <thead><tr><th class="eyebrow">Mode</th><th class="eyebrow">Storage</th><th class="eyebrow">Replicas</th><th class="eyebrow">Use</th></tr></thead>
+          <tbody>
+            <tr><td>Memory</td><td>RAM only</td><td>1</td><td class="muted">Demos and tests</td></tr>
+            <tr><td>Journal</td><td>RAM and an append-only file</td><td>1</td><td class="muted">Small teams, bare metal, a single VM</td></tr>
+            <tr><td>PostgreSQL</td><td>Your managed PostgreSQL</td><td>1 to many</td><td class="muted">Production and large organizations</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="arch-note reveal"><svg class="i"><use href="#i-check"/></svg>One Helm chart or one Terraform module. Our team installs it with you.</p>
+    </div>
+  </section>
+
+  <section id="evaluate">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="eyebrow">Guided evaluation</div>
+        <h2>Evaluate Mayday in an afternoon.</h2>
+        <p>Our engineers install Mayday in your cluster and connect it to your stack. You see it work with your own identities, alerts and audit trail.</p>
+      </div>
+      <ol class="eval reveal">
+        <li><span class="step">01</span><strong>Install</strong><span>We deploy Mayday with Helm in your namespace, on your managed PostgreSQL.</span></li>
+        <li><span class="step">02</span><strong>Connect</strong><span>Your team signs in with your identity provider. Your groups become teams through OIDC and SCIM 2.0.</span></li>
+        <li><span class="step">03</span><strong>Fire a test alert</strong><span>Alertmanager opens an incident and the on-call person gets the page. Your AI gateway runs the first analysis.</span></li>
+        <li><span class="step">04</span><strong>Verify</strong><span>The audit stream arrives in your SIEM. Your security team runs <code>audit-verify</code> with its own key.</span></li>
+      </ol>
+      <div class="sec-grid eval-cards">
+        <div class="card reveal">
+          <div class="card-h"><span class="eyebrow">What we need from you</span></div>
+          <ul class="ticks pad">
+            <li><svg class="i"><use href="#i-check"/></svg><span>A Kubernetes namespace or a VM</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>A PostgreSQL database</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>An OIDC client in Entra ID, Okta or Keycloak</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>One alert source, for example Alertmanager</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Your AI gateway URL and your SIEM endpoint</span></li>
+          </ul>
+        </div>
+        <div class="card reveal">
+          <div class="card-h"><span class="eyebrow">At the end of the afternoon</span><span class="badge badge-success"><svg class="i"><use href="#i-ok"/></svg>Live</span></div>
+          <ul class="ticks pad">
+            <li><svg class="i"><use href="#i-check"/></svg><span>A live alert that opens an incident and pages your on-call person</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>An agent finding on the timeline, with its trace</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Audit records in your SIEM, verified with your own key</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>The security review documents for your team</span></li>
+          </ul>
+        </div>
+      </div>
+      <div class="cta reveal">
+        <a class="btn btn-primary" href="#"><svg class="i"><use href="#i-arrow"/></svg>Request an evaluation</a>
+        <a class="btn btn-outline" href="#install">Architecture</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="diligence">
+    <div class="wrap sec-grid" style="align-items: start">
+      <div class="reveal">
+        <div class="eyebrow">Due diligence</div>
+        <h2 class="band-h">Everything your security review asks for.</h2>
+        <p class="muted band-p">The evaluation includes the documents a security and architecture review needs.</p>
+        <ul class="ticks">
+          <li><svg class="i"><use href="#i-check"/></svg><span>Architecture, scale and security controls</span></li>
+          <li><svg class="i"><use href="#i-check"/></svg><span>Identity model: roles, scopes, delegated tokens and opt-ins</span></li>
+          <li><svg class="i"><use href="#i-check"/></svg><span>Audit stream schema and ISO/IEC 27001:2022 mapping</span></li>
+          <li><svg class="i"><use href="#i-check"/></svg><span>Agents: delegated runs, untrusted data and AI budgets</span></li>
+          <li><svg class="i"><use href="#i-check"/></svg><span>Deployment, configuration and sizing guide</span></li>
+          <li><svg class="i"><use href="#i-check"/></svg><span>Test strategy and coverage of every boundary</span></li>
+        </ul>
+      </div>
+      <div class="reveal">
+        <div class="eyebrow">Quality</div>
+        <h2 class="band-h">Tested at every boundary.</h2>
+        <ul class="ticks">
+          <li><svg class="i"><use href="#i-check"/></svg><span>Contract tests for every port, against a real PostgreSQL and a real Keycloak identity provider.</span></li>
+          <li><svg class="i"><use href="#i-check"/></svg><span>Tests for delegation limits, untrusted alert data and audit tamper detection.</span></li>
+          <li><svg class="i"><use href="#i-check"/></svg><span>Browser use-case tests for the main flows of work.</span></li>
+          <li><svg class="i"><use href="#i-check"/></svg><span>Documentation for each part of the product, with its use cases and limits.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="eyebrow">Questions</div>
+        <h2>Answers for your review.</h2>
+      </div>
+      <div class="faq reveal">
+        <details><summary>How do we evaluate Mayday?</summary><p>Request an evaluation. In one afternoon our engineers install Mayday in your cluster and connect your identity provider, alert sources, AI gateway and SIEM. Your team sees it work with your own identities, alerts and audit trail.</p></details>
+        <details><summary>What does your team prepare?</summary><p>A Kubernetes namespace or a VM, a PostgreSQL database, an OIDC client, one alert source, your AI gateway URL and your SIEM endpoint.</p></details>
+        <details><summary>Where does our data go?</summary><p>To your PostgreSQL and the AI gateway and tools you configure. Traces go to the OpenTelemetry endpoint you set. The audit stream goes to your SIEM.</p></details>
+        <details><summary>Can an agent get admin rights?</summary><p>Run tokens carry member rights. Admin rights through an agent need the agent's own role, or token exchange with both the organization switch and the person's own opt-in on.</p></details>
+        <details><summary>What happens when the LLM or its budget is unavailable?</summary><p>Alerts open incidents and page people at once. On HTTP 429 the agent pauses for the stated cooldown, then continues with new work.</p></details>
+        <details><summary>How do our alert sources and pagers connect?</summary><p>Alert sources post to the Alertmanager endpoint or the generic alerts API (<code>POST /api/v1/alerts</code>). Pages go to your chat, SMS or push bridge through one signed webhook. Teams come from your identity provider.</p></details>
+        <details><summary>Will it scale to our organization?</summary><p>The design target is 50,000 to 100,000 concurrent users and 10,000 incidents and alerts a day. With PostgreSQL it runs many stateless replicas.</p></details>
+        <details><summary>Which identity providers work?</summary><p>Entra ID, Okta, Keycloak, or any OIDC and SCIM 2.0 provider. Groups become teams and owners.</p></details>
+        <details><summary>Which agents can connect?</summary><p>Claude, coding agents and your own bots, through the built-in MCP server, signed webhooks or gRPC. Writes by agents are configurable.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap">
+    <div class="card float closing reveal" id="contact">
+      <div class="eyebrow">Mayday! Mayday!</div>
+      <h2 style="margin-top: 1rem">Sleep well.<br>Mayday is on watch.</h2>
+      <p>Talk to us about a guided evaluation. Our engineers set up Mayday in your cluster in one afternoon, with your identities, alerts and audit trail.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="#"><svg class="i"><use href="#i-arrow"/></svg>Request an evaluation</a>
+        <a class="btn btn-ghost" href="#">Contact sales</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div>
+      <a class="brand" href="#top" style="color: inherit"><svg class="i i-lg"><use href="#i-buoy"/></svg>Mayday</a>
+      <p class="muted" style="margin-top: 0.75rem; font-size: 12px">AI-first, self-hosted incident management.</p>
+    </div>
+    <div><div class="eyebrow">Product</div><ul><li><a href="#security">Security model</a></li><li><a href="#budget">Budget-aware agents</a></li><li><a href="#lifecycle">Lifecycle</a></li><li><a href="#evaluate">Evaluate</a></li></ul></div>
+    <div><div class="eyebrow">Evaluate</div><ul><li><a href="#install">Architecture</a></li><li><a href="#evaluate">Guided evaluation</a></li><li><a href="#diligence">Due diligence</a></li><li><a href="#faq">Questions</a></li></ul></div>
+    <div><div class="eyebrow">Contact</div><ul><li><a href="#">Request an evaluation</a></li><li><a href="#">Contact sales</a></li></ul></div>
+  </div>
+</footer>
+
+<script src="main.js" defer></script>
+</body>
+</html>
