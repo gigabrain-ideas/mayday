@@ -23,8 +23,8 @@ An escalation policy tells who Mayday pages when an alert fires, and who is next
 - A page goes to the people of all targets of the level: for a schedule, the person on call now (overrides apply); for a user, that user. Disabled users and duplicates are skipped.
 - When a level reaches nobody, the next level is paged on the next tick. Otherwise the next level is paged `delayMinutes` after this page.
 - After the last level, the policy starts again at level 1 while `cycle < repeat`. Then the escalation is EXHAUSTED and Mayday publishes `alert.escalation_exhausted`.
-- Acknowledge stops the escalation (ACKNOWLEDGED). Resolve stops it (RESOLVED). Deleting the policy stops its escalations (CANCELLED).
-- "Escalate now" pages the next level at once. On a firing alert without an active escalation it starts the team default policy at level 1, at any severity.
+- A human in the loop: an acknowledgement by a person, or by an agent that acts for a person (delegated token), stops the escalation (ACKNOWLEDGED). An automated agent (no person behind it) can acknowledge the alert and go on with its analysis, but the escalation goes on: the on-call person is still paged until a human acknowledges. Resolve stops it (RESOLVED), also a resolve by an automated agent: Mayday has no approved runbooks yet that would decide when an agent may close an alert alone (see PRODUCT.md). Deleting the policy stops its escalations (CANCELLED).
+- "Escalate now" pages the next level at once. It works on an alert that waits for a person: firing, or acknowledged only by an automated agent. On such an alert without an active escalation it starts the team default policy at level 1, at any severity.
 - Each page publishes `alert.paged` (team ids, level, user ids) and calls the `Pager` port. The state is saved before the page is sent, so two instances never send the same page.
 - A schedule that was deleted, or a user that does not exist, reaches nobody.
 
@@ -33,7 +33,7 @@ stateDiagram-v2
   [*] --> ACTIVE: alert created or reopened
   ACTIVE --> ACTIVE: no ack after delay / escalate now (next level)
   ACTIVE --> EXHAUSTED: last level and no repeats left
-  ACTIVE --> ACKNOWLEDGED: acknowledge
+  ACTIVE --> ACKNOWLEDGED: acknowledge by a human
   ACTIVE --> RESOLVED: resolve
   ACTIVE --> CANCELLED: policy deleted
   ACKNOWLEDGED --> ACTIVE: alert reopened
@@ -73,6 +73,7 @@ Alerting calls the `AlertLifecycle` port (`opened`, `closed`); escalation implem
 
 - The Checkout owner creates "Default": level 1 the Primary schedule, 5 minutes; level 2 the Secondary schedule, 10 minutes; level 3 the team lead; repeat once.
 - A SEV2 alert fires at 03:00. Ana (Primary) is paged. She does not acknowledge. At 03:05 Lee (Secondary) is paged. Lee acknowledges. The escalation stops.
+- A SEV2 alert fires. The built-in agent starts its analysis automatically and acknowledges the alert. Ana is still paged, and at 03:05 Lee is paged too. Lee acknowledges: the escalation stops, and the agent goes on with its analysis.
 - Sam has an override on Primary. The page goes to Sam, not to the rotation.
 - A responder sees that the person on call is on a plane and presses "Escalate now". The next level is paged.
 - The administrator enforces `escalation.max_ack_minutes` = 15 as MINIMUM. The team keeps a policy with 10 minutes.
@@ -85,7 +86,7 @@ Alerting calls the `AlertLifecycle` port (`opened`, `closed`); escalation implem
 - A target schedule or user that does not exist, or a disabled user: `invalid`.
 - An update with an old version: `conflict`.
 - A SEV5 alert with `escalation.page_min_severity` = SEV3: nobody is paged.
-- "Escalate now" on an alert that is not firing, or for a team without a default policy: `invalid`.
+- "Escalate now" on an alert that a person acknowledged or that is resolved, or for a team without a default policy: `invalid`.
 
 ## Rebuild checklist
 

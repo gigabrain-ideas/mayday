@@ -5,6 +5,7 @@ import mayday.alerting.Alert
 import mayday.alerting.AlertLifecycle
 import mayday.alerting.AlertRepository
 import mayday.alerting.AlertStatus
+import mayday.alerting.waitsForHuman
 import mayday.directory.DirectoryService
 import mayday.directory.Team
 import mayday.identity.Access
@@ -196,7 +197,7 @@ class EscalationService(
     suspend fun escalateNow(by: Principal, alertId: String): Escalation {
         Access.requireWrite(by)
         val alert = alerts.get(alertId) ?: throw NotFound("Alert")
-        if (alert.status != AlertStatus.FIRING) throw Invalid("Only a firing alert can be escalated")
+        if (!alert.waitsForHuman) throw Invalid("Only an alert that waits for a person can be escalated")
         val cur = escalations.get(alert.id)
         if (cur == null || cur.status != EscalationStatus.ACTIVE) {
             val policy = defaultPolicy(alert.teamId) ?: throw Invalid("The team has no default escalation policy")
@@ -230,7 +231,7 @@ class EscalationService(
                 when {
                     alert == null || policy == null -> stop(e.id, EscalationStatus.CANCELLED)
                     alert.status == AlertStatus.RESOLVED -> stop(e.id, EscalationStatus.RESOLVED)
-                    alert.status == AlertStatus.ACKNOWLEDGED -> stop(e.id, EscalationStatus.ACKNOWLEDGED)
+                    alert.status == AlertStatus.ACKNOWLEDGED && !alert.waitsForHuman -> stop(e.id, EscalationStatus.ACKNOWLEDGED)
                     else -> advance(e, alert, policy, manual = false)
                 }
             }

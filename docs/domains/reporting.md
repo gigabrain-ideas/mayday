@@ -16,7 +16,7 @@ Reports show how a team or an organization handles incidents over a period: coun
 |---|---|
 | Incidents, open, resolved | Incidents reported in the period |
 | By severity | Count per SEV |
-| MTTA | Mean of `acknowledgedAt − reportedAt` |
+| MTTA | Mean of `acknowledgedAt − reportedAt`. Only a person (or an agent for a person) acknowledges an incident, so an incident that only an automated agent handled is not in MTTA (it is in MTTR when resolved). |
 | MTTR | Mean of `resolvedAt − (impactStartedAt or reportedAt)` |
 | MTTD | Mean of `discoveredAt − impactStartedAt` |
 | Postmortems | Required, published, overdue (due date passed and not published) |

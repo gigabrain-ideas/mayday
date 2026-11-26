@@ -60,6 +60,10 @@ data class Alert(
     val version: Long = 1,
 )
 
+/** Firing, or acknowledged only by an automated agent: paging goes on until a person acknowledges. */
+val Alert.waitsForHuman: Boolean
+    get() = status == AlertStatus.FIRING || (status == AlertStatus.ACKNOWLEDGED && acknowledgedBy?.automated == true)
+
 @Serializable
 data class AlertSignal(
     val title: String,
@@ -235,7 +239,7 @@ class AlertService(
     override suspend fun raiseForAddedTeams(incident: Incident, teamIds: List<String>, actor: Actor): List<RaisedAlert> =
         telemetry.span("alert.raise_for_added_teams", mapOf("mayday.incident.id" to incident.id)) { span ->
             val linked = incident.alertIds.mapNotNull { alerts.get(it) }
-            val somebodyOnIt = incident.acknowledgedAt != null || linked.any { it.acknowledgedBy != null }
+            val somebodyOnIt = incident.acknowledgedAt != null || linked.any { it.status == AlertStatus.ACKNOWLEDGED && !it.waitsForHuman }
             span.set("mayday.incident.acknowledged", somebodyOnIt.toString())
             if (somebodyOnIt || !incident.status.open) {
                 emptyList()
@@ -291,7 +295,7 @@ class AlertService(
             val a = alerts.get(id)?.takeIf { it.source == INCIDENT_SOURCE && it.labels["incident"] == incident.key } ?: continue
             when {
                 !incident.status.open && a.status != AlertStatus.RESOLVED -> resolveInternal(a, actor, "Incident ${incident.key} is ${incident.status.name.lowercase()}.")
-                a.status == AlertStatus.FIRING -> acknowledgeInternal(a, actor)
+                acknowledgeable(a, actor) -> acknowledgeInternal(a, actor)
             }
         }
     }
@@ -317,9 +321,13 @@ class AlertService(
     suspend fun acknowledge(by: Principal, id: String): Alert {
         Access.requireWrite(by)
         val cur = get(by, id)
-        if (cur.status != AlertStatus.FIRING) return cur
+        if (!acknowledgeable(cur, by.actor)) return cur
         return acknowledgeInternal(cur, by.actor)
     }
+
+    /** A firing alert, or one that only an automated agent acknowledged and that a human now takes over. */
+    private fun acknowledgeable(a: Alert, actor: Actor) =
+        a.status == AlertStatus.FIRING || (a.waitsForHuman && !actor.automated)
 
     private suspend fun acknowledgeInternal(cur: Alert, actor: Actor): Alert {
         val next = cur.copy(
@@ -330,7 +338,7 @@ class AlertService(
         )
         alerts.save(next, cur.version)
         publish("alert.updated", next)
-        runCatching { lifecycle.closed(next) }
+        if (!actor.automated) runCatching { lifecycle.closed(next) }
         return next
     }
 

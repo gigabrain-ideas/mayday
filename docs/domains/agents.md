@@ -39,7 +39,7 @@ Agents are an add-on. Without an agent, Mayday is a complete incident management
 - Each run result goes to the subject: a timeline entry (incident) or an update (alert).
 - Runs that do not finish in 30 minutes become FAILED.
 - The built-in agent calls the same tools as external agents (`MaydayTools`), plus the tool gateway servers. It skips only the `mcp.write_enabled` switch, not RBAC.
-- The built-in agent on an automatic run (no person behind it) does not get `create_incident`. Its task is to work on the subject of the run, not to open more incidents. It writes its findings on the current incident. On a manual run it acts for the person and gets the tool. External agents always get the tool (with WRITE, role MEMBER and `mcp.write_enabled`), because they can have tasks other than incident work. An automatic run can still add responder teams with `update_incident` and send alerts with `send_alert`, so it can still cause pages; this rule stops only new incidents.
+- The built-in agent on an automatic run (no person behind it) does not get `create_incident`. Its task is to work on the subject of the run, not to open more incidents. It writes its findings on the current incident. On a manual run it acts for the person and gets the tool. External agents always get the tool (with WRITE, role MEMBER and `mcp.write_enabled`), because they can have tasks other than incident work. An automated agent can acknowledge alerts and set incident statuses, but a human stays in the loop: the on-call person is paged until a person acknowledges ([escalation.md](escalation.md)). An automatic run can still add responder teams with `update_incident` and send alerts with `send_alert`, so it can still cause pages; this rule stops only new incidents.
 
 ## LLM providers
 

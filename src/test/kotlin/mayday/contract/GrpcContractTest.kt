@@ -396,6 +396,24 @@ class GrpcContractTest : ServerContract() {
     }
 
     @Test
+    fun `an agent acknowledgement keeps paging until a person acknowledges`() = suspendTest {
+        val s = newSchedule()
+        val p = escalation.createPolicy(SaveEscalationPolicyRequest.newBuilder().setTeamId("checkout").setName("Human ${unique()}").setTeamDefault(true)
+            .addLevels(level(5, TargetKind.TARGET_KIND_SCHEDULE to s.id)).addLevels(level(10, TargetKind.TARGET_KIND_USER to userOf("member").id)).build(), auth("lead"))
+        val creds = agents.createAgent(agentInput("Watcher ${unique()}", Delivery.DELIVERY_PULL, AgentAction.AGENT_ACTION_ANALYZE), auth("admin"))
+        val alert = alerts.ingestAlert(AlertSignal.newBuilder().setTitle("Disk ${unique()}").setSeverity(Severity.SEVERITY_SEV2).setTeam("checkout").build(), auth("member")).alert
+        val byAgent = alerts.acknowledgeAlert(id(alert.id), bearer(creds.token.secret))
+        assertEquals(AlertStatus.ALERT_STATUS_ACKNOWLEDGED, byAgent.status)
+        assertEquals(EscalationStatus.ESCALATION_STATUS_ACTIVE, escalation.getEscalation(id(alert.id), auth("viewer")).status)
+        assertEquals(2, escalation.escalateNow(id(alert.id), auth("member")).pagesList.size, "responders can still escalate")
+        val byPerson = alerts.acknowledgeAlert(id(alert.id), auth("member"))
+        assertEquals(userOf("member").id, byPerson.acknowledgedBy.id)
+        assertEquals(EscalationStatus.ESCALATION_STATUS_ACKNOWLEDGED, escalation.getEscalation(id(alert.id), auth("viewer")).status)
+        escalation.deletePolicy(id(p.id), auth("lead"))
+        oncall.deleteSchedule(id(s.id), auth("lead"))
+    }
+
+    @Test
     fun `a firing alert pages the default policy and responders escalate now`() = suspendTest {
         val s = newSchedule()
         val p = escalation.createPolicy(SaveEscalationPolicyRequest.newBuilder().setTeamId("checkout").setName("Pager ${unique()}").setTeamDefault(true)

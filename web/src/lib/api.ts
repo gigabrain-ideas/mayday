@@ -39,6 +39,9 @@ export type Scope = "ORG" | "PROJECT" | "TEAM";
 export type Enforcement = "NONE" | "MINIMUM" | "LOCKED";
 
 export interface Actor { kind: "USER" | "AGENT" | "SYSTEM"; id: string; name: string; onBehalfOf?: string }
+/** Firing, or acknowledged only by an agent with no person behind it: paging goes on until a person acknowledges. */
+export const waitsForHuman = (a: { status: string; acknowledgedBy?: Actor }) =>
+  a.status === "FIRING" || (a.status === "ACKNOWLEDGED" && a.acknowledgedBy?.kind === "AGENT" && !a.acknowledgedBy.onBehalfOf);
 export interface Page<T> { items: T[]; nextCursor?: string }
 export interface Project { id: string; slug: string; name: string; description: string; createdAt: string }
 export interface Team {

@@ -10,7 +10,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 
 | Element | Rules |
 |---|---|
-| `Alert` | `fingerprint`, `source`, `title`, `severity`, `status` (FIRING, ACKNOWLEDGED, RESOLVED), `teamId`, `labels`, `count`, `firstSeenAt`, `lastSeenAt`, optional `incidentId`, list of `updates`. |
+| `Alert` | `fingerprint`, `source`, `title`, `severity`, `status` (FIRING, ACKNOWLEDGED, RESOLVED), `teamId`, `labels`, `count`, `firstSeenAt`, `lastSeenAt`, optional `incidentId`, list of `updates`. An automated agent can acknowledge; a person (or an agent for a person) can acknowledge again after it, and only that stops the escalation. |
 | Fingerprint | Given by the source, or SHA-256 of source, title, team and sorted labels. |
 | Deduplication | A firing signal with the fingerprint of an open alert increments `count` and keeps the worst severity. A resolved alert that fires again inside `alerts.dedup_window_minutes` reopens. Otherwise Mayday creates a new alert. |
 | Resolve signal | Resolves the open alert. With no open alert, it does nothing (or records a resolved alert when the fingerprint is new). |
@@ -48,7 +48,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 - A flapping alert inside the window does not create a new incident each time.
 - A critical alert opens an incident. The incident does not raise a second alert.
 - A viewer tries to declare an incident: `forbidden`, and no alert is raised.
-- The incident is IDENTIFIED, or a responder acknowledged one of its alerts. The commander adds SRE: SRE gets no alert and nobody is paged, because somebody is already on the incident.
+- The incident is acknowledged, or a person acknowledged one of its alerts. The commander adds SRE: SRE gets no alert and nobody is paged, because somebody is already on the incident. An acknowledgement by an automated agent does not count: then SRE is paged.
 - A team is removed from an incident and added again: it gets no second alert.
 
 ## Rebuild checklist

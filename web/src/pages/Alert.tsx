@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { Check, CheckCheck, ExternalLink, Link2, Send, Siren } from "lucide-react";
-import { rpc, type Alert, type Incident } from "@/lib/api";
+import { rpc, waitsForHuman, type Alert, type Incident } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -35,12 +35,13 @@ export function AlertPage() {
           <span className="eyebrow">/</span>
           <SeverityBadge severity={a.severity} />
           <AlertStatusBadge status={a.status} />
+          {a.status === "ACKNOWLEDGED" && waitsForHuman(a) && <Badge tone="outline">By an agent · waiting for a person</Badge>}
           <Badge tone="outline">×{a.count}</Badge>
         </div>
         <h1 className="text-[22px] font-light leading-snug tracking-tight">{a.title}</h1>
         {canWrite && (
           <div className="mt-4 flex flex-wrap gap-2">
-            {a.status === "FIRING" && <Button onClick={() => act(rpc.alerts.acknowledgeAlert({ id: a.id }))}><Check /> Acknowledge</Button>}
+            {waitsForHuman(a) && <Button onClick={() => act(rpc.alerts.acknowledgeAlert({ id: a.id }))}><Check /> Acknowledge</Button>}
             {a.status !== "RESOLVED" && <Button variant="outline" onClick={() => act(rpc.alerts.resolveAlert({ id: a.id, text: "" }))}><CheckCheck /> Resolve</Button>}
             {a.externalUrl && <Button variant="ghost" asChild><a href={a.externalUrl} target="_blank" rel="noreferrer noopener"><ExternalLink /> Source</a></Button>}
           </div>

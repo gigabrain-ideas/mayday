@@ -101,6 +101,71 @@ class EscalationTest {
         assertEquals(b.id, esc.policies(f.viewer, f.team.id).first().id)
     }
 
+    private val automaticAgent = mayday.identity.Principal(mayday.shared.Actor(mayday.shared.ActorKind.AGENT, "mayday", "Mayday agent"), null,
+        mayday.identity.OrgRole.MEMBER, setOf(mayday.identity.TokenScope.READ, mayday.identity.TokenScope.WRITE), "run-1")
+
+    @Test
+    fun `an automatic agent acknowledges an alert and the on-call person is still paged`() = suspendTest {
+        twoLevels()
+        val alert = fire()
+        val acked = f.app.alerts.acknowledge(automaticAgent, alert.id)
+        assertEquals(AlertStatus.ACKNOWLEDGED, acked.status)
+        assertEquals(EscalationStatus.ACTIVE, esc.escalation(f.viewer, alert.id).status, "a human must still acknowledge")
+        clock.advance(Duration.ofMinutes(5))
+        esc.tick()
+        assertEquals(listOf(f.memberUser.id), f.pager.pages.last().recipients.map { it.id }, "the next level is paged")
+        val human = f.app.alerts.acknowledge(f.member, alert.id)
+        assertEquals(f.memberUser.id, human.acknowledgedBy?.id)
+        assertEquals(EscalationStatus.ACKNOWLEDGED, esc.escalation(f.viewer, alert.id).status)
+    }
+
+    @Test
+    fun `an agent that acts for a person acknowledges for that person`() = suspendTest {
+        twoLevels()
+        val alert = fire()
+        val forPerson = mayday.identity.Principal(mayday.shared.Actor(mayday.shared.ActorKind.AGENT, "mayday", "Mayday agent", onBehalfOf = f.memberUser.id),
+            f.memberUser, mayday.identity.OrgRole.MEMBER, mayday.identity.Principal.DELEGATED, "run-2")
+        f.app.alerts.acknowledge(forPerson, alert.id)
+        assertEquals(EscalationStatus.ACKNOWLEDGED, esc.escalation(f.viewer, alert.id).status)
+    }
+
+    @Test
+    fun `an automatic agent moves the incident on and the raised alerts keep paging until a human acknowledges`() = suspendTest {
+        twoLevels()
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        val alertId = inc.alertIds.single()
+        val byAgent = f.app.incidents.update(automaticAgent, inc.key, IncidentPatch(status = IncidentStatus.IDENTIFIED))
+        assertNull(byAgent.acknowledgedAt, "only a human acknowledges an incident")
+        assertEquals(EscalationStatus.ACTIVE, esc.escalation(f.viewer, alertId).status)
+        val byHuman = f.app.incidents.update(f.member, inc.key, IncidentPatch(status = IncidentStatus.MONITORING))
+        assertTrue(byHuman.acknowledgedAt != null)
+        assertEquals(f.memberUser.id, f.app.alerts.get(f.viewer, alertId).acknowledgedBy?.id)
+        assertEquals(EscalationStatus.ACKNOWLEDGED, esc.escalation(f.viewer, alertId).status)
+    }
+
+    @Test
+    fun `a human confirms the status that an automatic agent set and paging stops`() = suspendTest {
+        twoLevels()
+        val inc = f.app.incidents.declare(f.member, NewIncident("Checkout returns errors", severity = Severity.SEV2, teamIds = listOf(f.team.id)))
+        f.app.incidents.update(automaticAgent, inc.key, IncidentPatch(status = IncidentStatus.IDENTIFIED))
+        val edited = f.app.incidents.update(f.member, inc.key, IncidentPatch(title = "Checkout returns 500"))
+        assertNull(edited.acknowledgedAt, "an edit without a status is no acknowledgement")
+        val confirmed = f.app.incidents.update(f.member, inc.key, IncidentPatch(status = IncidentStatus.IDENTIFIED))
+        assertTrue(confirmed.acknowledgedAt != null)
+        assertEquals(EscalationStatus.ACKNOWLEDGED, esc.escalation(f.viewer, inc.alertIds.single()).status)
+    }
+
+    @Test
+    fun `a team added after only an automatic agent acknowledged is paged`() = suspendTest {
+        twoLevels()
+        val inc = f.app.incidents.declare(f.member, NewIncident("Payments slow", severity = Severity.SEV2, teamIds = listOf(f.other.id)))
+        f.app.alerts.acknowledge(automaticAgent, inc.alertIds.single())
+        f.app.incidents.update(automaticAgent, inc.key, IncidentPatch(status = IncidentStatus.IDENTIFIED))
+        val next = f.app.incidents.update(f.member, inc.key, IncidentPatch(teamIds = listOf(f.other.id, f.team.id)))
+        assertEquals(2, next.alertIds.size)
+        assertEquals(listOf(f.teamAdminUser.id), f.pager.pages.single().recipients.map { it.id })
+    }
+
     @Test
     fun `raised alerts stop paging when the incident is acknowledged and resolve with it`() = suspendTest {
         twoLevels()

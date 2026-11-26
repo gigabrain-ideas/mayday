@@ -87,6 +87,7 @@ Without Docker and without `MAYDAY_TEST_DATABASE_URL`, `PostgresStoreContractTes
 | 4 | A member declares an incident. Mayday raises an alert for the incident. The incident shows it, and the alert links back to the incident. | Passes |
 | 5 | A responder sets the status of a new incident from Investigating to Identified. Details shows the Acknowledged time and the time to acknowledge, and the raised alert is acknowledged. | Passes |
 | 6 | On-call with "All teams" shows who is on call now for the schedules of every team. | Passes |
+| 7 | An automated agent acknowledges an alert. The alert shows "By an agent · waiting for a person" and the Acknowledge button. A person acknowledges and the button goes away. | Passes |
 
 Negative cases stay in the contract and domain tests. Use-case tests show that the flows work end to end.
 

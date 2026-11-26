@@ -69,6 +69,9 @@ data class Actor(
     val name: String,
     val onBehalfOf: String? = null,
 ) {
+    /** An agent with no person behind it. It may act, but its acknowledgement keeps a human in the loop: paging goes on. */
+    val automated: Boolean get() = kind == ActorKind.AGENT && onBehalfOf == null
+
     companion object {
         val system = Actor(ActorKind.SYSTEM, "system", "Mayday")
     }

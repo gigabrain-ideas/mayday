@@ -120,6 +120,26 @@ class UseCaseTest : BrowserContract() {
         assertThat(nowCard("SRE · SRE primary")).containsText("admin")
     }
 
+    @Test
+    fun `7 an agent acknowledges an alert and a person still acknowledges it`() {
+        val title = unique("Queue backlog grows")
+        val alert = runBlocking {
+            val a = app.alerts.ingest(principal("admin"), mayday.alerting.AlertSignal(title, mayday.shared.Severity.SEV3, "checkout", source = "prometheus")).alert
+            val agent = mayday.identity.Principal(mayday.shared.Actor(mayday.shared.ActorKind.AGENT, "mayday", "Mayday agent"), null,
+                mayday.identity.OrgRole.MEMBER, setOf(mayday.identity.TokenScope.READ, mayday.identity.TokenScope.WRITE), "run-e2e")
+            app.alerts.acknowledge(agent, a.id)
+        }
+        signIn()
+        page.navigate("/alerts/${alert.id}")
+
+        val waiting = page.getByText("By an agent · waiting for a person")
+        assertThat(waiting).isVisible()
+        button("Acknowledge").click()
+
+        assertThat(waiting).hasCount(0)
+        assertThat(page.getByRole(AriaRole.BUTTON, Page.GetByRoleOptions().setName("Acknowledge"))).hasCount(0)
+    }
+
     private fun createTeam(name: String) {
         page.navigate("/settings/directory")
         page.getByPlaceholder("New team name").fill(name)

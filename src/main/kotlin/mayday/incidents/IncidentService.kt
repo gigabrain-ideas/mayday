@@ -169,7 +169,7 @@ class IncidentService(
             impactStartedAt = patch.impactStartedAt ?: cur.impactStartedAt,
             impactEndedAt = patch.impactEndedAt ?: (if (resolvedNow && cur.impactEndedAt == null) now else cur.impactEndedAt),
             discoveredAt = patch.discoveredAt ?: cur.discoveredAt,
-            acknowledgedAt = cur.acknowledgedAt ?: if (status != IncidentStatus.INVESTIGATING) now else null,
+            acknowledgedAt = cur.acknowledgedAt ?: if (patch.status != null && status != IncidentStatus.INVESTIGATING && !by.actor.automated) now else null,
             resolvedAt = resolvedAt,
             labels = patch.labels ?: cur.labels,
             postmortemRequired = required,
@@ -200,6 +200,7 @@ class IncidentService(
         }
         if (next.severity != cur.severity) span.set("mayday.incident.severity", next.severity.name)
         if (next.status != cur.status) record(next, EntryKind.STATUS, by.actor, "Status changed from ${cur.status} to ${next.status}.")
+        else if (cur.acknowledgedAt == null && next.acknowledgedAt != null) record(next, EntryKind.STATUS, by.actor, "Incident acknowledged with status ${next.status}.")
         if (next.severity != cur.severity) record(next, EntryKind.SEVERITY, by.actor, "Severity changed from ${cur.severity} to ${next.severity}.")
         val fields = buildList {
             if (next.title != cur.title) add("title")
@@ -214,7 +215,7 @@ class IncidentService(
         raised.forEach { record(next, EntryKind.ALERT, Actor.system, it.note, null, mapOf("alertId" to it.alertId)) }
         publish("incident.updated", next)
         if (raised.isNotEmpty()) runCatching { alerts.raised(next, raised.map { it.alertId }) }
-        if (next.status != cur.status) runCatching { alerts.statusChanged(next, by.actor) }
+        if (next.status != cur.status || (cur.acknowledgedAt == null && next.acknowledgedAt != null)) runCatching { alerts.statusChanged(next, by.actor) }
         return next
     }
 

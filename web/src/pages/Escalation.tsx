@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowDown, ArrowUp, BellRing, ChevronsUp, Pencil, Plus, Trash2 } from "lucide-react";
 import {
-  items, rpc, type Alert, type Escalation, type EscalationLevel, type EscalationPolicy, type EscalationStatus, type EscalationTarget, type Schedule, type Team, type TeamMember,
+  items, rpc, waitsForHuman, type Alert, type Escalation, type EscalationLevel, type EscalationPolicy, type EscalationStatus, type EscalationTarget, type Schedule, type Team, type TeamMember,
 } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession, useTeamOwner } from "@/lib/session";
@@ -177,7 +177,7 @@ export function AlertEscalation({ alert }: { alert: Alert }) {
   };
   return (
     <Card>
-      <CardHeader title="Escalation" action={canWrite && alert.status === "FIRING" &&
+      <CardHeader title="Escalation" action={canWrite && waitsForHuman(alert) &&
         <Button size="sm" variant="outline" onClick={escalate}><ChevronsUp /> Escalate now</Button>} />
       {esc.loading && !e && !esc.error ? <div className="flex justify-center p-6"><Spinner /></div> : !e ? (
         <p className="px-4 py-4 text-[12.5px] text-muted-foreground">Nobody was paged. The team has no default policy, or the severity is below the paging threshold.</p>

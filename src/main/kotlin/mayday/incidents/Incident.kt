@@ -111,7 +111,7 @@ interface IncidentAlerts {
 
     /**
      * Before an update that adds responder teams is saved: raise alerts for the added teams while nobody is on the incident.
-     * Raises none when the incident or one of its alerts is acknowledged, or when the incident is closed.
+     * Raises none when a person acknowledged the incident or one of its alerts, or when the incident is closed. An acknowledgement by an automated agent does not count.
      */
     suspend fun raiseForAddedTeams(incident: Incident, teamIds: List<String>, actor: Actor): List<RaisedAlert>
 
@@ -121,7 +121,7 @@ interface IncidentAlerts {
     /** After the incident is saved: announce the raised alerts and start their escalation. */
     suspend fun raised(incident: Incident, alertIds: List<String>)
 
-    /** After a status change: acknowledge the raised alerts when the incident leaves INVESTIGATING, resolve them when it closes. */
+    /** After a status change or a human acknowledgement: acknowledge the raised alerts (with the actor of the change), resolve them when the incident closes. */
     suspend fun statusChanged(incident: Incident, actor: Actor)
 
     companion object {
