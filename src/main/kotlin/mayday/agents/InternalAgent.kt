@@ -2,6 +2,7 @@ package mayday.agents
 
 import kotlinx.serialization.json.JsonObject
 import mayday.identity.Principal
+import mayday.runbooks.Runbook
 import mayday.shared.Clock
 import mayday.shared.JSON
 import mayday.shared.SpanKind
@@ -16,9 +17,9 @@ class InternalAgent(
     private val model: String = "",
     private val maxTurns: Int = 24,
 ) {
-    suspend fun run(agent: AgentConfig, run: AgentRun, principal: Principal, subject: JsonObject): String {
+    suspend fun run(agent: AgentConfig, run: AgentRun, principal: Principal, subject: JsonObject, runbook: Runbook? = null): String {
         val tools = catalog.tools(principal, internal = true)
-        val messages = mutableListOf(LlmMessage(LlmRole.USER, listOf(LlmBlock.Text(task(run)), LlmBlock.Text(untrusted(subject)))))
+        val messages = mutableListOf(LlmMessage(LlmRole.USER, listOf(LlmBlock.Text(task(run, runbook)), LlmBlock.Text(untrusted(subject)))))
         val system = SYSTEM_PROMPT + if (agent.instructions.isNotBlank()) "\n\nOrganization instructions:\n${agent.instructions}" else ""
         var finalText = ""
         for (turn in 0 until maxTurns) {
@@ -69,7 +70,7 @@ class InternalAgent(
             LlmBlock.ToolResult(use.id, outcome.content.take(60_000), outcome.isError)
         }
 
-    private fun task(run: AgentRun): String {
+    private fun task(run: AgentRun, runbook: Runbook?): String {
         val ref = when (run.subjectKind) {
             SubjectKind.INCIDENT -> run.subjectLabel
             SubjectKind.ALERT -> "the alert in the subject data"
@@ -85,7 +86,14 @@ class InternalAgent(
             AgentAction.RUNBOOK -> "Write a runbook from the resolution notes and timeline of $ref. Use ASD-STE100 Simplified Technical English: short sentences, active voice, one instruction per step, imperative verbs. Use numbered steps in Markdown with sections Symptoms, Checks, Procedure, Verification, Escalation. Call save_runbook with the title and body. Finish with a one-line summary."
         }
         val human = if (run.prompt.isNotBlank()) "\n\nInstructions from the person who started this run:\n${run.prompt}" else ""
-        return "Current time: ${clock.now()}\nTask: $goal$human"
+        return "Current time: ${clock.now()}\nTask: $goal$human" + (runbook?.let { procedure(it, run.alertId.orEmpty()) } ?: "")
+    }
+
+    /** A person approved the runbook for this type of alert, so its text is part of the task, not of the untrusted subject data. */
+    private fun procedure(rb: Runbook, alertId: String): String {
+        val resolve = if (Runbook.RESOLVE in rb.allowedTools) "When the verification of the runbook passes, resolve the alert with resolve_alert." else "The runbook does not let you resolve the alert. A person resolves it."
+        return "\n\nFollow the approved runbook \"${rb.title}\" for the alert with id $alertId. Do only its steps. Use only the tools that you have. $resolve " +
+            "When a step fails, or the runbook does not cover the case, call ${RunbookScope.RAISE} with the reason and stop.\n\nRunbook:\n${rb.body}"
     }
 
     /** Subject data comes from alert sources and people. '<' and '>' are JSON-escaped, so the data cannot close the tag. */

@@ -145,6 +145,8 @@ message AgentRun {
   bool requires_approval = 19;
   optional Actor approved_by = 20;
   google.protobuf.Timestamp approved_at = 21;
+  // The approved runbook that an automatic run follows.
+  optional string runbook_id = 22;
 }
 
 message AgentRuns {

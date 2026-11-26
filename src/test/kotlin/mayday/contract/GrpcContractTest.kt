@@ -44,6 +44,7 @@ class GrpcContractTest : ServerContract() {
     private val events by lazy { EventServiceGrpcKt.EventServiceCoroutineStub(channel) }
     private val oncall by lazy { OnCallServiceGrpcKt.OnCallServiceCoroutineStub(channel) }
     private val escalation by lazy { EscalationServiceGrpcKt.EscalationServiceCoroutineStub(channel) }
+    private val runbooks by lazy { RunbookServiceGrpcKt.RunbookServiceCoroutineStub(channel) }
 
     private fun unique() = UUID.randomUUID().toString().take(8)
 
@@ -527,6 +528,83 @@ class GrpcContractTest : ServerContract() {
         assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { incidents.declareIncident(declare("read only"), bearer(issued.secret)) }
         users.revokeToken(id(issued.token.id), auth("lead"))
         assertStatus(Status.Code.UNAUTHENTICATED, "unauthenticated") { authn.getMe(empty, bearer(issued.secret)) }
+    }
+
+    // ---- runbooks ----
+
+    private fun draft(source: String, vararg tools: String) = SaveAgentRunbookRequest.newBuilder().setTeamId("checkout").setTitle("Disk full on $source")
+        .setBody("1. Delete the old log files.\n2. Make sure that disk use is below 80%.").setMatch(AlertMatch.newBuilder().setSource(source))
+        .addAllAllowedTools(tools.toList()).build()
+
+    @Test
+    fun `members draft runbooks and only a team owner approves the version that they read`() = suspendTest {
+        val source = "prom-${unique()}"
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { runbooks.saveRunbook(draft(source), auth("viewer")) }
+        assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { runbooks.saveRunbook(draft(source).toBuilder().clearMatch().build(), auth("member")) }
+        val d = runbooks.saveRunbook(draft(source, "resolve_alert"), auth("member"))
+        assertEquals(RunbookStatus.RUNBOOK_STATUS_DRAFT, d.status)
+        assertEquals(source, d.match.source)
+        assertEquals(listOf("resolve_alert"), d.allowedToolsList)
+        assertFalse(d.hasApprovedBy())
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { runbooks.approveRunbook(approve(d), auth("member")) }
+        assertStatus(Status.Code.ABORTED, "conflict") { runbooks.approveRunbook(approve(d).toBuilder().setVersion(d.version + 5).build(), auth("lead")) }
+        val ok = runbooks.approveRunbook(approve(d), auth("lead"))
+        assertEquals(RunbookStatus.RUNBOOK_STATUS_APPROVED, ok.status)
+        assertEquals(userOf("lead").id, ok.approvedBy.id)
+        assertTrue(ok.hasApprovedAt())
+        assertTrue(runbooks.listRunbooks(ListRunbooksRequest.newBuilder().setTeamId("checkout").build(), auth("viewer")).itemsList.any { it.id == ok.id })
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") {
+            runbooks.saveRunbook(draft(source).toBuilder().setId(ok.id).setVersion(ok.version).build(), auth("member"))
+        }
+        val changed = runbooks.saveRunbook(draft(source).toBuilder().setId(ok.id).setVersion(ok.version).setTitle("Changed").build(), auth("lead"))
+        assertEquals(RunbookStatus.RUNBOOK_STATUS_DRAFT, changed.status, "a change needs a new approval")
+        assertFalse(changed.hasApprovedBy())
+        val again = runbooks.approveRunbook(approve(changed), auth("lead"))
+        assertStatus(Status.Code.PERMISSION_DENIED, "forbidden") { runbooks.revokeRunbook(id(again.id), auth("member")) }
+        assertEquals(RunbookStatus.RUNBOOK_STATUS_REVOKED, runbooks.revokeRunbook(id(again.id), auth("lead")).status)
+        assertStatus(Status.Code.NOT_FOUND, "not_found") { runbooks.getRunbook(id("missing"), auth("viewer")) }
+    }
+
+    private fun approve(rb: AgentRunbook) = ApproveRunbookRequest.newBuilder().setId(rb.id).setVersion(rb.version).build()
+
+    @Test
+    fun `an agent that follows an approved runbook resolves its alert and paging stops, other agent resolves keep paging`() = suspendTest {
+        val source = "prom-${unique()}"
+        val s = newSchedule()
+        val p = escalation.createPolicy(SaveEscalationPolicyRequest.newBuilder().setTeamId("checkout").setName("Runbook ${unique()}").setTeamDefault(true)
+            .addLevels(level(5, TargetKind.TARGET_KIND_SCHEDULE to s.id)).build(), auth("lead"))
+        val rb = runbooks.approveRunbook(approve(runbooks.saveRunbook(draft(source, "resolve_alert"), auth("member"))), auth("lead"))
+        val creds = agents.createAgent(agentInput("Runbook agent ${unique()}", Delivery.DELIVERY_PULL, AgentAction.AGENT_ACTION_ANALYZE).toBuilder()
+            .addTriggers(AgentTrigger.newBuilder().setEvent(TriggerEvent.TRIGGER_EVENT_ALERT_CREATED).setMinSeverity(Severity.SEVERITY_SEV2)
+                .addTeamIds(team.id).setAction(AgentAction.AGENT_ACTION_ANALYZE)).build(), auth("admin"))
+        val agentAuth = bearer(creds.token.secret)
+        try {
+            val covered = alerts.ingestAlert(AlertSignal.newBuilder().setTitle("Disk ${unique()}").setSource(source).setSeverity(Severity.SEVERITY_SEV2)
+                .setTeam("checkout").build(), auth("member")).alert
+            var claimed: ClaimedRun? = null
+            eventually { claimed = runs.claimRuns(ClaimRunsRequest.newBuilder().setLimit(50).build(), agentAuth).itemsList.firstOrNull { it.run.runbookId == rb.id }; claimed != null }
+            assertEquals(rb.id, claimed!!.subject.fieldsMap["runbook"]?.structValue?.fieldsMap?.get("id")?.stringValue, "the agent receives the runbook")
+            val resolved = alerts.resolveAlert(AlertTextRequest.newBuilder().setId(covered.id).setText("Old logs deleted. Disk at 40%.").build(), agentAuth)
+            assertEquals(AlertStatus.ALERT_STATUS_RESOLVED, resolved.status)
+            assertEquals(creds.agent.id, resolved.resolvedBy.id)
+            assertEquals(rb.id, resolved.resolvedUnderRunbook)
+            assertEquals(EscalationStatus.ESCALATION_STATUS_RESOLVED, escalation.getEscalation(id(covered.id), auth("viewer")).status)
+
+            val other = alerts.ingestAlert(AlertSignal.newBuilder().setTitle("Latency ${unique()}").setSource("other-$source").setSeverity(Severity.SEVERITY_SEV2)
+                .setTeam("checkout").build(), auth("member")).alert
+            val alone = alerts.resolveAlert(AlertTextRequest.newBuilder().setId(other.id).setText("Looks fine").build(), agentAuth)
+            assertEquals(AlertStatus.ALERT_STATUS_RESOLVED, alone.status)
+            assertEquals(creds.agent.id, alone.resolvedBy.id)
+            assertFalse(alone.hasResolvedUnderRunbook())
+            assertEquals(EscalationStatus.ESCALATION_STATUS_ACTIVE, escalation.getEscalation(id(other.id), auth("viewer")).status, "a person must confirm")
+            val confirmed = alerts.acknowledgeAlert(id(other.id), auth("member"))
+            assertEquals(AlertStatus.ALERT_STATUS_RESOLVED, confirmed.status)
+            assertEquals(EscalationStatus.ESCALATION_STATUS_RESOLVED, escalation.getEscalation(id(other.id), auth("viewer")).status)
+        } finally {
+            agents.deleteAgent(id(creds.agent.id), auth("admin"))
+            escalation.deletePolicy(id(p.id), auth("lead"))
+            oncall.deleteSchedule(id(s.id), auth("lead"))
+        }
     }
 
     // ---- agents ----

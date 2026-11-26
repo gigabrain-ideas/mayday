@@ -367,6 +367,40 @@ abstract class StoreContract {
     }
 
     @Test
+    fun `runbooks round trip by team with their match and approval and enforce optimistic concurrency`() = suspendTest {
+        fun rb(team: String) = mayday.runbooks.Runbook(Ids.new(), team, "Disk full", "1. Delete old logs.",
+            mayday.runbooks.AlertMatch("prometheus", mapOf("service" to "db"), "disk-*"), listOf("resolve_alert"),
+            createdBy = mayday.shared.Actor.system, createdAt = now, updatedAt = now)
+        val a = rb("t1")
+        p.runbooks.save(a, null)
+        p.runbooks.save(rb("t2"), null)
+        assertEquals(a, p.runbooks.get(a.id))
+        assertEquals(listOf(a), p.runbooks.byTeam("t1"))
+        assertFailsWith<Conflict> { p.runbooks.save(a, null) }
+        val approved = a.copy(status = mayday.runbooks.RunbookStatus.APPROVED, approvedBy = mayday.shared.Actor(mayday.shared.ActorKind.USER, "u1", "Ana"),
+            approvedAt = now, version = 2)
+        p.runbooks.save(approved, 1)
+        assertFailsWith<Conflict> { p.runbooks.save(a.copy(title = "stale", version = 2), 1) }
+        assertEquals(approved, p.runbooks.get(a.id))
+        p.runbooks.delete(a.id)
+        assertNull(p.runbooks.get(a.id))
+    }
+
+    @Test
+    fun `alerts and runs keep who resolved and the runbook`() = suspendTest {
+        val agent = mayday.shared.Actor(mayday.shared.ActorKind.AGENT, "mayday", "Mayday agent")
+        val alert = mayday.alerting.Alert(Ids.new(), "fp-${Ids.new()}", "prometheus", "Disk", severity = mayday.shared.Severity.SEV2,
+            status = mayday.alerting.AlertStatus.RESOLVED, teamId = "t1", firstSeenAt = now, lastSeenAt = now, resolvedAt = now, resolvedBy = agent, resolvedUnderRunbook = "rb1")
+        p.alerts.save(alert, null)
+        assertEquals(alert, p.alerts.get(alert.id))
+        val run = mayday.agents.AgentRun(Ids.new(), "mayday", "Mayday agent", mayday.agents.AgentAction.ANALYZE, mayday.agents.SubjectKind.ALERT, alert.id, "Disk",
+            trigger = mayday.agents.RunTrigger.AUTO, requestedBy = mayday.shared.Actor.system, createdAt = now, alertId = alert.id, runbookId = "rb1",
+            runbookTitle = "Disk full", raisedAt = now)
+        p.runs.save(run, null)
+        assertEquals(run, p.runs.get(run.id))
+    }
+
+    @Test
     fun `due escalations are active ones whose time came, earliest first`() = suspendTest {
         fun e(minutes: Long, status: mayday.escalation.EscalationStatus = mayday.escalation.EscalationStatus.ACTIVE, policy: String = "p1") =
             mayday.escalation.Escalation(Ids.new(), "t1", policy, status, 0, 0, now.plus(minutes, ChronoUnit.MINUTES),

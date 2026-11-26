@@ -41,6 +41,9 @@ import mayday.policy.Enforcement
 import mayday.policy.Keys
 import mayday.policy.PolicyService
 import mayday.policy.Scope
+import mayday.runbooks.AlertMatch
+import mayday.runbooks.RunbookInput
+import mayday.runbooks.RunbookService
 import mayday.shared.DomainException
 import mayday.shared.Forbidden
 import mayday.shared.Invalid
@@ -87,6 +90,7 @@ class MaydayTools(
     private val identity: () -> IdentityService,
     private val agents: () -> AgentService,
     private val onCall: OnCallService,
+    private val runbooks: RunbookService,
 ) : ToolCatalog {
     private class Tool(val spec: ToolSpec, val handler: suspend (Principal, JsonObject, Gate) -> JsonElement)
 
@@ -265,6 +269,49 @@ class MaydayTools(
         },
         Tool(ToolSpec("add_alert_update", "Add an update to an alert.", S.obj(listOf("id", "text"), "id" to S.str("Alert id"), "text" to S.str("Update")), write = true)) { p, a, g ->
             JSON.encodeToJsonElement(alerts.addUpdate(p, g.alert(p, a.req("id")).id, a.req("text")))
+        },
+        Tool(ToolSpec("list_runbooks", "List the runbooks of a team: drafts and runbooks that a person approved for agentic use on a type of alert.",
+            S.obj(listOf("team"), "team" to S.str("Team id or slug")))) { p, a, _ ->
+            JSON.encodeToJsonElement(runbooks.list(p, a.req("team")))
+        },
+        Tool(ToolSpec("get_runbook", "Get one runbook with its procedure, the alerts it covers, the allowed tools and its approval.",
+            S.obj(listOf("id"), "id" to S.str("Runbook id")))) { p, a, _ ->
+            JSON.encodeToJsonElement(runbooks.get(p, a.req("id")))
+        },
+        Tool(ToolSpec("draft_runbook", "Create a runbook draft, or change a runbook. A change makes it a draft again: a team owner must approve it before agents follow it.",
+            S.obj(listOf("title", "body"),
+                "id" to S.str("Runbook id. Empty creates a new draft."),
+                "team" to S.str("Team id or slug. Required for a new draft."),
+                "title" to S.str("Title"),
+                "body" to S.str("Procedure in Markdown, ASD-STE100: Symptoms, Checks, Procedure, Verification, Escalation"),
+                "source" to S.str("Alert source that the runbook covers, for example prometheus"),
+                "labels" to buildJsonObject { put("type", "object"); put("description", "Alert labels that must all be equal"); putJsonObject("additionalProperties") { put("type", "string") } },
+                "fingerprint" to S.str("Alert fingerprint pattern. * matches any text."),
+                "allowed_tools" to S.arr("Write tools that an agent can call when it follows the runbook. resolve_alert lets it resolve the alert.", S.str("Tool name")),
+                "version" to S.int("Version that you read, for a change"),
+            ), write = true)) { p, a, g ->
+            val labels = (a["labels"] as? JsonObject)?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap()
+            val match = AlertMatch(a.str("source").orEmpty(), labels, a.str("fingerprint").orEmpty())
+            val id = a.str("id")?.takeIf { it.isNotBlank() }
+            val rb = if (id == null) {
+                val team = directory.team(a.req("team"))
+                g.write(listOf(team.id))
+                runbooks.create(p, RunbookInput(team.id, a.req("title"), a.req("body"), match, a.strList("allowed_tools").orEmpty()))
+            } else {
+                g.write(listOf(runbooks.get(p, id).teamId))
+                runbooks.update(p, id, RunbookInput(title = a.req("title"), body = a.req("body"), match = match, allowedTools = a.strList("allowed_tools").orEmpty()), a.int("version")?.toLong())
+            }
+            JSON.encodeToJsonElement(rb)
+        },
+        Tool(ToolSpec("approve_runbook", "Team owners: approve a runbook for agentic use. Only a person can approve. Give the version that you read.",
+            S.obj(listOf("id", "version"), "id" to S.str("Runbook id"), "version" to S.int("Version that you read")), write = true)) { p, a, g ->
+            g.write(listOf(runbooks.get(p, a.req("id")).teamId))
+            JSON.encodeToJsonElement(runbooks.approve(p, a.req("id"), a.int("version")?.toLong() ?: throw Invalid("'version' is required")))
+        },
+        Tool(ToolSpec("revoke_runbook", "Team owners: stop the agentic use of a runbook. Agents that follow it then raise their alerts to a person.",
+            S.obj(listOf("id"), "id" to S.str("Runbook id")), write = true)) { p, a, g ->
+            g.write(listOf(runbooks.get(p, a.req("id")).teamId))
+            JSON.encodeToJsonElement(runbooks.revoke(p, a.req("id")))
         },
         Tool(ToolSpec("claim_agent_runs", "For pull agents: claim queued runs for the calling agent identity.",
             S.obj(emptyList(), "limit" to S.int("Maximum runs, 1-50")))) { p, a, _ ->

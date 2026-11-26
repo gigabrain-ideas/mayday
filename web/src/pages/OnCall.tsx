@@ -5,6 +5,7 @@ import { items, rpc, type OnCall, type Schedule, type ScheduleOverride, type Shi
 import { useLive, useQuery } from "@/lib/hooks";
 import { useSession, useTeamOwner } from "@/lib/session";
 import { EscalationPolicies } from "@/pages/Escalation";
+import { TeamRunbooks } from "@/pages/Runbooks";
 import { useToast } from "@/lib/toast";
 import { cn, dateTime, duration, fromLocalInput, toLocalInput } from "@/lib/utils";
 import { PageHeader } from "@/components/common";
@@ -102,6 +103,7 @@ function Schedules({ team }: { team: Team }) {
       </Card>
       {schedule && <Overrides schedule={schedule} team={team} members={members.data ?? []} isOwner={isOwner} />}
       <EscalationPolicies team={team} members={members.data ?? []} />
+      <TeamRunbooks team={team} />
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         {editing && <ScheduleForm team={team} members={members.data ?? []} schedule={editing === "new" ? undefined : editing}
           onDone={(s) => { setEditing(null); list.reload(); if (s) setPicked(s.id); }} />}

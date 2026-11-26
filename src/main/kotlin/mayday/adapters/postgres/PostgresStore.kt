@@ -43,6 +43,8 @@ import mayday.escalation.EscalationPolicyRepository
 import mayday.escalation.EscalationRepository
 import mayday.provisioning.DirectoryGroup
 import mayday.provisioning.GroupRepository
+import mayday.runbooks.Runbook
+import mayday.runbooks.RunbookRepository
 import mayday.shared.Conflict
 import mayday.shared.JSON
 import mayday.shared.Page
@@ -123,6 +125,8 @@ class PostgresStore(val pool: Pool) {
             s.execute("create index if not exists overrides_user on schedule_overrides (team_id, user_id, ends_at)")
             s.execute("create table if not exists escalation_policies (id text primary key, team_id text not null, version bigint not null, doc jsonb not null)")
             s.execute("create index if not exists escalation_policies_team on escalation_policies (team_id)")
+            s.execute("create table if not exists runbooks (id text primary key, team_id text not null, version bigint not null, doc jsonb not null)")
+            s.execute("create index if not exists runbooks_team on runbooks (team_id)")
             s.execute("""create table if not exists escalations (
                 id text primary key, policy_id text not null, status text not null, next_at timestamptz, version bigint not null, doc jsonb not null)""")
             s.execute("create index if not exists escalations_due on escalations (next_at) where status = 'ACTIVE'")
@@ -473,6 +477,26 @@ class PostgresStore(val pool: Pool) {
             } else {
                 val n = exec("update escalation_policies set version = ?, doc = ? where id = ? and version = ?", policy.version, doc, policy.id, expectedVersion)
                 if (n == 0) throw Conflict("The escalation policy changed. Reload and try again.")
+            }
+        }
+    }
+
+    val runbooks = object : RunbookRepository {
+        private val ser = Runbook.serializer()
+        override suspend fun get(id: String) = query("select doc from runbooks where id = ?", id) { dec(ser, it) }.firstOrNull()
+        override suspend fun byTeam(teamId: String) = query("select doc from runbooks where team_id = ?", teamId) { dec(ser, it) }
+        override suspend fun delete(id: String) { exec("delete from runbooks where id = ?", id) }
+        override suspend fun save(runbook: Runbook, expectedVersion: Long?) {
+            val doc = JsonDoc(enc(ser, runbook))
+            if (expectedVersion == null) {
+                try {
+                    exec("insert into runbooks (id, team_id, version, doc) values (?, ?, ?, ?)", runbook.id, runbook.teamId, runbook.version, doc)
+                } catch (e: java.sql.SQLException) {
+                    if (e.sqlState == "23505") throw Conflict("Runbook exists") else throw e
+                }
+            } else {
+                val n = exec("update runbooks set version = ?, doc = ? where id = ? and version = ?", runbook.version, doc, runbook.id, expectedVersion)
+                if (n == 0) throw Conflict("The runbook changed. Reload and try again.")
             }
         }
     }

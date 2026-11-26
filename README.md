@@ -15,6 +15,7 @@ Mayday is an AI-first, self-hosted incident management platform.
 - **See what the agent did.** Every agent run is an OpenTelemetry trace: each model turn, each tool call, token usage and errors. The run links to it.
 - **The right person, without a spreadsheet.** Teams have on-call schedules. When someone is sick, a colleague covers for a set period with one click; team owners can plug in anyone from the team. Agents ask `get_on_call` too.
 - **Nobody sleeps through a page.** Escalation policies page the person on call, then the next level when nobody acknowledges in time. Team owners configure them; administrators set the limits for all teams (for example "the next level after 15 minutes at most"). Pages go to your chat, SMS or push service through one signed webhook.
+- **Agents close routine alerts, people stay in charge.** A team owner approves a runbook for a type of alert. An agent follows it and closes these alerts alone. Every other agent close keeps paging until a person acknowledges, and an agent that meets a case outside the runbook pages a person.
 - **Teams stay in your identity provider.** Entra ID, Okta, Keycloak or any OIDC and SCIM 2.0 provider: groups become teams and owners, and people who leave a group leave the team and its rotations. Open standards only.
 - **Runs anywhere.** One service. A laptop with no database, a VM, or Kubernetes with PostgreSQL and many replicas.
 - **One typed API.** gRPC with a protobuf contract for the web interface, scripts and agents.

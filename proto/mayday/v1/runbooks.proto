@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package mayday.v1;
+
+import "google/protobuf/timestamp.proto";
+import "mayday/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "mayday.api.v1";
+option java_outer_classname = "RunbooksProto";
+
+enum RunbookStatus {
+  RUNBOOK_STATUS_UNSPECIFIED = 0;
+  RUNBOOK_STATUS_DRAFT = 1;
+  // A team owner approved it for agentic use.
+  RUNBOOK_STATUS_APPROVED = 2;
+  RUNBOOK_STATUS_REVOKED = 3;
+}
+
+// The type of alert that a runbook covers. Every given criterion must hold. At least one is required.
+message AlertMatch {
+  string source = 1;
+  // All labels must be equal.
+  map<string, string> labels = 2;
+  // Fingerprint pattern. * matches any text.
+  string fingerprint = 3;
+}
+
+// A standard operating procedure for agentic use on one type of alert.
+message AgentRunbook {
+  string id = 1;
+  string team_id = 2;
+  string title = 3;
+  // Procedure in Markdown.
+  string body = 4;
+  AlertMatch match = 5;
+  // Write tools that an agent can call while it follows the runbook. resolve_alert lets it resolve the alert with no person.
+  repeated string allowed_tools = 6;
+  RunbookStatus status = 7;
+  optional Actor approved_by = 8;
+  google.protobuf.Timestamp approved_at = 9;
+  optional Actor revoked_by = 10;
+  google.protobuf.Timestamp revoked_at = 11;
+  Actor created_by = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+  int64 version = 15;
+}
+
+message AgentRunbooks {
+  repeated AgentRunbook items = 1;
+}
+
+message ListRunbooksRequest {
+  // Team id or slug.
+  string team_id = 1;
+}
+
+message SaveAgentRunbookRequest {
+  // Empty on create.
+  string id = 1;
+  // On create only. Team id or slug.
+  string team_id = 2;
+  string title = 3;
+  string body = 4;
+  AlertMatch match = 5;
+  repeated string allowed_tools = 6;
+  // On update: the version you read. A different current version is a conflict.
+  optional int64 version = 7;
+}
+
+message ApproveRunbookRequest {
+  string id = 1;
+  // The version that the person read. A different current version is a conflict.
+  int64 version = 2;
+}
+
+service RunbookService {
+  rpc ListRunbooks(ListRunbooksRequest) returns (AgentRunbooks);
+  rpc GetRunbook(IdRequest) returns (AgentRunbook);
+  // Creates a draft, or changes a runbook. A change makes an approved runbook a draft again and needs a team owner.
+  rpc SaveRunbook(SaveAgentRunbookRequest) returns (AgentRunbook);
+  // Team owners, as a person (no agent, no delegated token).
+  rpc ApproveRunbook(ApproveRunbookRequest) returns (AgentRunbook);
+  // Team owners.
+  rpc RevokeRunbook(IdRequest) returns (AgentRunbook);
+}

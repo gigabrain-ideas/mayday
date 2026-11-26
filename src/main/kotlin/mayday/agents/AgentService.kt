@@ -8,6 +8,9 @@ import kotlinx.serialization.json.put
 import mayday.alerting.Alert
 import mayday.alerting.AlertAutomation
 import mayday.alerting.AlertService
+import mayday.alerting.RunbookCoverage
+import mayday.runbooks.Runbook
+import mayday.runbooks.RunbookService
 import mayday.audit.AuditActor
 import mayday.audit.AuditCategory
 import mayday.audit.AuditOutcome
@@ -182,7 +185,8 @@ class AgentService(
     private val telemetry: Telemetry = Telemetry.noop,
     private val budgetPause: Duration = DEFAULT_COOLDOWN,
     private val audit: AuditTrail = AuditTrail.none,
-) : AgentIdentityLookup, AlertAutomation {
+    private val runbooks: RunbookService? = null,
+) : AgentIdentityLookup, AlertAutomation, RunbookCoverage {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("agent-runs"))
     private val permits = Semaphore(concurrency)
     private val delegationTtl = Duration.ofHours(1)
@@ -596,6 +600,7 @@ class AgentService(
 
     private suspend fun startTriggered(alert: Alert) {
         val alertTeams = listOf(alert.teamId)
+        val runbook = runCatching { runbooks?.matchFor(alert) }.getOrNull()
         for (agent in agents.list()) {
             if (!agent.enabled) continue
             if (agent.kind == AgentKind.INTERNAL && !internalReady()) continue
@@ -623,10 +628,13 @@ class AgentService(
                     requestedBy = Actor.system,
                     requiresApproval = approvalRequired(t.action, teams),
                     createdAt = clock.now(),
+                    alertId = alert.id,
+                    runbookId = runbook?.id,
+                    runbookTitle = runbook?.title.orEmpty(),
                 )
                 runs.save(run, null)
                 audit.record(AuditCategory.AGENT, "run.started", AuditActor.system, run.target(), run.auditDetails(), alertTeams)
-                note(run, "${agent.name} started automatically: ${t.action.label}.")
+                note(run, "${agent.name} started automatically: ${t.action.label}." + (runbook?.let { " It follows the approved runbook \"${it.title}\"." } ?: ""))
                 start(agent, run)
             }
         }
@@ -753,7 +761,9 @@ class AgentService(
             val run = transition(runId) { it.copy(status = RunStatus.RUNNING, startedAt = clock.now(), traceId = span.traceId) }
             try {
                 val principal = principalFor(agent, run)
-                val result = InternalAgent(llmProvider(), tools(), clock, telemetry, llm.model).run(agent, run, principal, snapshot(run))
+                val runbook = run.runbookId?.let { followed(run) ?: throw IllegalStateException("The runbook \"${run.runbookTitle}\" is no longer approved") }
+                val catalog = runbook?.let { rb -> RunbookScope(tools(), rb, { runbooks?.approved(rb.id) != null }, { reason -> raiseToHuman(run.id, reason) }) } ?: tools()
+                val result = InternalAgent(llmProvider(), catalog, clock, telemetry, llm.model).run(agent, run, principal, snapshot(run), runbook)
                 finish(runId, RunStatus.SUCCEEDED, result, "")
                 span.set("mayday.run.status", RunStatus.SUCCEEDED.name)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -806,6 +816,9 @@ class AgentService(
         audit.record(AuditCategory.AGENT, "run.${done.status.name.lowercase()}", by ?: done.agentActor(), done.target(), done.auditDetails(),
             outcome = if (status == RunStatus.FAILED) AuditOutcome.FAILURE else AuditOutcome.SUCCESS)
         val agentActor = Actor(ActorKind.AGENT, done.agentId, done.agentName, done.onBehalfOf)
+        if (done.runbookId != null && done.status in setOf(RunStatus.FAILED, RunStatus.CANCELLED)) {
+            raiseToHuman(done.id, "The run ${done.status.name.lowercase()}: ${error.ifBlank { "no reason given" }.take(500)}")
+        }
         when (done.status) {
             RunStatus.SUCCEEDED -> if (output.isNotBlank()) note(done, output.take(20_000), agentActor)
             RunStatus.AWAITING_APPROVAL -> note(done, "${output.take(20_000)}\n\nThis patch waits for approval. A person must approve or reject it in Mayday.".trimStart(), agentActor)
@@ -846,7 +859,14 @@ class AgentService(
     private suspend fun approvalRequired(action: AgentAction, teams: List<String>) =
         action == AgentAction.PATCH && policy.bool(Keys.AGENT_PATCH_APPROVAL, teams)
 
-    private suspend fun snapshot(run: AgentRun): JsonObject = when (run.subjectKind) {
+    /** The subject data. A runbook run also carries the runbook, so external agents receive the procedure and its allowed tools. */
+    private suspend fun snapshot(run: AgentRun): JsonObject {
+        val base = subjectData(run)
+        val rb = run.runbookId?.let { followed(run) } ?: return base
+        return JsonObject(base + ("runbook" to JSON.encodeToJsonElement(rb)))
+    }
+
+    private suspend fun subjectData(run: AgentRun): JsonObject = when (run.subjectKind) {
         SubjectKind.INCIDENT -> {
             val inc = incidents.get(Principal.system, run.subjectId)
             buildJsonObject {
@@ -859,6 +879,36 @@ class AgentService(
             put("kind", "alert")
             put("alert", JSON.encodeToJsonElement(alerts.get(Principal.system, run.subjectId)))
         }
+    }
+
+    /** The runbook of the run, when it is still approved and still covers the alert of the run. */
+    private suspend fun followed(run: AgentRun): Runbook? {
+        val rb = run.runbookId?.let { runbooks?.approved(it) } ?: return null
+        val alert = run.alertId?.let { runCatching { alerts.get(Principal.system, it) }.getOrNull() } ?: return null
+        return rb.takeIf { it.covers(alert) }
+    }
+
+    /**
+     * An automated agent resolves [alert] with no person: only an active run of that agent, started by this alert, whose runbook is still
+     * approved, covers the alert and allows `resolve_alert`.
+     */
+    override suspend fun runbookFor(alert: Alert, agent: Actor): String? {
+        if (!agent.automated) return null
+        val candidates = runs.bySubject(alert.id) + (alert.incidentId?.let { runs.bySubject(it) } ?: emptyList())
+        return candidates.asSequence()
+            .filter { it.agentId == agent.id && it.alertId == alert.id && it.status.active && it.runbookId != null && it.raisedAt == null }
+            .firstNotNullOfOrNull { run -> followed(run)?.takeIf { Runbook.RESOLVE in it.allowedTools }?.id }
+    }
+
+    /** Raises the alert of a runbook run to a person, once per run. */
+    private suspend fun raiseToHuman(runId: String, reason: String) {
+        var first = false
+        val run = transition(runId) { cur -> first = cur.raisedAt == null; if (first) cur.copy(raisedAt = clock.now()) else cur }
+        if (!first) return
+        val actor = Actor(ActorKind.AGENT, run.agentId, run.agentName, run.onBehalfOf)
+        audit.record(AuditCategory.AGENT, "run.raised_to_human", run.agentActor(), run.target(), run.auditDetails() + ("reason" to reason.take(500)))
+        run.alertId?.let { alerts.raiseToHuman(it, actor, reason) }
+        if (run.subjectKind == SubjectKind.INCIDENT) note(run, "${run.agentName} raised the alert to a person: ${reason.take(500)}", actor)
     }
 
     private suspend fun publish(run: AgentRun) =
@@ -879,5 +929,6 @@ private fun AgentRun.auditDetails() = buildMap {
     onBehalfOf?.let { put("onBehalfOf", it) }
     if (requiresApproval) put("requiresApproval", "true")
     approvedBy?.let { put("approvedBy", it.id) }
+    runbookId?.let { put("runbook", it) }
 }
 private fun AgentRun.agentActor() = AuditActor(AuditParty("agent", agentId, agentName), onBehalfOf?.let { AuditParty("user", it) }, runId = id)

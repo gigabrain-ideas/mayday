@@ -221,6 +221,15 @@ class EscalationService(
         stop(alert.id, status)
     }
 
+    /** Starts the team default policy at level 1 when no escalation is active, at any severity. An active escalation goes on. */
+    override suspend fun needsHuman(alert: Alert) {
+        if (!alert.waitsForHuman) return
+        val cur = escalations.get(alert.id)
+        if (cur?.status == EscalationStatus.ACTIVE) return
+        val policy = defaultPolicy(alert.teamId) ?: return
+        begin(alert, policy, cur, manual = false)
+    }
+
     /** Pages the next level of every due escalation. Returns the number of escalations handled. */
     suspend fun tick(): Int {
         val due = escalations.due(clock.now(), TICK_BATCH)
@@ -230,8 +239,7 @@ class EscalationService(
                 val policy = policies.get(e.policyId)
                 when {
                     alert == null || policy == null -> stop(e.id, EscalationStatus.CANCELLED)
-                    alert.status == AlertStatus.RESOLVED -> stop(e.id, EscalationStatus.RESOLVED)
-                    alert.status == AlertStatus.ACKNOWLEDGED && !alert.waitsForHuman -> stop(e.id, EscalationStatus.ACKNOWLEDGED)
+                    !alert.waitsForHuman -> stop(e.id, if (alert.status == AlertStatus.RESOLVED) EscalationStatus.RESOLVED else EscalationStatus.ACKNOWLEDGED)
                     else -> advance(e, alert, policy, manual = false)
                 }
             }

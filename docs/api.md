@@ -18,14 +18,15 @@ gRPC reflection and the standard gRPC health service (`grpc.health.v1.Health`) a
 | `directory.proto` | `DirectoryService` | `ListProjects`, `CreateProject`, `UpdateProject`, `DeleteProject`, `ListTeams`, `CreateTeam`, `UpdateTeam` (`replace_groups` sets `member_groups` and `owner_groups`, administrators), `DeleteTeam`, `ListTeamMembers`, `SetTeamMember` (team owners; role unspecified removes; `conflict` when identity provider groups manage the team) |
 | `oncall.proto` | `OnCallService` | `ListSchedules`, `GetSchedule`, `CreateSchedule`, `UpdateSchedule` (with `version`), `DeleteSchedule`, `ListOverrides`, `CreateOverride`, `DeleteOverride`, `ListShifts` (rotation with overrides, window at most 93 days), `GetOnCall`. See [oncall.md](domains/oncall.md) |
 | `escalation.proto` | `EscalationService` | `ListPolicies`, `GetPolicy`, `CreatePolicy`, `UpdatePolicy` (with `version`), `DeletePolicy` (team owners), `GetEscalation` (by alert id), `EscalateNow` (WRITE). See [escalation.md](domains/escalation.md) |
+| `runbooks.proto` | `RunbookService` | `ListRunbooks`, `GetRunbook`, `SaveRunbook` (create with empty `id`; update with `version`), `ApproveRunbook` (team owners as a person, with the `version` they read), `RevokeRunbook` (team owners). See [runbooks.md](domains/runbooks.md) |
 | `incidents.proto` | `IncidentService` | `ListIncidents` (keyset: `cursor`, `next_cursor`), `DeclareIncident`, `GetIncident` (`ref` = key, number or id), `UpdateIncident` (with `version`), `ListTimeline`, `AddTimelineEntry`, `SavePostmortem`, `SaveResolution`, `SaveRunbook` |
-| `alerting.proto` | `AlertService` | `ListAlerts`, `CountAlerts` (exact number for the same filter; the sidebar badge), `IngestAlert`, `GetAlert`, `AcknowledgeAlert`, `ResolveAlert`, `AddAlertUpdate`, `LinkAlert` |
+| `alerting.proto` | `AlertService` | `ListAlerts`, `CountAlerts` (exact number for the same filter; the sidebar badge), `IngestAlert`, `GetAlert`, `AcknowledgeAlert`, `ResolveAlert`, `AddAlertUpdate`, `LinkAlert`. `Alert.resolved_by` and `Alert.resolved_under_runbook` show who resolved it and under which approved runbook; an automated agent resolve with no runbook keeps paging |
 | `reporting.proto` | `ReportService` | `GetReport` |
 | `policy.proto` | `PolicyService` | `GetSettings`, `SetSetting`, `ClearSetting`, `ListChangeRequests`, `RequestChange`, `DecideChange` |
 | `agents.proto` | `AgentService` | `ListAgents`, `ListEligibleAgents`, `GetAgent`, `CreateAgent`, `UpdateAgent`, `DeleteAgent`, `RotateAgentCredentials` (secrets in the response only), `GetLlm`, `UpdateLlm`, `ListMcpServers`, `SaveMcpServer`, `DeleteMcpServer` |
 | `agents.proto` | `AgentRunService` | `ListRuns`, `GetRun`, `StartRun`, `CancelRun`, `ClaimRuns`, `ReportProgress`, `CompleteRun`, `ApproveRun`, `RejectRun` |
 | `audit.proto` | `AuditService` | `GetAuditStatus` (administrators): instance, reads switch, accepted and lost records, per sink delivered, pending, failures, lost and last error. See [audit.md](domains/audit.md) |
-| `events.proto` | `EventService` | `Subscribe` (server stream): `incident.*`, `alert.*`, `agent_run.updated`, `setting.changed`, `oncall.changed`, `escalation.changed`, `alert.paged`, `alert.escalation_exhausted`, and `ping` every 25 seconds |
+| `events.proto` | `EventService` | `Subscribe` (server stream): `incident.*`, `alert.*`, `agent_run.updated`, `setting.changed`, `oncall.changed`, `escalation.changed`, `runbook.*`, `alert.paged`, `alert.escalation_exhausted`, and `ping` every 25 seconds |
 
 Conventions (`common.proto`):
 
@@ -97,7 +98,7 @@ HTTP edges return the body `{"error": "<code>", "message": "<text for people>"}`
 
 `McpServerView` and `SaveMcpServerRequest` have `use_agent_identity`: Mayday sends the identity headers of the LLM settings (token and custom headers) to the MCP server instead of the static credential. Field 9 (`scope`) is removed and reserved.
 
-`AgentRun.trace_id` is the OpenTelemetry trace of the run. It is empty when tracing is off. `Me.trace_url_template` is the value of `MAYDAY_TRACE_URL_TEMPLATE`. Replace `{traceId}` to get a link to the trace.
+`AgentRun.trace_id` is the OpenTelemetry trace of the run. It is empty when tracing is off. `AgentRun.runbook_id` is the approved runbook that an automatic run follows. `Me.trace_url_template` is the value of `MAYDAY_TRACE_URL_TEMPLATE`. Replace `{traceId}` to get a link to the trace.
 
 ## gRPC-Web
 
@@ -168,6 +169,7 @@ The receiver must:
 3. Use `delegatedToken` (when present) for MCP and gRPC calls. Otherwise use its own agent token. The delegated token has the scopes `read` and `write` and stops working when the run is finished.
 4. Report with the MCP tool `report_agent_run`, or with `AgentRunService.ReportProgress` and `AgentRunService.CompleteRun` `{id, success, output, error}`.
 5. When `run.requiresApproval` is true (policy `agents.patch_requires_approval`), do not merge or deploy the patch. A successful report moves the run to `AWAITING_APPROVAL` and ends the delegated token. A person approves (`AgentRunService.ApproveRun`) or rejects (`AgentRunService.RejectRun {id, reason}`) it in Mayday. Apply the patch only after the run is `SUCCEEDED` with `approvedBy` set.
+6. When `run.runbookId` is set, follow `subject.runbook`: do only its steps and call only its `allowedTools`. Resolve the alert that started the run (`run.alertId` in the webhook) only when the runbook allows `resolve_alert`; only then does paging stop with no person. When a step fails or the runbook does not cover the case, complete the run with `success: false` and the reason: Mayday raises the alert to a person.
 
 ## Page webhook
 

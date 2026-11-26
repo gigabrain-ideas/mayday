@@ -16,7 +16,7 @@ An incident records a disruption from detection to postmortem. It is the place w
 | `Severity` | SEV1 (worst) to SEV5. |
 | Postmortem | Mandatory when the severity is at or worse than the policy `postmortem.required_min_severity` for the incident teams (strictest team wins). Nobody can make a mandatory postmortem optional. A user can make an optional postmortem mandatory. `postmortemDueAt` = `resolvedAt` + `postmortem.due_days`. |
 | `TimelineEntry` | Ordered by event time. Kinds: NOTE, STATUS, SEVERITY, FIELD, ALERT, AGENT, POSTMORTEM, RUNBOOK, RESOLUTION. Each entry has an `Actor` (user, agent, system) and `onBehalfOf` when an agent acted for a person. |
-| `Runbook` | Title and Markdown body, plus who generated it. |
+| `Runbook` | Title and Markdown body, plus who generated it. A record on the incident with no approval. Agents follow only runbooks that a team owner approved for a type of alert ([runbooks.md](runbooks.md)). |
 | `version` | Optimistic concurrency. A stale write fails with `conflict`. |
 
 ## Ports

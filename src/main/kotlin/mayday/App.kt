@@ -42,6 +42,8 @@ import mayday.provisioning.GroupSync
 import mayday.provisioning.GroupSyncSettings
 import mayday.provisioning.ProvisioningService
 import mayday.reporting.ReportService
+import mayday.runbooks.RunbookRepository
+import mayday.runbooks.RunbookService
 import mayday.shared.Clock
 import mayday.shared.EventBus
 import mayday.shared.InProcessEventBus
@@ -92,6 +94,7 @@ class Ports(
     val escalationPolicies: EscalationPolicyRepository,
     val escalations: EscalationRepository,
     val groups: GroupRepository,
+    val runbooks: RunbookRepository,
     val events: EventBus,
     val llm: LlmProviderFactory = LlmProviders,
     val dispatcher: AgentDispatcher = WebhookDispatcher(),
@@ -112,21 +115,21 @@ class Ports(
         pager: Pager = this.pager,
     ) = Ports(
         projects, teams, users, tokens, settings, changeRequests, incidents, timeline, alerts, agents, runs, mcpServers, config,
-        schedules, overrides, escalationPolicies, escalations, groups, events, llm, dispatcher, clock, close, credentials, telemetry, audit, pager,
+        schedules, overrides, escalationPolicies, escalations, groups, runbooks, events, llm, dispatcher, clock, close, credentials, telemetry, audit, pager,
     )
 
     companion object {
         fun memory(store: MemoryStore, events: EventBus = InProcessEventBus()) = Ports(
             store.projects, store.teams, store.users, store.tokens, store.settings, store.changeRequests,
             store.incidents, store.timeline, store.alerts, store.agents, store.runs, store.mcpServers, store.config,
-            store.schedules, store.overrides, store.escalationPolicies, store.escalations, store.groups, events,
+            store.schedules, store.overrides, store.escalationPolicies, store.escalations, store.groups, store.runbooks, events,
             close = { store.close() },
         )
 
         fun postgres(store: PostgresStore, events: EventBus) = Ports(
             store.projects, store.teams, store.users, store.tokens, store.settings, store.changeRequests,
             store.incidents, store.timeline, store.alerts, store.agents, store.runs, store.mcpServers, store.config,
-            store.schedules, store.overrides, store.escalationPolicies, store.escalations, store.groups, events,
+            store.schedules, store.overrides, store.escalationPolicies, store.escalations, store.groups, store.runbooks, events,
             close = { (events as? AutoCloseable)?.close(); store.pool.close() },
         )
     }
@@ -145,12 +148,13 @@ class App(val settings: AppSettings, val ports: Ports) {
     val policy = PolicyService(ports.settings, ports.changeRequests, directory, ports.events, ports.clock, audit)
     val incidents = IncidentService(ports.incidents, ports.timeline, directory, policy, ports.events, ports.clock, ports.telemetry)
     val alerts = AlertService(ports.alerts, incidents, directory, policy, ports.events, ports.clock, ports.telemetry)
+    val runbooks = RunbookService(ports.runbooks, directory, ports.events, ports.clock, audit)
     lateinit var identity: IdentityService
     lateinit var tools: ToolCatalog
     val agents: AgentService = AgentService(
         ports.agents, ports.runs, ports.mcpServers, ports.config, incidents, alerts, { identity }, policy, box,
         ports.llm, ports.dispatcher, { tools }, ports.events, ports.clock, settings.publicUrl, settings.llm, settings.agentConcurrency,
-        ports.credentials, ports.telemetry, audit = audit,
+        ports.credentials, ports.telemetry, audit = audit, runbooks = runbooks,
     )
     val reports = ReportService(ports.incidents, ports.alerts, directory)
     val onCall = OnCallService(ports.schedules, ports.overrides, ports.users, directory, ports.events, ports.clock)
@@ -167,11 +171,12 @@ class App(val settings: AppSettings, val ports: Ports) {
         identity = IdentityService(ports.users, ports.tokens, ports.teams, agents, signer, ports.clock, settings.adminEmails, policy, audit)
         identity.membership = onCall
         identity.groupSync = groupSync
-        maydayTools = MaydayTools(incidents, alerts, directory, policy, { identity }, { agents }, onCall)
+        maydayTools = MaydayTools(incidents, alerts, directory, policy, { identity }, { agents }, onCall, runbooks)
         tools = AuditedCatalog(CompositeCatalog(listOf(maydayTools, McpGateway(ports.mcpServers, box, { agents.gatewayAuth() }, ports.telemetry))), audit)
         mcp = McpServer(AuditedCatalog(maydayTools, audit), VERSION, ports.telemetry, audit)
         alerts.automation = agents
         alerts.lifecycle = escalation
+        alerts.coverage = agents
         incidents.alerts = alerts
         policy.listener = identity
         ports.events.subscribe { if (it.type == "setting.changed") policy.invalidate() }

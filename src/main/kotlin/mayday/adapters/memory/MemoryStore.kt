@@ -49,6 +49,8 @@ import mayday.escalation.EscalationPolicyRepository
 import mayday.escalation.EscalationRepository
 import mayday.escalation.EscalationStatus
 import mayday.provisioning.DirectoryGroup
+import mayday.runbooks.Runbook
+import mayday.runbooks.RunbookRepository
 import mayday.provisioning.GroupRepository
 import mayday.shared.Conflict
 import mayday.shared.JSON
@@ -147,8 +149,9 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
     private val groupsC = Coll("directory_groups", DirectoryGroup.serializer(), journal)
     private val escalationPoliciesC = Coll("escalation_policies", EscalationPolicy.serializer(), journal)
     private val escalationsC = Coll("escalations", Escalation.serializer(), journal)
+    private val runbooksC = Coll("runbooks", Runbook.serializer(), journal)
     private val all = listOf(projectsC, teamsC, usersC, tokensC, settingsC, requestsC, incidentsC, timelineC, alertsC, agentsC, runsC, mcpC, configC,
-        schedulesC, overridesC, groupsC, escalationPoliciesC, escalationsC)
+        schedulesC, overridesC, groupsC, escalationPoliciesC, escalationsC, runbooksC)
 
     private val incidentOrder = ConcurrentSkipListMap<Long, String>(reverseOrder())
     private val counter = AtomicLong(0)
@@ -396,6 +399,18 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
             if (expectedVersion == null && cur != null) throw Conflict("Escalation policy exists")
             if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The escalation policy changed. Reload and try again.")
             escalationPoliciesC.put(policy.id, policy)
+        }
+    }
+
+    val runbooks = object : RunbookRepository {
+        override suspend fun get(id: String) = runbooksC.map[id]
+        override suspend fun byTeam(teamId: String) = runbooksC.map.values.filter { it.teamId == teamId }
+        override suspend fun delete(id: String) = runbooksC.remove(id)
+        override suspend fun save(runbook: Runbook, expectedVersion: Long?) = synchronized(this) {
+            val cur = runbooksC.map[runbook.id]
+            if (expectedVersion == null && cur != null) throw Conflict("Runbook exists")
+            if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The runbook changed. Reload and try again.")
+            runbooksC.put(runbook.id, runbook)
         }
     }
 

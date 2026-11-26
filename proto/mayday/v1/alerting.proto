@@ -40,6 +40,10 @@ message Alert {
   google.protobuf.Timestamp resolved_at = 16;
   repeated AlertUpdate updates = 17;
   int64 version = 18;
+  // Who resolved the alert. An automated agent with no resolved_under_runbook leaves the alert waiting for a person: paging goes on.
+  optional Actor resolved_by = 19;
+  // The approved runbook that the automated agent followed when it resolved the alert.
+  optional string resolved_under_runbook = 20;
 }
 
 message AlertPage {

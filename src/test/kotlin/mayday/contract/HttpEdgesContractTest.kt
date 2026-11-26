@@ -31,6 +31,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import mayday.shared.JSON
 import kotlin.test.assertTrue
 
 /** Plain HTTP edges: browser sign-in, token exchange, MCP, alert intake, static files and operations endpoints. */
@@ -199,6 +200,45 @@ class HttpEdgesContractTest : ServerContract() {
         assertEquals(2, (batch as JsonArray).size)
         assertError(mcp("{oops", member), 400, "invalid")
         assertError(mcp(rpc(8, "ping"), emptyMap()), 401, "unauthenticated")
+    }
+
+    @Test
+    fun `MCP runbook tools let agents draft, only a person who owns the team approves, and an agent resolve with no run waits for a person`() = suspendTest {
+        val agent = app.agents.create(principal("admin"), mayday.agents.AgentInput("Runbook writer ${unique()}", role = mayday.identity.OrgRole.MEMBER,
+            delivery = mayday.agents.Delivery.PULL))
+        val agentH = bearerHeader(agent.token!!.secret)
+        fun call(id: Int, tool: String, args: String, h: Map<String, String>) =
+            json(mcp(rpc(id, "tools/call", """{"name":"$tool","arguments":$args}"""), h)).jsonObject["result"]!!.jsonObject
+        fun text(r: kotlinx.serialization.json.JsonObject) = r["content"]!!.jsonArray.single().jsonObject["text"]!!.jsonPrimitive.content
+        assertTrue(setOf("list_runbooks", "get_runbook").all { it in toolNames(bearerHeader(token("viewer"))) })
+        assertTrue("draft_runbook" !in toolNames(bearerHeader(token("viewer"))))
+        app.policy.set(principal("admin"), Scope.ORG, "org", Keys.MCP_WRITE, "true", Enforcement.NONE)
+        try {
+            val source = "prom-${unique()}"
+            val drafted = call(1, "draft_runbook", """{"team":"checkout","title":"Disk full","body":"1. Delete old logs.","source":"$source","labels":{"service":"db"},"allowed_tools":["resolve_alert"]}""", agentH)
+            assertEquals("false", drafted["isError"]!!.jsonPrimitive.content, drafted.toString())
+            val rb = JSON.parseToJsonElement(text(drafted)).jsonObject
+            assertEquals("DRAFT", rb["status"]!!.jsonPrimitive.content)
+            assertEquals("db", rb["match"]!!.jsonObject["labels"]!!.jsonObject["service"]!!.jsonPrimitive.content)
+            val rbId = rb["id"]!!.jsonPrimitive.content
+            val byAgent = call(2, "approve_runbook", """{"id":"$rbId","version":1}""", agentH)
+            assertEquals("true", byAgent["isError"]!!.jsonPrimitive.content)
+            assertTrue(text(byAgent).startsWith("forbidden"), text(byAgent))
+            val byLead = call(3, "approve_runbook", """{"id":"$rbId","version":1}""", bearerHeader(token("lead")))
+            assertEquals("APPROVED", JSON.parseToJsonElement(text(byLead)).jsonObject["status"]!!.jsonPrimitive.content, text(byLead))
+            val listed = call(4, "list_runbooks", """{"team":"checkout"}""", bearerHeader(token("viewer")))
+            assertTrue(rbId in text(listed))
+
+            val alert = app.alerts.ingest(principal("member"), mayday.alerting.AlertSignal("Disk ${unique()}", Severity.SEV4, "checkout", source = source,
+                labels = mapOf("service" to "db"))).alert
+            val resolved = JSON.parseToJsonElement(text(call(5, "resolve_alert", """{"id":"${alert.id}"}""", agentH))).jsonObject
+            assertEquals("RESOLVED", resolved["status"]!!.jsonPrimitive.content)
+            assertEquals(agent.agent.id, resolved["resolvedBy"]!!.jsonObject["id"]!!.jsonPrimitive.content)
+            assertNull(resolved["resolvedUnderRunbook"], "an agent with no run on the alert does not follow the runbook")
+        } finally {
+            app.policy.clear(principal("admin"), Scope.ORG, "org", Keys.MCP_WRITE)
+            app.agents.delete(principal("admin"), agent.agent.id)
+        }
     }
 
     @Test

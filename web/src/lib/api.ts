@@ -14,6 +14,7 @@ import { IncidentService } from "@/gen/mayday/v1/incidents_pb";
 import { OnCallService } from "@/gen/mayday/v1/oncall_pb";
 import { PolicyService } from "@/gen/mayday/v1/policy_pb";
 import { ReportService } from "@/gen/mayday/v1/reporting_pb";
+import { RunbookService } from "@/gen/mayday/v1/runbooks_pb";
 
 export type Severity = "SEV1" | "SEV2" | "SEV3" | "SEV4" | "SEV5";
 export const SEVERITIES: Severity[] = ["SEV1", "SEV2", "SEV3", "SEV4", "SEV5"];
@@ -41,8 +42,11 @@ export type Enforcement = "NONE" | "MINIMUM" | "LOCKED";
 
 export interface Actor { kind: "USER" | "AGENT" | "SYSTEM"; id: string; name: string; onBehalfOf?: string }
 /** Firing, or acknowledged only by an agent with no person behind it: paging goes on until a person acknowledges. */
-export const waitsForHuman = (a: { status: string; acknowledgedBy?: Actor }) =>
-  a.status === "FIRING" || (a.status === "ACKNOWLEDGED" && a.acknowledgedBy?.kind === "AGENT" && !a.acknowledgedBy.onBehalfOf);
+const automated = (a?: Actor) => a?.kind === "AGENT" && !a.onBehalfOf;
+/** Same rule as Alert.waitsForHuman on the server: paging goes on until a person acknowledges. */
+export const waitsForHuman = (a: { status: string; acknowledgedBy?: Actor; resolvedBy?: Actor; resolvedUnderRunbook?: string }) =>
+  a.status === "FIRING" || (a.status === "ACKNOWLEDGED" && automated(a.acknowledgedBy)) ||
+  (a.status === "RESOLVED" && automated(a.resolvedBy) && !a.resolvedUnderRunbook && (!a.acknowledgedBy || automated(a.acknowledgedBy)));
 export interface Page<T> { items: T[]; nextCursor?: string }
 export interface Project { id: string; slug: string; name: string; description: string; createdAt: string }
 export interface Team {
@@ -93,7 +97,7 @@ export interface AlertUpdate { at: string; actor: Actor; text: string }
 export interface Alert {
   id: string; fingerprint: string; source: string; title: string; description: string; severity: Severity; status: AlertStatus;
   teamId: string; labels: Record<string, string>; externalUrl?: string; incidentId?: string; firstSeenAt: string; lastSeenAt: string;
-  count: number; acknowledgedBy?: Actor; resolvedAt?: string; updates: AlertUpdate[]; version: number;
+  count: number; acknowledgedBy?: Actor; resolvedAt?: string; resolvedBy?: Actor; resolvedUnderRunbook?: string; updates: AlertUpdate[]; version: number;
 }
 export interface AgentTrigger { event: "ALERT_CREATED"; minSeverity: Severity; teamIds: string[]; action: AgentAction }
 export interface AgentConfig {
@@ -108,7 +112,13 @@ export interface AgentRun {
   id: string; agentId: string; agentName: string; action: AgentAction; subjectKind: "INCIDENT" | "ALERT"; subjectId: string;
   subjectLabel: string; status: RunStatus; trigger: "AUTO" | "MANUAL"; requestedBy: Actor; onBehalfOf?: string; prompt: string;
   output: string; error: string; createdAt: string; startedAt?: string; finishedAt?: string; traceId?: string;
-  requiresApproval: boolean; approvedBy?: Actor; approvedAt?: string;
+  requiresApproval: boolean; approvedBy?: Actor; approvedAt?: string; runbookId?: string;
+}
+export type RunbookStatus = "DRAFT" | "APPROVED" | "REVOKED";
+export interface AlertMatch { source: string; labels: Record<string, string>; fingerprint: string }
+export interface AgentRunbook {
+  id: string; teamId: string; title: string; body: string; match: AlertMatch; allowedTools: string[]; status: RunbookStatus;
+  approvedBy?: Actor; approvedAt?: string; revokedBy?: Actor; revokedAt?: string; createdBy: Actor; createdAt: string; updatedAt: string; version: number;
 }
 export type LlmProvider = "anthropic" | "openai";
 export type AuthStyle = "API_KEY" | "BEARER";
@@ -281,6 +291,7 @@ export const rpc = {
   agentRuns: service(AgentRunService),
   oncall: service(OnCallService),
   escalation: service(EscalationService),
+  runbooks: service(RunbookService),
   audit: service(AuditService),
 };
 

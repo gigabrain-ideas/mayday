@@ -76,6 +76,7 @@ flowchart LR
 | Directory | `mayday.directory` | Projects, teams, identity provider group links | [directory.md](domains/directory.md) |
 | On-call | `mayday.oncall` | Schedules, rotations, overrides, who is on call | [oncall.md](domains/oncall.md) |
 | Escalation | `mayday.escalation` | Escalation policies, paging, acknowledgement timeouts | [escalation.md](domains/escalation.md) |
+| Runbooks | `mayday.runbooks` | Runbooks that team owners approve for agentic use on a type of alert | [runbooks.md](domains/runbooks.md) |
 | Provisioning | `mayday.provisioning` | Teams from identity provider groups: groups claim and SCIM 2.0 | [provisioning.md](domains/provisioning.md) |
 | Reporting | `mayday.reporting` | Metrics over incidents and alerts | [reporting.md](domains/reporting.md) |
 | Tools | `mayday.tools` | Use cases as tools for MCP and the built-in agent | [mcp.md](domains/mcp.md) |
@@ -133,7 +134,9 @@ flowchart TB
 | `ToolCatalog` | `agents` | `MaydayTools`, `McpGateway`, `CompositeCatalog` |
 | `AgentIdentityLookup` | `identity` | `AgentService` |
 | `AlertAutomation` | `alerting` | `AgentService` |
-| `AlertLifecycle` | `alerting` | `EscalationService` (an alert opened, acknowledged or resolved) |
+| `AlertLifecycle` | `alerting` | `EscalationService` (an alert opened, acknowledged or resolved, or raised to a person) |
+| `RunbookCoverage` | `alerting` | `AgentService` (the approved runbook that an automated agent follows on an alert) |
+| `RunbookRepository` | `runbooks` | `MemoryStore`, `PostgresStore` (table `runbooks`) |
 | `Pager` | `escalation` | `WebhookPager` (`MAYDAY_PAGING_WEBHOOK_URL`); default `Pager.none`; tests use `RecordingPager` |
 | `PolicyReader` | `policy` | `PolicyService` |
 | `TeamMembershipListener` | `identity` | `OnCallService` (a person who leaves a team leaves its rotations) |

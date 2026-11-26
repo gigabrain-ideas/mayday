@@ -533,3 +533,25 @@ class EventGrpc(
 
     private fun ping() = DomainEvent("ping", "", Instant.now()).into(Event.newBuilder()).build()
 }
+
+@Service
+class RunbookGrpc(private val auth: Authenticator, private val app: App) : RunbookServiceGrpcKt.RunbookServiceCoroutineImplBase() {
+    private val runbooks get() = app.runbooks
+
+    override suspend fun listRunbooks(request: ListRunbooksRequest): AgentRunbooks =
+        runbooks.list(auth.caller(), request.teamId).itemsInto(AgentRunbooks.newBuilder()).build()
+
+    override suspend fun getRunbook(request: IdRequest): AgentRunbook = runbooks.get(auth.caller(), request.id).into(AgentRunbook.newBuilder()).build()
+
+    override suspend fun saveRunbook(request: SaveAgentRunbookRequest): AgentRunbook {
+        val input = request.decode<mayday.runbooks.RunbookInput>()
+        val rb = if (request.id.isBlank()) runbooks.create(auth.caller(), input)
+        else runbooks.update(auth.caller(), request.id, input, if (request.hasVersion()) request.version else null)
+        return rb.into(AgentRunbook.newBuilder()).build()
+    }
+
+    override suspend fun approveRunbook(request: ApproveRunbookRequest): AgentRunbook =
+        runbooks.approve(auth.caller(), request.id, request.version).into(AgentRunbook.newBuilder()).build()
+
+    override suspend fun revokeRunbook(request: IdRequest): AgentRunbook = runbooks.revoke(auth.caller(), request.id).into(AgentRunbook.newBuilder()).build()
+}

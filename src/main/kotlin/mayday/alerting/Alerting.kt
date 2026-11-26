@@ -17,6 +17,7 @@ import mayday.policy.PolicyReader
 import mayday.shared.Actor
 import mayday.shared.ActorKind
 import mayday.shared.Clock
+import mayday.shared.Conflict
 import mayday.shared.Crypto
 import mayday.shared.DomainEvent
 import mayday.shared.EventPublisher
@@ -56,13 +57,23 @@ data class Alert(
     val count: Long = 1,
     val acknowledgedBy: Actor? = null,
     val resolvedAt: Ts? = null,
+    val resolvedBy: Actor? = null,
+    /** The approved runbook that an automated agent followed when it resolved the alert. */
+    val resolvedUnderRunbook: String? = null,
     val updates: List<AlertUpdate> = emptyList(),
     val version: Long = 1,
 )
 
-/** Firing, or acknowledged only by an automated agent: paging goes on until a person acknowledges. */
+/**
+ * Paging goes on until a person acknowledges: the alert fires, only an automated agent acknowledged it, or an automated agent
+ * resolved it with no approved runbook that covers it and no person acknowledged it before.
+ */
 val Alert.waitsForHuman: Boolean
-    get() = status == AlertStatus.FIRING || (status == AlertStatus.ACKNOWLEDGED && acknowledgedBy?.automated == true)
+    get() = when (status) {
+        AlertStatus.FIRING -> true
+        AlertStatus.ACKNOWLEDGED -> acknowledgedBy?.automated == true
+        AlertStatus.RESOLVED -> resolvedBy?.automated == true && resolvedUnderRunbook == null && acknowledgedBy?.automated != false
+    }
 
 @Serializable
 data class AlertSignal(
@@ -105,14 +116,26 @@ interface AlertLifecycle {
     /** A new alert, or a resolved alert that fires again. */
     suspend fun opened(alert: Alert)
 
-    /** The alert was acknowledged or resolved. */
+    /** A person acknowledged the alert, or it was resolved and no person must confirm the resolve. */
     suspend fun closed(alert: Alert)
+
+    /** An agent raised the alert to a person: paging starts when it does not go on already, at any severity. */
+    suspend fun needsHuman(alert: Alert) = Unit
 
     companion object {
         val none = object : AlertLifecycle {
             override suspend fun opened(alert: Alert) = Unit
             override suspend fun closed(alert: Alert) = Unit
         }
+    }
+}
+
+/** Port that the agents context implements: the approved runbook that an automated agent follows on this alert and that lets it resolve the alert. */
+fun interface RunbookCoverage {
+    suspend fun runbookFor(alert: Alert, agent: Actor): String?
+
+    companion object {
+        val none = RunbookCoverage { _, _ -> null }
     }
 }
 
@@ -130,6 +153,7 @@ class AlertService(
 ) : IncidentAlerts {
     @Volatile var automation: AlertAutomation = object : AlertAutomation { override suspend fun onAlertCreated(alert: Alert) = Unit }
     @Volatile var lifecycle: AlertLifecycle = AlertLifecycle.none
+    @Volatile var coverage: RunbookCoverage = RunbookCoverage.none
 
     suspend fun get(by: Principal, id: String): Alert = Access.requireRead(by).let { alerts.get(id) ?: throw NotFound("Alert") }
 
@@ -170,6 +194,7 @@ class AlertService(
         if (signal.status == AlertStatus.RESOLVED) {
             span.set(OUTCOME, "resolved")
             if (active != null) return IngestResult(resolveInternal(active, sourceActor, "Resolved by ${signal.source}."), false)
+            if (latest != null && latest.waitsForHuman) return IngestResult(confirmResolve(latest, sourceActor, "${signal.source} confirms the resolve."), false)
             return IngestResult(latest ?: resolveInternal(createAlert(signal, fp, team.id, now), sourceActor, "Resolved by ${signal.source}."), latest == null)
         }
 
@@ -180,6 +205,8 @@ class AlertService(
             val next = target.copy(
                 status = if (reopened) AlertStatus.FIRING else target.status,
                 resolvedAt = if (reopened) null else target.resolvedAt,
+                resolvedBy = if (reopened) null else target.resolvedBy,
+                resolvedUnderRunbook = if (reopened) null else target.resolvedUnderRunbook,
                 lastSeenAt = now,
                 count = target.count + 1,
                 severity = if (signal.severity.rank < target.severity.rank) signal.severity else target.severity,
@@ -325,13 +352,14 @@ class AlertService(
         return acknowledgeInternal(cur, by.actor)
     }
 
-    /** A firing alert, or one that only an automated agent acknowledged and that a human now takes over. */
+    /** A firing alert, or one that waits for a person and that a person now takes over. */
     private fun acknowledgeable(a: Alert, actor: Actor) =
         a.status == AlertStatus.FIRING || (a.waitsForHuman && !actor.automated)
 
+    /** On a resolve that waits for a person, the acknowledgement confirms the resolve: the alert stays RESOLVED. */
     private suspend fun acknowledgeInternal(cur: Alert, actor: Actor): Alert {
         val next = cur.copy(
-            status = AlertStatus.ACKNOWLEDGED,
+            status = if (cur.status == AlertStatus.RESOLVED) AlertStatus.RESOLVED else AlertStatus.ACKNOWLEDGED,
             acknowledgedBy = actor,
             updates = cur.updates + AlertUpdate(clock.now(), actor, "Acknowledged."),
             version = cur.version + 1,
@@ -342,26 +370,76 @@ class AlertService(
         return next
     }
 
+    /** A person who resolves an alert that an automated agent resolved confirms that resolve. */
     suspend fun resolve(by: Principal, id: String, note: String = ""): Alert {
         Access.requireWrite(by)
         val cur = get(by, id)
-        if (cur.status == AlertStatus.RESOLVED) return cur
+        if (cur.status == AlertStatus.RESOLVED) {
+            return if (cur.waitsForHuman && !by.actor.automated) confirmResolve(cur, by.actor, note.ifBlank { "Resolve confirmed." }) else cur
+        }
         return resolveInternal(cur, by.actor, note.ifBlank { "Resolved." })
     }
 
+    /**
+     * A resolve by an automated agent stops paging only when the agent follows an approved runbook that covers the alert.
+     * Otherwise the alert is RESOLVED, but paging goes on until a person acknowledges or the monitoring source resolves it.
+     */
     private suspend fun resolveInternal(cur: Alert, actor: Actor, text: String): Alert {
         val now = clock.now()
+        val runbook = if (actor.automated) runCatching { coverage.runbookFor(cur, actor) }.getOrNull() else null
+        val waiting = actor.automated && runbook == null && cur.acknowledgedBy?.automated != false
+        val notes = buildList {
+            add(AlertUpdate(now, actor, text))
+            if (runbook != null) add(AlertUpdate(now, Actor.system, "Resolved under an approved runbook. No person must confirm."))
+            if (waiting) add(AlertUpdate(now, Actor.system, "No approved runbook covers this resolve. Paging goes on until a person acknowledges."))
+        }
         val next = cur.copy(
             status = AlertStatus.RESOLVED,
             resolvedAt = now,
-            updates = cur.updates + AlertUpdate(now, actor, text),
+            resolvedBy = actor,
+            resolvedUnderRunbook = runbook,
+            updates = cur.updates + notes,
             version = cur.version + 1,
         )
         alerts.save(next, cur.version)
         next.incidentId?.let { incidentTimeline(it, actor, "Alert resolved: ${next.title}") }
         publish("alert.updated", next)
+        if (!next.waitsForHuman) runCatching { lifecycle.closed(next) }
+        return next
+    }
+
+    /** A person or the monitoring source confirms a resolve that waits for a person. Paging stops. */
+    private suspend fun confirmResolve(cur: Alert, actor: Actor, text: String): Alert {
+        val next = cur.copy(resolvedBy = actor, updates = cur.updates + AlertUpdate(clock.now(), actor, text), version = cur.version + 1)
+        alerts.save(next, cur.version)
+        publish("alert.updated", next)
         runCatching { lifecycle.closed(next) }
         return next
+    }
+
+    /**
+     * An agent that follows a runbook raises the alert to a person: it failed, or the case is not in the runbook.
+     * A resolve under the runbook then needs a person too. Paging starts when it does not go on already.
+     */
+    suspend fun raiseToHuman(id: String, agent: Actor, reason: String): Alert? {
+        repeat(3) {
+            val cur = alerts.get(id) ?: return null
+            val next = cur.copy(
+                resolvedUnderRunbook = null,
+                updates = cur.updates + AlertUpdate(clock.now(), agent, "Raised to a person: ${reason.take(1000)}"),
+                version = cur.version + 1,
+            )
+            try {
+                alerts.save(next, cur.version)
+            } catch (_: Conflict) {
+                return@repeat
+            }
+            next.incidentId?.let { incidentTimeline(it, agent, "${agent.name} raised the alert to a person: ${reason.take(500)}") }
+            publish("alert.updated", next)
+            runCatching { lifecycle.needsHuman(next) }
+            return next
+        }
+        return null
     }
 
     suspend fun addUpdate(by: Principal, id: String, text: String): Alert {

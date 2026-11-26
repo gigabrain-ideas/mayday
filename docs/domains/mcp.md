@@ -16,10 +16,13 @@ Mayday exposes its use cases as tools. External agents use them through the MCP 
 
 | Tool | Kind | Notes |
 |---|---|---|
-| `list_incidents`, `get_incident`, `list_alerts`, `get_alert`, `list_teams`, `get_settings`, `get_on_call` | read | Always available with READ scope |
+| `list_incidents`, `get_incident`, `list_alerts`, `get_alert`, `list_teams`, `get_settings`, `get_on_call`, `list_runbooks`, `get_runbook` | read | Always available with READ scope |
 | `add_schedule_override` | write | Needs `mcp.write_enabled` for the team. Team members add only themselves, team owners add any team member ([oncall.md](oncall.md)) |
 | `create_incident`, `update_incident`, `add_timeline_entry`, `set_postmortem`, `save_runbook`, `save_resolution` | write | Needs WRITE, role MEMBER, and `mcp.write_enabled` for the incident teams. The built-in agent on an automatic run does not get `create_incident` ([agents.md](agents.md)) |
-| `send_alert`, `acknowledge_alert`, `resolve_alert`, `add_alert_update` | write | Same as above, for the alert team |
+| `send_alert`, `acknowledge_alert`, `add_alert_update` | write | Same as above, for the alert team |
+| `resolve_alert` | write | Same as above. A resolve by an automated agent stops paging only under an approved runbook ([runbooks.md](runbooks.md)) |
+| `draft_runbook`, `approve_runbook`, `revoke_runbook` | write | Same as above, for the runbook team. Only a team owner, as a person, approves; team owners revoke ([runbooks.md](runbooks.md)) |
+| `raise_to_human` | runbook | Only for the built-in agent while it follows an approved runbook. It raises the alert to a person |
 | `claim_agent_runs`, `report_agent_run` | agent | Only for agent identities (pull agents) |
 | `set_setting`, `list_users`, `set_user_role` | admin | Only when the principal is an administrator with ADMIN scope |
 

@@ -36,6 +36,8 @@ export function AlertPage() {
           <SeverityBadge severity={a.severity} />
           <AlertStatusBadge status={a.status} />
           {a.status === "ACKNOWLEDGED" && waitsForHuman(a) && <Badge tone="outline">By an agent · waiting for a person</Badge>}
+          {a.status === "RESOLVED" && waitsForHuman(a) && <Badge tone="outline">Resolved by an agent · waiting for a person</Badge>}
+          {a.status === "RESOLVED" && a.resolvedUnderRunbook && <Badge tone="outline">Resolved under an approved runbook</Badge>}
           <Badge tone="outline">×{a.count}</Badge>
         </div>
         <h1 className="text-[22px] font-light leading-snug tracking-tight">{a.title}</h1>
@@ -97,7 +99,7 @@ export function AlertPage() {
             <CardHeader title="Details" />
             <div className="divide-y px-4 py-2 text-[12.5px]">
               {[["Team", teamName(a.teamId)], ["Source", a.source], ["First seen", dateTime(a.firstSeenAt)], ["Last seen", dateTime(a.lastSeenAt)],
-                ["Resolved", dateTime(a.resolvedAt)], ["Fingerprint", a.fingerprint.slice(0, 16)]].map(([k, v]) => (
+                ["Resolved", dateTime(a.resolvedAt)], ["Resolved by", a.resolvedBy ? a.resolvedBy.kind === "USER" ? userName(a.resolvedBy.id) : a.resolvedBy.name : "—"], ["Fingerprint", a.fingerprint.slice(0, 16)]].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-3 py-1.5"><span className="eyebrow">{k}</span><span>{v}</span></div>
               ))}
             </div>

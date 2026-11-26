@@ -91,6 +91,13 @@ data class AgentRun(
     val requiresApproval: Boolean = false,
     val approvedBy: Actor? = null,
     val approvedAt: Ts? = null,
+    /** The alert that started an automatic run. */
+    val alertId: String? = null,
+    /** The approved runbook that an automatic run follows. */
+    val runbookId: String? = null,
+    val runbookTitle: String = "",
+    /** When the run raised its alert to a person: it failed, or it left the runbook. */
+    val raisedAt: Ts? = null,
     val version: Long = 1,
 )
 
