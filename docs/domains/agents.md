@@ -39,6 +39,7 @@ Agents are an add-on. Without an agent, Mayday is a complete incident management
 - Each run result goes to the subject: a timeline entry (incident) or an update (alert).
 - Runs that do not finish in 30 minutes become FAILED.
 - The built-in agent calls the same tools as external agents (`MaydayTools`), plus the tool gateway servers. It skips only the `mcp.write_enabled` switch, not RBAC.
+- The built-in agent on an automatic run (no person behind it) does not get `create_incident`. Its task is to work on the subject of the run, not to open more incidents. It writes its findings on the current incident. On a manual run it acts for the person and gets the tool. External agents always get the tool (with WRITE, role MEMBER and `mcp.write_enabled`), because they can have tasks other than incident work. An automatic run can still add responder teams with `update_incident` and send alerts with `send_alert`, so it can still cause pages; this rule stops only new incidents.
 
 ## LLM providers
 
@@ -61,6 +62,8 @@ Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider
 - After resolution, an engineer presses "Draft postmortem". The agent fills all sections with `set_postmortem`.
 - In Kubernetes, Helm sets `MAYDAY_LLM_BASE_URL` to the company AI gateway, `MAYDAY_LLM_CREDENTIAL=oauth2`, the issuer and `MAYDAY_LLM_HEADERS=x-company-agent-id=...`. Mayday gets a token with workload identity from the company identity provider, refreshes it before it expires and sends the custom header on every call. The UI shows these fields as "Set by the environment".
 - A company gateway needs no agent id. The administrator sets no custom header and nothing extra goes out.
+- An external watcher agent finds a full disk and declares an incident with `create_incident`.
+- An engineer starts a manual run and tells the built-in agent to declare an incident for Checkout. The agent declares it for the engineer.
 - A team uses Mayday without any agent. Alerts open incidents, responders write the timeline and the postmortem by hand.
 - During an incident, an operator opens the trace of a run (trace id on the run) and sees each model turn and each tool call with its duration and result status.
 
@@ -71,6 +74,7 @@ Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider
 - An administrator presses "Create patch". The agent tries `set_setting` with the delegated token: `forbidden`.
 - The agent keeps the delegated token after the run is completed and calls Mayday again: `unauthenticated`.
 - The delegated user is a member. The agent tries `set_setting` (admin): the tool is not offered and the call fails.
+- During an automatic analysis, the built-in agent finds a second problem and tries `create_incident`: the tool is not offered, the call fails with `not_found`, and no incident is declared.
 - An agent tries to complete a run of another agent: `forbidden`. It completes a finished run: `conflict`.
 - Remediation triggers exist, but `agents.auto_remediation` is false (default, and locked in the demo): no run starts.
 - The webhook endpoint is down: the run becomes FAILED with the reason on the timeline.

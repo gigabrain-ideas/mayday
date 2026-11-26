@@ -175,6 +175,7 @@ class MaydayTools(
                 "teams" to S.arr("Responder team ids or slugs", S.str("Team")),
                 "impact_started_at" to S.str("ISO-8601 time when impact started"),
             ), write = true)) { p, a, g ->
+            if (automatic(p, g.internal)) throw Forbidden("The built-in agent declares incidents only on behalf of a person. Add your findings to the current incident.")
             val teams = a.strList("teams")?.map { directory.team(it).id } ?: throw Invalid("'teams' is required")
             g.write(teams)
             val inc = incidents.declare(p, NewIncident(a.req("title"), a.str("description").orEmpty(),
@@ -318,10 +319,17 @@ class MaydayTools(
         i.resolvedAt?.let { put("resolvedAt", it.toString()) }
     }
 
+    /**
+     * The built-in agent without a person behind it runs an automatic task (analysis, remediation, postmortem).
+     * It must not declare new incidents. External agents and the built-in agent on behalf of a person may.
+     */
+    private fun automatic(p: Principal, internal: Boolean) = internal && p.isAgent && !p.isDelegated
+
     override suspend fun tools(principal: Principal, internal: Boolean): List<ToolSpec> = list.map { it.spec }.filter { spec ->
         when {
             spec.admin -> Access.isAdmin(principal)
             spec.name in setOf("claim_agent_runs", "report_agent_run") -> principal.isAgent && !internal
+            spec.name == "create_incident" && automatic(principal, internal) -> false
             spec.write -> principal.role.rank >= OrgRole.MEMBER.rank && principal.has(mayday.identity.TokenScope.WRITE)
             else -> true
         }

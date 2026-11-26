@@ -381,6 +381,45 @@ class AgentTest {
     }
 
     @Test
+    fun `the built-in agent on an automatic run cannot declare incidents`() = suspendTest {
+        f.enableLlm()
+        f.llm.toolCall("create_incident", buildJsonObject { put("title", "Another problem"); put("severity", "SEV2"); put("teams", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive("checkout")))) })
+        f.llm.answer("tried")
+        f.app.alerts.ingest(f.member, AlertSignal("Errors", Severity.SEV2, "checkout"))
+        eventually { f.app.agents.recentRuns(f.viewer, 10).any { it.agentId == "mayday" && it.status.terminal } }
+        val run = f.app.agents.recentRuns(f.viewer, 10).single { it.agentId == "mayday" }
+        assertNull(run.onBehalfOf)
+        assertTrue(f.llm.requests.first().tools.none { it.name == "create_incident" }, "the tool is not offered")
+        assertTrue(f.app.incidents.list(f.admin, mayday.incidents.IncidentFilter(), null, 100).items.none { it.title == "Another problem" })
+    }
+
+    @Test
+    fun `the built-in agent declares incidents only on behalf of a person`() = suspendTest {
+        val teams = buildJsonObject { put("title", "Another problem"); put("severity", "SEV2"); put("teams", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive("checkout")))) }
+        val alone = mayday.identity.Principal(mayday.shared.Actor(ActorKind.AGENT, "mayday", "Mayday agent"), null, OrgRole.MEMBER, setOf(TokenScope.READ, TokenScope.WRITE), "run-1")
+        assertTrue(f.app.tools.tools(alone, true).none { it.name == "create_incident" })
+        val refused = f.app.tools.call(alone, "create_incident", teams, true)
+        assertTrue(refused.isError)
+        assertEquals("not_found", refused.code, "a hidden tool cannot be called")
+        assertTrue(f.app.incidents.list(f.admin, mayday.incidents.IncidentFilter(), null, 100).items.isEmpty())
+        val forPerson = mayday.identity.Principal(mayday.shared.Actor(ActorKind.AGENT, "mayday", "Mayday agent", onBehalfOf = f.memberUser.id), f.memberUser, OrgRole.MEMBER, mayday.identity.Principal.DELEGATED, "run-2")
+        assertTrue(f.app.tools.tools(forPerson, true).any { it.name == "create_incident" })
+        assertFalse(f.app.tools.call(forPerson, "create_incident", teams, true).isError)
+        assertEquals("forbidden", f.app.maydayTools.call(alone, "create_incident", teams, true).code, "the tool refuses even when called directly")
+    }
+
+    @Test
+    fun `external agents keep the tool to declare incidents`() = suspendTest {
+        val creds = f.app.agents.create(f.admin, AgentInput("Watcher", delivery = Delivery.PULL, role = OrgRole.MEMBER))
+        val external = f.app.identity.authenticate(creds.token!!.secret)
+        f.app.policy.set(f.admin, Scope.ORG, "org", Keys.MCP_WRITE, "true", Enforcement.NONE)
+        assertTrue(f.app.tools.tools(external, false).any { it.name == "create_incident" })
+        val out = f.app.tools.call(external, "create_incident",
+            buildJsonObject { put("title", "Disk is full"); put("severity", "SEV3"); put("teams", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive("checkout")))) }, false)
+        assertFalse(out.isError, out.content)
+    }
+
+    @Test
     fun `viewers cannot start agents`() = suspendTest {
         f.enableLlm()
         val i = incident()
