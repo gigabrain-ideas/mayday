@@ -34,7 +34,7 @@ object Ids {
         random.nextBytes(bytes)
         val ts = System.currentTimeMillis()
         for (i in 0 until 6) bytes[i] = (ts shr (40 - 8 * i)).toByte()
-        return bytes.joinToString("") { "%02x".format(it) }
+        return Crypto.hex(bytes)
     }
 
     fun secret(bytes: Int = 32): String {

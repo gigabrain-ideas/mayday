@@ -14,11 +14,14 @@ object Crypto {
     private val enc = Base64.getUrlEncoder().withoutPadding()
     private val dec = Base64.getUrlDecoder()
 
+    private val hexFormat = java.util.HexFormat.of()
+
+    fun hex(bytes: ByteArray): String = hexFormat.formatHex(bytes)
     fun b64(bytes: ByteArray): String = enc.encodeToString(bytes)
     fun unb64(s: String): ByteArray = dec.decode(s)
 
     fun sha256Hex(s: String): String =
-        MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+        hex(MessageDigest.getInstance("SHA-256").digest(s.toByteArray()))
 
     fun hmac(key: ByteArray, data: ByteArray): ByteArray {
         val mac = Mac.getInstance("HmacSHA256")
@@ -27,7 +30,7 @@ object Crypto {
     }
 
     fun hmacHex(key: String, data: String): String =
-        hmac(key.toByteArray(), data.toByteArray()).joinToString("") { "%02x".format(it) }
+        hex(hmac(key.toByteArray(), data.toByteArray()))
 
     fun equal(a: ByteArray, b: ByteArray) = MessageDigest.isEqual(a, b)
 }

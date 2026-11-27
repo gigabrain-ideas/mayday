@@ -41,7 +41,7 @@ object AuditChain {
         if (auditKey.isNotEmpty()) auditKey.toByteArray() else Crypto.hmac(secretKey.toByteArray(), "mayday-audit-v1".toByteArray())
 
     fun hash(key: ByteArray, record: AuditRecord): String =
-        Crypto.hmac(key, JSON.encodeToString(AuditRecord.serializer(), record.copy(hash = null)).toByteArray()).joinToString("") { "%02x".format(it) }
+        Crypto.hex(Crypto.hmac(key, JSON.encodeToString(AuditRecord.serializer(), record.copy(hash = null)).toByteArray()))
 
     data class Problem(val instance: String, val seq: Long, val problem: String)
     data class Report(val records: Int, val instances: Map<String, LongRange>, val problems: List<Problem>, val unreadable: Int) {

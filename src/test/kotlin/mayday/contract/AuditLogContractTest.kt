@@ -149,4 +149,11 @@ class AuditLogContractTest {
         assertEquals(1, mayday.audit.AuditVerify.main(arrayOf(file.toString()), mapOf("MAYDAY_SECRET_KEY" to "s3cret"), java.io.PrintStream(java.io.ByteArrayOutputStream())))
         assertEquals(2, mayday.audit.AuditVerify.main(arrayOf(file.toString()), emptyMap(), java.io.PrintStream(java.io.ByteArrayOutputStream())))
     }
+
+    /** Token hashes and the audit chain store lowercase hex; a changed encoding would break every stored hash. */
+    @Test
+    fun `hashes are lowercase hex of the digest`() {
+        kotlin.test.assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", mayday.shared.Crypto.sha256Hex("abc"))
+        kotlin.test.assertEquals("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843", mayday.shared.Crypto.hmacHex("Jefe", "what do ya want for nothing?"))
+    }
 }
