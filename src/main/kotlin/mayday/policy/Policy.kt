@@ -197,12 +197,19 @@ class PolicyService(
     private val clock: Clock,
     private val audit: AuditTrail = AuditTrail.none,
 ) : PolicyReader {
-    @Volatile private var cache: Map<String, SettingValue>? = null
+    /** The cache remembers the generation it was read at. A change during the read moves the generation on, so the old read is not used. */
+    private class Snapshot(val generation: Long, val values: Map<String, SettingValue>)
+    private val generation = java.util.concurrent.atomic.AtomicLong()
+    @Volatile private var cache: Snapshot? = null
     @Volatile var listener: OrgSettingListener = object : OrgSettingListener { override suspend fun orgSettingChanged(key: String) = Unit }
 
-    private suspend fun index(): Map<String, SettingValue> = cache ?: settings.all().associateBy { it.id }.also { cache = it }
+    private suspend fun index(): Map<String, SettingValue> {
+        val g = generation.get()
+        cache?.takeIf { it.generation == g }?.let { return it.values }
+        return settings.all().associateBy { it.id }.also { cache = Snapshot(g, it) }
+    }
 
-    fun invalidate() { cache = null }
+    fun invalidate() { generation.incrementAndGet() }
 
     fun schema() = SettingCatalog.defs
 

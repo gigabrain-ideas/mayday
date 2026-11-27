@@ -39,6 +39,13 @@ Policy holds the configurable rules: postmortem obligations, alert behavior, pag
 
 - `OrgSettingListener`: called after an organization-level value is set, removed or approved through a change request, on the instance that made the change. Identity implements it.
 
+## Cache
+
+- Each instance caches all values. `setting.changed` and `events.resync` clear the cache.
+- PostgreSQL sends `events.resync` to the instance after its LISTEN connection connects again: changes made while it was gone are not lost.
+- The cache keeps the generation it was read at. A change that arrives during a read makes that read stale, and the next read loads again.
+- Negative: an administrator turns off `agents.auto_remediation` while one replica reconnects. That replica uses the new value after the reconnect, not the old one until a restart.
+
 ## Permissions
 
 - Organization level: administrators.
@@ -66,4 +73,4 @@ Policy records `setting.set` and `setting.removed` (value, previous value, enfor
 
 ## Rebuild checklist
 
-Pass `PolicyTest` and `PolicyReplicaTest` (a direct change and an approved change request reach a second instance). Keep the resolution order and the meaning of MINIMUM. Invalidate caches on `setting.changed`.
+Pass `PolicyTest` and `PolicyReplicaTest` (a direct change and an approved change request reach a second instance). Keep the resolution order and the meaning of MINIMUM. Invalidate caches on `setting.changed` and `events.resync`; pass `PolicyCacheTest` (a change during a read wins) and `PgEventBusContractTest`.

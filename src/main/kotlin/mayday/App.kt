@@ -179,7 +179,7 @@ class App(val settings: AppSettings, val ports: Ports) {
         alerts.coverage = agents
         incidents.alerts = alerts
         policy.listener = identity
-        ports.events.subscribe { if (it.type == "setting.changed") policy.invalidate() }
+        ports.events.subscribe { if (it.type == "setting.changed" || it.type == EventBus.RESYNC) policy.invalidate() }
     }
 
     suspend fun start() = agents.ensureInternalAgent()

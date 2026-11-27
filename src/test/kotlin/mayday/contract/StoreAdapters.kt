@@ -47,6 +47,14 @@ class PostgresStoreContractTest : StoreContract() {
 }
 
 class TestDatabase private constructor(val jdbc: String, val user: String?, val password: String?) {
+    /** A fresh container can refuse the first connections for a moment after it reports ready. */
+    private fun awaitConnection() {
+        repeat(50) {
+            if (runCatching { java.sql.DriverManager.getConnection(jdbc, user, password).close() }.isSuccess) return
+            Thread.sleep(200)
+        }
+    }
+
     companion object {
         val instance: TestDatabase by lazy {
             val url = System.getenv("MAYDAY_TEST_DATABASE_URL")
@@ -55,7 +63,7 @@ class TestDatabase private constructor(val jdbc: String, val user: String?, val 
                     System.getenv("MAYDAY_TEST_DATABASE_USER"), System.getenv("MAYDAY_TEST_DATABASE_PASSWORD"))
             } else {
                 val c = PostgreSQLContainer(System.getenv("MAYDAY_TEST_POSTGRES_IMAGE") ?: "postgres:18-alpine").apply { start() }
-                TestDatabase(c.jdbcUrl, c.username, c.password)
+                TestDatabase(c.jdbcUrl, c.username, c.password).also { it.awaitConnection() }
             }
         }
     }

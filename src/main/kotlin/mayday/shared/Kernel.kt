@@ -103,6 +103,11 @@ interface EventPublisher {
 
 interface EventBus : EventPublisher {
     fun subscribe(listener: (DomainEvent) -> Unit): AutoCloseable
+
+    companion object {
+        /** Events from other replicas may be lost (a connection drop): every cache that events keep fresh reloads. */
+        const val RESYNC = "events.resync"
+    }
 }
 
 class InProcessEventBus : EventBus {

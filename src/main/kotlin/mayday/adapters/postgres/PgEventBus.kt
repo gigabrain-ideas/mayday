@@ -12,7 +12,10 @@ import mayday.shared.JSON
 import org.postgresql.PGConnection
 import java.util.logging.Logger
 
-/** Fans out domain events to all replicas with LISTEN/NOTIFY, so live updates work behind a load balancer. */
+/**
+ * Fans out domain events to all replicas with LISTEN/NOTIFY, so live updates work behind a load balancer.
+ * NOTIFY reaches only open connections, so after each (re)connect subscribers get [EventBus.RESYNC].
+ */
 class PgEventBus(private val pool: Pool) : EventBus, AutoCloseable {
     private val log = Logger.getLogger("mayday.events")
     private val local = InProcessEventBus()
@@ -37,6 +40,7 @@ class PgEventBus(private val pool: Pool) : EventBus, AutoCloseable {
             try {
                 pool.open().use { c ->
                     c.createStatement().use { it.execute("listen mayday_events") }
+                    local.deliver(DomainEvent(EventBus.RESYNC, "", java.time.Instant.now()))
                     val pg = c.unwrap(PGConnection::class.java)
                     while (running) {
                         pg.getNotifications(10_000)?.forEach { n ->
