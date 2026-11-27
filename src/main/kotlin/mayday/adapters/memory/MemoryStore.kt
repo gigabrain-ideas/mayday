@@ -431,9 +431,12 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
             if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The escalation changed")
             escalationsC.put(escalation.id, escalation)
         }
-        override suspend fun due(at: Instant, limit: Int) = escalationsC.map.values.asSequence()
-            .filter { it.status == EscalationStatus.ACTIVE && it.nextAt != null && it.nextAt <= at }
-            .sortedWith(compareBy({ it.nextAt }, { it.id })).take(limit).toList()
+        override suspend fun claimDue(at: Instant, limit: Int, lease: java.time.Duration) = synchronized(this) {
+            escalationsC.map.values.asSequence()
+                .filter { it.status == EscalationStatus.ACTIVE && it.nextAt != null && it.nextAt <= at }
+                .sortedWith(compareBy({ it.nextAt }, { it.id })).take(limit).toList()
+                .map { it.copy(nextAt = at.plus(lease), version = it.version + 1).also { c -> escalationsC.put(c.id, c) } }
+        }
         override suspend fun activeByPolicy(policyId: String) =
             escalationsC.map.values.filter { it.policyId == policyId && it.status == EscalationStatus.ACTIVE }
     }

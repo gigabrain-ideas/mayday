@@ -71,7 +71,7 @@ An administrator who sets `escalation.max_ack_minutes` to 15 as MINIMUM makes su
 | `EscalationRepository` | `MemoryStore`, `PostgresStore` (table `escalations`, partial index on `next_at` for ACTIVE, index on `policy_id`) |
 | `Pager` | `Pager.none` (default), `WebhookPager` (`MAYDAY_PAGING_WEBHOOK_URL`, signed like agent webhooks with `MAYDAY_PAGING_WEBHOOK_SECRET`) |
 
-Alerting calls the `AlertLifecycle` port (`opened`, `closed`); escalation implements it. On-call gives the person on call of a schedule (`OnCallService.onCallFor`). The server calls `tick()` every 15 seconds; each tick handles up to 500 due escalations.
+Alerting calls the `AlertLifecycle` port (`opened`, `closed`); escalation implements it. On-call gives the person on call of a schedule (`OnCallService.onCallFor`). The server calls `tick()` every 15 seconds on every instance. Each tick claims up to 500 due escalations (`EscalationRepository.claimDue`, PostgreSQL `for update skip locked`): a claim moves `nextAt` 30 seconds on, so each due escalation is handled by one instance. A claim that fails is logged and is due again after those 30 seconds.
 
 ## Positive use cases
 

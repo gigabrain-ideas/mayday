@@ -458,21 +458,39 @@ abstract class StoreContract {
     }
 
     @Test
-    fun `due escalations are active ones whose time came, earliest first`() = suspendTest {
+    fun `due escalations are claimed earliest first and wait for their lease`() = suspendTest {
         fun e(minutes: Long, status: mayday.escalation.EscalationStatus = mayday.escalation.EscalationStatus.ACTIVE, policy: String = "p1") =
             mayday.escalation.Escalation(Ids.new(), "t1", policy, status, 0, 0, now.plus(minutes, ChronoUnit.MINUTES),
                 listOf(mayday.escalation.EscalationPage(now, 1, 0, listOf("u1"))), now, now)
         val late = e(-1); val early = e(-5); val future = e(10); val stopped = e(-9, mayday.escalation.EscalationStatus.ACKNOWLEDGED); val other = e(-2, policy = "p2")
         listOf(late, early, future, stopped, other).forEach { p.escalations.save(it, null) }
         assertEquals(early, p.escalations.get(early.id))
-        assertEquals(listOf(early.id, other.id, late.id), p.escalations.due(now, 10).map { it.id })
-        assertEquals(listOf(early.id), p.escalations.due(now, 1).map { it.id })
         assertEquals(setOf(late.id, early.id, future.id), p.escalations.activeByPolicy("p1").map { it.id }.toSet())
+        val lease = java.time.Duration.ofSeconds(30)
+        val first = p.escalations.claimDue(now, 1, lease)
+        assertEquals(listOf(early.id), first.map { it.id })
+        assertEquals(now.plus(lease), first.single().nextAt)
+        assertEquals(first.single(), p.escalations.get(early.id), "the claim is saved")
+        assertEquals(listOf(other.id, late.id), p.escalations.claimDue(now, 10, lease).map { it.id })
+        assertEquals(emptyList(), p.escalations.claimDue(now, 10, lease), "a claimed escalation waits for its lease")
+        assertEquals(setOf(early.id, other.id, late.id), p.escalations.claimDue(now.plus(lease), 10, lease).map { it.id }.toSet())
+        val early2 = p.escalations.get(early.id)!!
         assertFailsWith<Conflict> { p.escalations.save(early, null) }
-        val acked = early.copy(status = mayday.escalation.EscalationStatus.ACKNOWLEDGED, nextAt = null, version = 2)
-        p.escalations.save(acked, 1)
-        assertFailsWith<Conflict> { p.escalations.save(early.copy(version = 2), 1) }
+        val acked = early2.copy(status = mayday.escalation.EscalationStatus.ACKNOWLEDGED, nextAt = null, version = early2.version + 1)
+        p.escalations.save(acked, early2.version)
+        assertFailsWith<Conflict> { p.escalations.save(early2.copy(version = early2.version + 1), early2.version) }
         assertEquals(acked, p.escalations.get(early.id))
-        assertEquals(listOf(other.id, late.id), p.escalations.due(now, 10).map { it.id })
+        assertEquals(setOf(other.id, late.id), p.escalations.claimDue(now.plus(lease).plus(lease), 10, lease).map { it.id }.toSet(), "a stopped escalation is not claimed")
+    }
+
+    @Test
+    fun `concurrent claims never hand out a due escalation twice`() = suspendTest {
+        val all = (1..40).map {
+            mayday.escalation.Escalation(Ids.new(), "t1", "p1", mayday.escalation.EscalationStatus.ACTIVE, 0, 0, now.minusSeconds(it.toLong()), emptyList(), now, now)
+        }
+        all.forEach { p.escalations.save(it, null) }
+        val claimed = (1..6).map { async(Dispatchers.IO) { p.escalations.claimDue(now, 10, java.time.Duration.ofSeconds(30)).map { it.id } } }.awaitAll().flatten()
+        assertEquals(claimed.size, claimed.toSet().size, "no escalation is claimed twice")
+        assertEquals(all.map { it.id }.toSet(), claimed.toSet())
     }
 }

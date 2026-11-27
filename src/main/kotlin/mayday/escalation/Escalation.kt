@@ -97,8 +97,11 @@ interface EscalationRepository {
     suspend fun get(id: String): Escalation?
     suspend fun save(escalation: Escalation, expectedVersion: Long?)
 
-    /** ACTIVE escalations with [Escalation.nextAt] at or before [at], earliest first. */
-    suspend fun due(at: Instant, limit: Int): List<Escalation>
+    /**
+     * Claims up to [limit] ACTIVE escalations with [Escalation.nextAt] at or before [at], earliest first. A claim moves nextAt to
+     * at + [lease] and saves a new version, so other instances skip it; a claim that is not handled is due again after the lease.
+     */
+    suspend fun claimDue(at: Instant, limit: Int, lease: Duration): List<Escalation>
 
     suspend fun activeByPolicy(policyId: String): List<Escalation>
 }
@@ -134,6 +137,7 @@ private const val MAX_LEVELS = 10
 private const val MAX_TARGETS = 10
 private const val MAX_REPEAT = 9
 private const val TICK_BATCH = 500
+private val CLAIM_LEASE: Duration = Duration.ofSeconds(30)
 private val log = Logger.getLogger("mayday.escalation")
 
 class EscalationService(
@@ -235,7 +239,7 @@ class EscalationService(
 
     /** Pages the next level of every due escalation. Returns the number of escalations handled. */
     suspend fun tick(): Int {
-        val due = escalations.due(clock.now(), TICK_BATCH)
+        val due = escalations.claimDue(clock.now(), TICK_BATCH, CLAIM_LEASE)
         for (e in due) {
             runCatching {
                 val alert = alerts.get(e.id)
@@ -245,7 +249,7 @@ class EscalationService(
                     !alert.waitsForHuman -> stop(e.id, if (alert.status == AlertStatus.RESOLVED) EscalationStatus.RESOLVED else EscalationStatus.ACKNOWLEDGED)
                     else -> advance(e, alert, policy, manual = false)
                 }
-            }
+            }.onFailure { log.log(Level.WARNING, "Escalation of alert ${e.id} failed; it is due again in ${CLAIM_LEASE.seconds} seconds", it) }
         }
         return due.size
     }

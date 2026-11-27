@@ -541,9 +541,19 @@ class PostgresStore(val pool: Pool) {
                 if (n == 0) throw Conflict("The escalation changed")
             }
         }
-        override suspend fun due(at: Instant, limit: Int) = query(
-            "select doc from escalations where status = 'ACTIVE' and next_at <= ? order by next_at, id limit ?", at, limit,
-        ) { dec(ser, it) }
+        override suspend fun claimDue(at: Instant, limit: Int, lease: java.time.Duration): List<Escalation> = pool.withConnection { c ->
+            c.autoCommit = false
+            val claimed = c.prepareStatement(
+                "select doc from escalations where status = 'ACTIVE' and next_at <= ? order by next_at, id limit ? for update skip locked",
+            ).use { ps -> ps.bind(at, limit).executeQuery().use { rs -> buildList { while (rs.next()) add(dec(ser, rs)) } } }
+                .map { it.copy(nextAt = at.plus(lease), version = it.version + 1) }
+            c.prepareStatement("update escalations set next_at = ?, version = ?, doc = ? where id = ?").use { ps ->
+                claimed.forEach { e -> ps.bind(e.nextAt, e.version, JsonDoc(enc(ser, e)), e.id); ps.addBatch() }
+                if (claimed.isNotEmpty()) ps.executeBatch()
+            }
+            c.commit()
+            claimed
+        }
         override suspend fun activeByPolicy(policyId: String) =
             query("select doc from escalations where policy_id = ? and status = 'ACTIVE'", policyId) { dec(ser, it) }
     }
