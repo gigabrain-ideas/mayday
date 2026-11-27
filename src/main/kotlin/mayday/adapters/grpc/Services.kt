@@ -77,11 +77,12 @@ class UserGrpc(private val auth: Authenticator, private val app: App) : UserServ
     private val identity get() = app.identity
 
     override suspend fun listUsers(request: ListUsersRequest): UserPage {
-        Access.requireRead(auth.caller())
+        val caller = auth.caller()
+        Access.requireRead(caller)
         if (request.idsCount > 0) return UserPage.newBuilder().addAllItems(identity.byIds(request.idsList).map { it.into(User.newBuilder()).build() }).build()
         val q = if (request.hasQ()) request.q else null
         val cursor = if (request.hasCursor()) request.cursor else null
-        return identity.list(q, cursor, request.limit.orDefault(50)).into(UserPage.newBuilder()).build()
+        return identity.list(caller, q, cursor, request.limit.orDefault(50)).into(UserPage.newBuilder()).build()
     }
 
     override suspend fun createUser(request: CreateUserRequest): User =

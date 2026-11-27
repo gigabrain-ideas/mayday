@@ -102,7 +102,9 @@ export function UsersPage() {
   const { isAdmin, teams, me, reloadDirectory } = useSession();
   const toast = useToast();
   const [q, setQ] = useState("");
-  const { data, reload } = useQuery(() => rpc.users.listUsers<Page<User>>({ limit: 200, q: q || undefined }), [q]);
+  const search = isAdmin || q.trim().length >= 2;
+  const { data, reload } = useQuery(
+    () => search ? rpc.users.listUsers<Page<User>>({ limit: 200, q: q.trim() || undefined }) : Promise.resolve<Page<User>>({ items: [] }), [q, search]);
   const [editing, setEditing] = useState<User | null>(null);
   const [invite, setInvite] = useState({ email: "", name: "", role: "MEMBER" as OrgRole });
   const update = async (id: string, body: { role?: string; teams?: Record<string, TeamRole>; replaceTeams?: boolean; disabled?: boolean }) => {
@@ -127,7 +129,7 @@ export function UsersPage() {
       </div>
       <p className="text-[12px] text-muted-foreground">Users from single sign-on are created at their first login. Viewers can read. Members can manage incidents and start agents. Admins configure everything and enforce settings.</p>
       <Card>
-        {!data ? <div className="flex justify-center p-10"><Spinner /></div> : (
+        {!search ? <Empty icon={<Users />} title="Find a person">Type at least 2 characters of a name or email.</Empty> : !data ? <div className="flex justify-center p-10"><Spinner /></div> : (
           <Table>
             <thead><tr><Th>Name</Th><Th>Email</Th><Th>Role</Th><Th>Teams</Th><Th /></tr></thead>
             <tbody>

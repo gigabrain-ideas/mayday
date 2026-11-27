@@ -348,7 +348,7 @@ class MaydayTools(
         Tool(ToolSpec("list_users", "Administrators: list users and their roles.",
             S.obj(emptyList(), "query" to S.str("Name or email"), "limit" to S.int("1-200")), admin = true)) { p, a, _ ->
             Access.requireAdmin(p)
-            JSON.encodeToJsonElement(identity().list(a.str("query"), null, a.int("limit") ?: 50).items)
+            JSON.encodeToJsonElement(identity().list(p, a.str("query"), null, a.int("limit") ?: 50).items)
         },
         Tool(ToolSpec("set_user_role", "Administrators: change the organization role of a user.",
             S.obj(listOf("user_id", "role"), "user_id" to S.str("User id"), "role" to S.str("Role", OrgRole.entries.map { it.name })),

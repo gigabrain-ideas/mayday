@@ -513,6 +513,17 @@ class GrpcContractTest : ServerContract() {
     }
 
     @Test
+    fun `only administrators list users without a search of at least two characters`() = suspendTest {
+        for (q in listOf(null, "", " a ", "a")) {
+            val request = ListUsersRequest.newBuilder().apply { if (q != null) setQ(q) }.build()
+            for (who in listOf("viewer", "lead")) assertStatus(Status.Code.INVALID_ARGUMENT, "invalid") { users.listUsers(request, auth(who)) }
+            assertTrue(users.listUsers(request, auth("admin")).itemsCount > 0, "administrators browse with q=$q")
+        }
+        assertEquals(listOf(userOf("admin").id), users.listUsers(ListUsersRequest.newBuilder().setQ("admin@").build(), auth("viewer")).itemsList.map { it.id })
+        assertEquals(listOf(userOf("admin").id), users.listUsers(ListUsersRequest.newBuilder().addIds(userOf("admin").id).build(), auth("viewer")).itemsList.map { it.id })
+    }
+
+    @Test
     fun `token secrets appear only in the issue response and hashes never`() = suspendTest {
         val issued = users.issueToken(IssueTokenRequest.newBuilder().setName("cli").addScopes(TokenScope.TOKEN_SCOPE_READ).addScopes(TokenScope.TOKEN_SCOPE_ADMIN).setTtlDays(3).build(), auth("lead"))
         assertTrue(issued.secret.startsWith("mdy_"))

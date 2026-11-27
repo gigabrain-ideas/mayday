@@ -55,16 +55,17 @@ export function usePeopleVersion() {
   return useSyncExternalStore((s) => { subscribers.add(s); return () => subscribers.delete(s); }, () => version);
 }
 
-/** People that match [q] (name or email), searched on the server. */
+/** People that match [q] (name or email, at least 2 characters), searched on the server. */
 export function usePeopleSearch(q: string, limit = 50): User[] {
   const [found, setFound] = useState<User[]>([]);
   useEffect(() => {
     let live = true;
+    if (q.trim().length < 2) { setFound([]); return; }
     const t = window.setTimeout(() => {
-      rpc.users.listUsers<Page<User>>({ q: q.trim() || undefined, limit })
+      rpc.users.listUsers<Page<User>>({ q: q.trim(), limit })
         .then((p) => { if (live) { remember(p.items); setFound(p.items.filter((u) => !u.disabled)); } })
         .catch(() => {});
-    }, q ? 200 : 0);
+    }, 200);
     return () => { live = false; window.clearTimeout(t); };
   }, [q, limit]);
   return found;

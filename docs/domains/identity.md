@@ -44,6 +44,12 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 - Other organization changes, and saving `true` again, keep the opt-ins.
 - Run tokens (agent buttons) never have ADMIN. These settings change token exchange only.
 
+## Finding people
+
+- `ListUsers` with `ids`: everyone with READ gets those users (at most 500). The interface uses it to show the names on a page.
+- `ListUsers` with `q` (name or email): everyone with READ. A `q` must have at least 2 characters after trimming.
+- Administrators (ADMIN scope and role ADMIN) can omit `q` and page through all users. For all other callers, a `q` that is missing or shorter gets `invalid`. Thus a member or an agent cannot copy the full list of names and emails.
+
 ## Team members
 
 - `ListTeamMembers`: everyone with READ.
@@ -62,6 +68,7 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 ## Positive use cases
 
 - An engineer signs in with the company OIDC provider. Mayday creates the user at the first login.
+- A member types "an" in a person picker. Mayday shows the people whose name or email contains "an". An administrator opens Settings → Users and pages through all users.
 - A team owner adds a new colleague to the team and makes a senior engineer a second owner.
 - An Alertmanager uses a token with only ALERTS_INGEST.
 - A coding agent exchanges its token and the engineer's token for a delegated token and acts as the engineer.
@@ -77,6 +84,7 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 - An agent uses a delegated token after its run is finished: `unauthenticated`.
 - An agent tries to create tokens for a user, or to start another agent: `forbidden`.
 - An administrator tries to remove their own admin role: `conflict`.
+- A member or an automated agent calls `ListUsers` with no `q`, or with `q` = "a": `invalid`.
 - A team member adds someone to the team: `forbidden`. A team owner changes the members of another team: `forbidden`.
 - A team owner adds a member to a team that identity provider groups manage: `conflict`.
 - An administrator exchanges their token while `agents.exchange_admin` or their own `allowAgentAdmin` is false: the delegated token has no ADMIN scope.
@@ -91,4 +99,4 @@ Identity records `token.issued`, `token.revoked`, `token.delegated`, `token.exch
 
 ## Rebuild checklist
 
-Pass `IdentityTest`, `TeamMembersTest`, `AgentAdminExchangeTest`, `AgentAdminOptInResetTest`, the agent admin part of `StoreContract`, `DelegationLimitsTest`, the credential, token and scope parts of `GrpcContractTest`, the sign-in and token-exchange parts of `HttpEdgesContractTest`, and the token part of `StoreContract`.
+Pass `IdentityTest`, `TeamMembersTest`, `AgentAdminExchangeTest`, `AgentAdminOptInResetTest`, the agent admin part of `StoreContract`, `DelegationLimitsTest`, the credential, token, scope and user search parts of `GrpcContractTest`, the sign-in and token-exchange parts of `HttpEdgesContractTest`, and the token part of `StoreContract`.
