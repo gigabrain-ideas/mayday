@@ -277,7 +277,7 @@ class HttpEdgesContractTest : ServerContract() {
             {"status":"firing","fingerprint":"$fp-2","labels":{"alertname":"Slow","severity":"warning"}}]}"""
         val r = send("POST", "/api/v1/integrations/alertmanager?team=sre", firing, h)
         assertEquals(200, r.statusCode(), r.body())
-        assertEquals(mapOf("created" to 2, "updated" to 0), json(r).jsonObject.mapValues { it.value.jsonPrimitive.int })
+        assertEquals(mapOf("created" to 2, "updated" to 0, "rejected" to 0), json(r).jsonObject.filterKeys { it != "errors" }.mapValues { it.value.jsonPrimitive.int })
         val alerts = app.alerts.list(principal("viewer"), AlertFilter(), null, 200).items
         val high = alerts.single { it.fingerprint == fp }
         assertEquals(Severity.SEV1, high.severity)
@@ -291,11 +291,28 @@ class HttpEdgesContractTest : ServerContract() {
         assertEquals("Slow", slow.title)
 
         val resolved = send("POST", "/api/v1/integrations/alertmanager?team=sre", firing.replace("\"firing\"", "\"resolved\"").substringBefore(",\n") + "]}", h)
-        assertEquals(mapOf("created" to 0, "updated" to 1), json(resolved).jsonObject.mapValues { it.value.jsonPrimitive.int })
+        assertEquals(mapOf("created" to 0, "updated" to 1, "rejected" to 0), json(resolved).jsonObject.filterKeys { it != "errors" }.mapValues { it.value.jsonPrimitive.int })
         assertEquals(AlertStatus.RESOLVED, app.alerts.get(principal("viewer"), high.id).status)
 
         assertError(send("POST", "/api/v1/integrations/alertmanager", """{"alerts":[{"labels":{"alertname":"NoTeam"}}]}""", h), 400, "invalid")
         assertError(send("POST", "/api/v1/integrations/alertmanager", "[]", h), 400, "invalid")
+    }
+
+    @Test
+    fun `an alertmanager batch keeps the valid alerts when one alert is invalid`() = suspendTest {
+        val h = bearerHeader(scoped("admin", TokenScope.ALERTS_INGEST))
+        val fp = "am-${unique()}"
+        val body = """{"alerts":[{"status":"firing","fingerprint":"$fp-a","labels":{"alertname":"NoTeam"}},
+            {"status":"firing","fingerprint":"$fp-b","labels":{"alertname":"Good","team":"checkout"}},
+            {"status":"firing","fingerprint":"$fp-c","labels":{"alertname":"UnknownTeam","team":"nope"}}]}"""
+        val r = send("POST", "/api/v1/integrations/alertmanager", body, h)
+        assertEquals(200, r.statusCode(), r.body())
+        val res = json(r).jsonObject
+        assertEquals(1, res["created"]!!.jsonPrimitive.int)
+        assertEquals(2, res["rejected"]!!.jsonPrimitive.int)
+        assertEquals(listOf(0, 2), res["errors"]!!.jsonArray.map { it.jsonObject["index"]!!.jsonPrimitive.int })
+        assertEquals(listOf("invalid", "not_found"), res["errors"]!!.jsonArray.map { it.jsonObject["error"]!!.jsonPrimitive.content })
+        assertEquals(1, app.alerts.list(principal("viewer"), AlertFilter(), null, 200).items.count { it.fingerprint.startsWith(fp) })
     }
 
     @Test

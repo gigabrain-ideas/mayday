@@ -118,7 +118,7 @@ HTTP edges return the body `{"error": "<code>", "message": "<text for people>"}`
 | `POST /oauth/token` | RFC 8693 token exchange (below) |
 | `POST /mcp` | MCP server, see [domains/mcp.md](domains/mcp.md). `GET /mcp` answers 405. |
 | `POST /api/v1/alerts` | Alert intake: `{title, team, severity?, source?, fingerprint?, status?, description?, labels?, externalUrl?}`. 201 when new, 200 when deduplicated. |
-| `POST /api/v1/integrations/alertmanager?team=` | Prometheus Alertmanager webhook. Response: `{"created": n, "updated": n}` |
+| `POST /api/v1/integrations/alertmanager?team=` | Prometheus Alertmanager webhook. Response: `{"created": n, "updated": n, "rejected": n, "errors": [{"index", "error", "message"}]}`. A bad alert is skipped and listed in `errors`; when every alert is bad, the error of the first one. |
 | `GET /healthz`, `/livez`, `/readyz` | Health, liveness and readiness probes |
 | `GET /metrics` | Prometheus text format (Micrometer) |
 

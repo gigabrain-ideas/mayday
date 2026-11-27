@@ -10,7 +10,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 import mayday.App
@@ -68,6 +67,12 @@ private inline fun <reified T> decode(body: String?): T {
 }
 
 @Serializable private data class DevLogin(val email: String, val name: String = "")
+@Serializable private data class BatchError(val index: Int, val error: String, val message: String)
+@Serializable private data class BatchResult(val created: Int, val updated: Int, val rejected: Int, val errors: List<BatchError>)
+
+/** Errors of one alert in a batch. Alertmanager does not retry a 4xx answer, so these skip the alert and keep the others. */
+private val REJECTED = setOf("invalid", "not_found", "forbidden")
+
 @Serializable private data class ExchangeResult(val access_token: String, val issued_token_type: String, val token_type: String, val expires_in: Long)
 
 /** Browser sign-in. These endpoints set or clear the session cookie, so they stay plain HTTP. */
@@ -176,25 +181,40 @@ class IntegrationEndpoints(private val app: App, private val auth: Authenticator
     ): ResponseEntity<String> {
         val p = principal(authorization, cookie, requestedWith)
         val root = runCatching { JSON.parseToJsonElement(body.orEmpty()).jsonObject }.getOrElse { throw Invalid("Invalid JSON") }
+        val alerts = (root["alerts"] as? JsonArray).orEmpty()
         var created = 0; var updated = 0
-        (root["alerts"] as? JsonArray).orEmpty().forEach { el ->
-            val a = el.jsonObject
-            val labels = (a["labels"] as? JsonObject)?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap()
-            val ann = (a["annotations"] as? JsonObject)?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap()
-            val res = app.alerts.ingest(p, AlertSignal(
-                title = ann["summary"] ?: labels["alertname"] ?: "Alert",
-                severity = severityOf(labels["severity"]),
-                team = team ?: labels["team"] ?: throw Invalid("Set the 'team' label or the ?team= parameter"),
-                source = "alertmanager",
-                fingerprint = (a["fingerprint"] as? JsonPrimitive)?.content,
-                status = if ((a["status"] as? JsonPrimitive)?.content == "resolved") AlertStatus.RESOLVED else AlertStatus.FIRING,
-                description = ann["description"].orEmpty(),
-                labels = labels,
-                externalUrl = (a["generatorURL"] as? JsonPrimitive)?.content,
-            ))
-            if (res.created) created++ else updated++
+        val errors = ArrayList<BatchError>()
+        var first: DomainException? = null
+        alerts.forEachIndexed { i, el ->
+            try {
+                val res = app.alerts.ingest(p, alertmanagerSignal(el, team))
+                if (res.created) created++ else updated++
+            } catch (e: DomainException) {
+                if (e.code !in REJECTED) throw e
+                errors += BatchError(i, e.code, e.message ?: e.code)
+                if (first == null) first = e
+            }
         }
-        return json(mapOf("created" to created, "updated" to updated))
+        if (errors.size == alerts.size) first?.let { throw it }
+        return json(BatchResult(created, updated, errors.size, errors))
+    }
+
+    private fun alertmanagerSignal(el: JsonElement, team: String?): AlertSignal {
+        val a = el as? JsonObject ?: throw Invalid("Each alert must be a JSON object")
+        fun strings(key: String) = (a[key] as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.content.orEmpty() } ?: emptyMap()
+        val labels = strings("labels")
+        val ann = strings("annotations")
+        return AlertSignal(
+            title = ann["summary"] ?: labels["alertname"] ?: "Alert",
+            severity = severityOf(labels["severity"]),
+            team = team ?: labels["team"] ?: throw Invalid("Set the 'team' label or the ?team= parameter"),
+            source = "alertmanager",
+            fingerprint = (a["fingerprint"] as? JsonPrimitive)?.content,
+            status = if ((a["status"] as? JsonPrimitive)?.content == "resolved") AlertStatus.RESOLVED else AlertStatus.FIRING,
+            description = ann["description"].orEmpty(),
+            labels = labels,
+            externalUrl = (a["generatorURL"] as? JsonPrimitive)?.content,
+        )
     }
 
     private fun severityOf(s: String?): Severity = when (s?.lowercase()) {

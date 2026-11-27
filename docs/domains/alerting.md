@@ -32,7 +32,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 ## Interfaces
 
 - `POST /api/v1/alerts` with `AlertSignal` JSON (plain HTTP, for monitoring tools).
-- `POST /api/v1/integrations/alertmanager` (Prometheus Alertmanager webhook format). The team comes from the `team` label or the `?team=` parameter. The `severity` label maps: critical/page/fatal/p1/sev1 → SEV1, high/error/major/p2/sev2 → SEV2, warning/warn/medium/p3/sev3 → SEV3, low/minor/p4/sev4 → SEV4, info/informational/p5/sev5 → SEV5, other or none → SEV3.
+- `POST /api/v1/integrations/alertmanager` (Prometheus Alertmanager webhook format). The team comes from the `team` label or the `?team=` parameter. Mayday takes in each alert of the batch on its own. An alert with no team, an unknown team or a team that the token may not send for is skipped: the answer is 200 with `created`, `updated`, `rejected` and `errors` (`index`, `error`, `message` of each skipped alert). Alertmanager does not send a 4xx answer again, so one bad alert never drops the others. When every alert of the batch is skipped, the answer is the error of the first one. The `severity` label maps: critical/page/fatal/p1/sev1 → SEV1, high/error/major/p2/sev2 → SEV2, warning/warn/medium/p3/sev3 → SEV3, low/minor/p4/sev4 → SEV4, info/informational/p5/sev5 → SEV5, other or none → SEV3.
 - gRPC `AlertService` (`IngestAlert`, list, exact count with the same filter, acknowledge, resolve, updates, link). See [api.md](../api.md).
 - MCP tool `send_alert`.
 
@@ -53,6 +53,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 - A token with only `read` scope sends an alert: `forbidden`.
 - A token with only `alerts_ingest` sends an alert for a team that its owner is not in (not a team member, not admin of the team's project, not an administrator): `forbidden`. A leaked ingest token cannot open incidents for other teams. Agent tokens and tokens with `write` are not limited. For one Alertmanager that serves many teams, an administrator creates the token.
 - A signal for an unknown team: `not_found`.
+- An Alertmanager batch has one alert without a `team` label. Mayday takes in the other alerts and lists the skipped one in `errors`.
 - An `alerts_ingest` token of Checkout sends a resolve signal with the fingerprint of an SRE alert: the SRE alert stays firing, because the signal matches only Checkout alerts.
 - A flapping alert inside the window does not create a new incident each time.
 - A critical alert opens an incident. The incident does not raise a second alert.
