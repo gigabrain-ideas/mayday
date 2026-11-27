@@ -170,6 +170,16 @@ class AlertTest {
     }
 
     @Test
+    fun `every alert change announces the number of firing alerts`() = suspendTest {
+        val events = java.util.concurrent.CopyOnWriteArrayList<mayday.shared.DomainEvent>()
+        f.events.subscribe { events += it }
+        val a = svc.ingest(f.member, AlertSignal("Disk 80%", Severity.SEV4, "checkout")).alert
+        svc.ingest(f.member, AlertSignal("Disk 90%", Severity.SEV4, "checkout"))
+        svc.acknowledge(f.member, a.id)
+        assertEquals(listOf("1", "2", "1"), events.filter { it.type == "alert.created" || it.type == "alert.updated" }.map { it.data["firing"] })
+    }
+
+    @Test
     fun `minor alerts do not open incidents`() = suspendTest {
         assertNull(svc.ingest(f.member, AlertSignal("Disk 70%", Severity.SEV4, "checkout")).incidentKey)
     }

@@ -4,7 +4,7 @@ import {
   ACTION_LABEL, AGENT_ACTIONS, items, rpc, SEVERITIES, type AgentAction, type AgentConfig, type AgentCredentials, type AgentRun, type AgentTrigger,
   type AuthStyle, type ClientAuth, type CredentialMode, type GrantType, type LlmInput, type LlmProvider, type LlmView, type McpServerView, type OrgRole, type Page,
 } from "@/lib/api";
-import { useLive, useQuery } from "@/lib/hooks";
+import { RELOAD_SPREAD, useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { ago, dateTime, titleCase } from "@/lib/utils";
@@ -20,8 +20,8 @@ export function AgentsPage() {
   const toast = useToast();
   const { data, reload } = useQuery(() => items(rpc.agents.listAgents<Page<AgentConfig>>()), []);
   const runs = useQuery(() => items(rpc.agentRuns.listRuns<Page<AgentRun>>({ limit: 25 })), []);
-  useLive((t) => t === "agent.changed", reload);
-  useLive((t) => t === "agent_run.updated", runs.reload);
+  useLive((t) => t === "agent.changed", reload, RELOAD_SPREAD);
+  useLive((t) => t === "agent_run.updated", runs.reload, RELOAD_SPREAD);
   const [edit, setEdit] = useState<{ id?: string; draft: Draft } | null>(null);
   const [creds, setCreds] = useState<AgentCredentials | null>(null);
 

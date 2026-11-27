@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, BellRing, ChevronsUp, Pencil, Plus, Trash2 } from "
 import {
   items, rpc, waitsForHuman, type Alert, type Escalation, type EscalationLevel, type EscalationPolicy, type EscalationStatus, type EscalationTarget, type Schedule, type Team, type TeamMember,
 } from "@/lib/api";
-import { useLive, useQuery } from "@/lib/hooks";
+import { RELOAD_SPREAD, useLive, useQuery } from "@/lib/hooks";
 import { usePeopleSearch } from "@/lib/people";
 import { useSession, useTeamOwner } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -30,7 +30,7 @@ export function EscalationPolicies({ team, members }: { team: Team; members: Tea
   const isOwner = useTeamOwner()(team);
   const toast = useToast();
   const list = useQuery(() => items(rpc.escalation.listPolicies<{ items: EscalationPolicy[] }>({ teamId: team.id })), [team.id]);
-  useLive((t) => t === "escalation.changed", list.reload);
+  useLive((t) => t === "escalation.changed", list.reload, RELOAD_SPREAD);
   const targets = useTargetName();
   const [editing, setEditing] = useState<EscalationPolicy | "new" | null>(null);
   return (

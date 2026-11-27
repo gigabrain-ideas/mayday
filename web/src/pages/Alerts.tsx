@@ -1,7 +1,7 @@
 import { useNavigate, useSearchParams } from "react-router";
 import { BellOff } from "lucide-react";
 import { rpc, SEVERITIES, type Alert, type AlertStatus, type Page, type Severity } from "@/lib/api";
-import { useLive, useQuery } from "@/lib/hooks";
+import { RELOAD_SPREAD, useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { ago } from "@/lib/utils";
 import { Card, Empty, MultiSelect, Spinner, Table, Td, Th } from "@/components/ui";
@@ -15,7 +15,7 @@ export function AlertsPage() {
   const severity = (params.get("severity")?.split(",").filter(Boolean) ?? []) as Severity[];
   const team = params.get("team")?.split(",").filter(Boolean) ?? [];
   const { data, error, loading, reload } = useQuery(() => rpc.alerts.listAlerts<Page<Alert>>({ status, severity, team, limit: 100 }), [status.join(), severity.join(), team.join()]);
-  useLive((t) => t.startsWith("alert.") || t === "live.connected", reload);
+  useLive((t) => t.startsWith("alert.") || t === "live.connected", reload, RELOAD_SPREAD);
   const set = (k: string, v: string[]) => {
     const n = new URLSearchParams(params);
     n.set(k, v.join(","));

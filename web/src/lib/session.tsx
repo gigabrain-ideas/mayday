@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { auth, items, rpc, type Me, type Page, type Project, type Team } from "./api";
-import { closeLive, useLive } from "./hooks";
+import { RELOAD_SPREAD, closeLive, useLive } from "./hooks";
 import { forgetPeople, person, usePeopleVersion } from "./people";
 
 interface Session {
@@ -27,7 +27,7 @@ export function SessionProvider({ me, onLogout, onReloadMe, children }: { me: Me
     forgetPeople();
   }, []);
   useEffect(reloadDirectory, [reloadDirectory]);
-  useLive((t) => t === "agent.changed", onReloadMe);
+  useLive((t) => t === "agent.changed", onReloadMe, RELOAD_SPREAD);
   const people = usePeopleVersion();
 
   const value = useMemo<Session>(() => {

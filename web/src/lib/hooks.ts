@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { subscribeEvents, type ApiError, type LiveEvent } from "./api";
 
 type Listener = (e: LiveEvent) => void;
+/** Random delay, in ms, for reloads that every open tab makes after one event (lists, counts). */
+export const RELOAD_SPREAD = 3000;
 const listeners = new Set<Listener>();
 let live: AbortController | null = null;
 
@@ -16,7 +18,7 @@ function ensureLive() {
       if (ctl.signal.aborted) break;
       const down: LiveEvent = { type: "live.disconnected", subjectId: "", teamIds: [], data: {} };
       listeners.forEach((l) => l(down));
-      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, 3000 + Math.random() * 7000));
     }
   })();
 }
@@ -26,17 +28,25 @@ export function closeLive() {
   live = null;
 }
 
-/** Subscribe to live domain events. The filter decides which events are relevant. */
-export function useLive(filter: (type: string, subjectId: string, data: Record<string, string>) => boolean, onEvent: () => void) {
-  const ref = useRef({ filter, onEvent });
-  ref.current = { filter, onEvent };
+/**
+ * Subscribe to live domain events. The filter decides which events are relevant. Events that arrive while a call is due join that
+ * call, which gets the last of them. [spreadMs] adds a random delay up to that value: one event reaches every open tab at the same
+ * moment, and the spread keeps their reloads from reaching the server at the same moment.
+ */
+export function useLive(filter: (type: string, subjectId: string, data: Record<string, string>) => boolean, onEvent: (e: LiveEvent) => void, spreadMs = 0) {
+  const ref = useRef({ filter, onEvent, spreadMs });
+  ref.current = { filter, onEvent, spreadMs };
   useEffect(() => {
     ensureLive();
     let timer: number | undefined;
+    let last: LiveEvent | undefined;
     const l: Listener = (e) => {
       if (!ref.current.filter(e.type, e.subjectId, e.data)) return;
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => ref.current.onEvent(), 150);
+      last = e;
+      timer ??= window.setTimeout(() => {
+        timer = undefined;
+        ref.current.onEvent(last!);
+      }, 150 + Math.random() * ref.current.spreadMs);
     };
     listeners.add(l);
     return () => {

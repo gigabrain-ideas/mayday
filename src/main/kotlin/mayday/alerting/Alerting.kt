@@ -506,8 +506,11 @@ class AlertService(
         if (policy.bool(Keys.TIMELINE_AUTO, inc.teamIds)) incidents.systemEntry(incidentId, EntryKind.ALERT, actor, text)
     }
 
-    private suspend fun publish(type: String, a: Alert) =
-        events.publish(DomainEvent(type, a.id, clock.now(), listOf(a.teamId), mapOf("severity" to a.severity.name, "status" to a.status.name)))
+    /** "firing" is the number of firing alerts after the change: one count here, so open browsers need not each ask for it. */
+    private suspend fun publish(type: String, a: Alert) {
+        val firing = alerts.count(AlertFilter(statuses = setOf(AlertStatus.FIRING)))
+        events.publish(DomainEvent(type, a.id, clock.now(), listOf(a.teamId), mapOf("severity" to a.severity.name, "status" to a.status.name, "firing" to firing.toString())))
+    }
 
     companion object {
         private const val OUTCOME = "mayday.alert.outcome"

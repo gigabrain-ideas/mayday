@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { ArrowDown, ArrowUp, CalendarClock, Lock, Pencil, Plus, Trash2, UserPlus, Users } from "lucide-react";
 import { items, rpc, type OnCall, type Schedule, type ScheduleOverride, type Shift, type ShiftUnit, type Team, type TeamMember, type TeamRole } from "@/lib/api";
-import { useLive, useQuery } from "@/lib/hooks";
+import { RELOAD_SPREAD, useLive, useQuery } from "@/lib/hooks";
 import { useSession, useTeamOwner } from "@/lib/session";
 import { EscalationPolicies } from "@/pages/Escalation";
 import { TeamRunbooks } from "@/pages/Runbooks";
@@ -30,7 +30,7 @@ export function OnCallPage() {
   const teamId = team?.id ?? "";
   const setTeamId = (id: string) => setParams(id ? { team: teams.find((t) => t.id === id)?.slug ?? id } : {}, { replace: true });
   const now = useQuery(() => items(rpc.oncall.getOnCall<{ items: OnCall[] }>({ teamIds: teamId ? [teamId] : [] })), [teamId]);
-  useLive((t) => t === "oncall.changed", now.reload);
+  useLive((t) => t === "oncall.changed", now.reload, RELOAD_SPREAD);
   return (
     <>
       <PageHeader title="On-call" eyebrow="Who responds now"
@@ -77,7 +77,7 @@ function Schedules({ team }: { team: Team }) {
   const isOwner = useTeamOwner()(team);
   const list = useQuery(() => items(rpc.oncall.listSchedules<{ items: Schedule[] }>({ teamId: team.id })), [team.id]);
   const members = useQuery(() => items(rpc.directory.listTeamMembers<{ items: TeamMember[] }>({ id: team.id })), [team.id]);
-  useLive((t) => t === "oncall.changed", () => { list.reload(); members.reload(); });
+  useLive((t) => t === "oncall.changed", () => { list.reload(); members.reload(); }, RELOAD_SPREAD);
   const [picked, setPicked] = useState<string | null>(null);
   const [editing, setEditing] = useState<Schedule | "new" | null>(null);
   const schedule = list.data?.find((s) => s.id === picked) ?? list.data?.[0];
@@ -118,7 +118,7 @@ function ScheduleView({ schedule, isOwner, onEdit }: { schedule: Schedule; isOwn
   const [from] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
   const to = useMemo(() => new Date(from.getTime() + 14 * DAY), [from]);
   const shifts = useQuery(() => items(rpc.oncall.listShifts<{ items: Shift[] }>({ scheduleId: schedule.id, from, to })), [schedule.id, schedule.version]);
-  useLive((t) => t === "oncall.changed", shifts.reload);
+  useLive((t) => t === "oncall.changed", shifts.reload, RELOAD_SPREAD);
   const span = to.getTime() - from.getTime();
   const people = [...new Set((shifts.data ?? []).map((s) => s.userId ?? ""))];
   return (
@@ -230,7 +230,7 @@ function Overrides({ schedule, team, members, isOwner }: { schedule: Schedule; t
   const toast = useToast();
   const [range] = useState(() => ({ from: new Date(Date.now() - DAY), to: new Date(Date.now() + 92 * DAY) }));
   const list = useQuery(() => items(rpc.oncall.listOverrides<{ items: ScheduleOverride[] }>({ scheduleId: schedule.id, ...range })), [schedule.id]);
-  useLive((t) => t === "oncall.changed", list.reload);
+  useLive((t) => t === "oncall.changed", list.reload, RELOAD_SPREAD);
   const isMember = !!me.user.teams[team.id];
   const [open, setOpen] = useState(false);
   return (

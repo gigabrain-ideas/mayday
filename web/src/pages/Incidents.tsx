@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { Plus, Search, Siren } from "lucide-react";
 import { rpc, SEVERITIES, type Incident, type Page, type Severity } from "@/lib/api";
-import { useLive, useQuery } from "@/lib/hooks";
+import { RELOAD_SPREAD, useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { ago, between, cn, fromLocalInput } from "@/lib/utils";
@@ -22,7 +22,7 @@ export function IncidentsPage() {
   const filter = { open: scope === "open", severity, team, q: params.get("q") || undefined, limit: 50 };
   const list = (cursor?: string) => rpc.incidents.listIncidents<Page<Incident>>({ ...filter, cursor });
   const { data, error, loading, reload } = useQuery(() => list(), [JSON.stringify(filter)]);
-  useLive((t) => t.startsWith("incident.") || t === "live.connected", () => { setExtra([]); reload(); });
+  useLive((t) => t.startsWith("incident.") || t === "live.connected", () => { setExtra([]); reload(); }, RELOAD_SPREAD);
 
   const set = (k: string, v: string | string[]) => {
     const n = new URLSearchParams(params);

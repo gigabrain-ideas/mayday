@@ -215,6 +215,23 @@ class UseCaseTest : BrowserContract() {
         assertThat(members.getByText(late, Locator.GetByTextOptions().setExact(true))).isVisible()
     }
 
+    @Test
+    fun `10 the firing badge follows new alerts and no tab asks the server for the count`() {
+        fun fire() = runBlocking { app.alerts.ingest(principal("admin"), mayday.alerting.AlertSignal(unique("CPU high"), mayday.shared.Severity.SEV4, "checkout")) }
+        fire()
+        signIn()
+        val badge = page.locator("aside span[aria-label$=' firing']")
+        assertThat(badge).isVisible()
+        page.waitForTimeout(500.0)
+        val counts = java.util.concurrent.atomic.AtomicInteger()
+        page.onRequest { if (it.url().endsWith("/CountAlerts")) counts.incrementAndGet() }
+        val before = badge.getAttribute("aria-label")!!.substringBefore(' ').toInt()
+        fire()
+
+        assertThat(badge).hasAttribute("aria-label", "${before + 1} firing")
+        assertEquals(0, counts.get(), "the count comes with the event")
+    }
+
     private fun createTeam(name: String) {
         page.navigate("/settings/directory")
         page.getByPlaceholder("New team name").fill(name)

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Lock, LockOpen, MessageSquarePlus, ShieldCheck } from "lucide-react";
 import { items, rpc, SEVERITIES, type ChangeRequest, type EffectiveSetting, type Enforcement, type Page, type Scope, type SettingDef, type SettingsView } from "@/lib/api";
-import { useLive, useQuery } from "@/lib/hooks";
+import { RELOAD_SPREAD, useLive, useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { ago, titleCase } from "@/lib/utils";
@@ -28,7 +28,7 @@ export function PoliciesPage() {
   const ready = scope === "ORG" || !!scopeId;
   const target = { scope, scopeId: scope === "ORG" ? "org" : scopeId };
   const { data, reload } = useQuery(ready ? () => rpc.policy.getSettings<SettingsView>(target) : null, [scope, scopeId]);
-  useLive((t) => t === "setting.changed", reload);
+  useLive((t) => t === "setting.changed", reload, RELOAD_SPREAD);
 
   const canManage = (() => {
     if (isAdmin) return true;
@@ -171,7 +171,7 @@ export function ChangeRequestsPage() {
   const { isAdmin, teamName, projects } = useSession();
   const toast = useToast();
   const { data, reload } = useQuery(() => items(rpc.policy.listChangeRequests<Page<ChangeRequest>>()), []);
-  useLive((t) => t.startsWith("change_request."), reload);
+  useLive((t) => t.startsWith("change_request."), reload, RELOAD_SPREAD);
   const scopeName = (c: ChangeRequest) => c.scope === "ORG" ? "Organization" : c.scope === "TEAM" ? teamName(c.scopeId) : projects.find((p) => p.id === c.scopeId)?.name ?? c.scopeId;
   const decide = async (id: string, approve: boolean) => {
     try { await rpc.policy.decideChange({ id, approve, note: "" }); reload(); } catch (e) { toast.error(e); }
