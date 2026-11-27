@@ -13,7 +13,10 @@ The benefit of Mayday-mayday is its agentic-first approach. A few use-case scena
 - Mayday-mayday exposes an MCP server allowing agents to read (always) and write (configurable in its settings). Admin functions must be RBAC'ed, so either the agent's identity must have that permission or the person using the agent must provide their identity.
 - postmortems can be auto-populated and shown in the web UI based on the available data for the configured internal agent (if LLM provider is setup) or for an external agent.
 - Humans or agents can spell out how they solved the issue inside a prompt/section on the page. They can dictate (voice) or write (keyboard/stylus like apple pencil). A runbook (or standard operating procedure) can be auto-generated from this at a press of a button (requires the internal agent or a configured handoff system for this).
-- if sufficient tools are provided (via MCPs or APIs), runbooks can be OK-ed for agentic use, and an external agent or Mayday-mayday's internal one can act when alerts are triggered. If they fail or encounter uncharted territory (not matching the runbook), they raise to a human.
+- if sufficient tools are provided (via MCPs or APIs), runbooks can be OK-ed for agentic use, and an external agent or Mayday-mayday's internal one can act when alerts are triggered. The agent starts when a covered alert fires, if an agent trigger matches the alert and the team allows automatic remediation. If they fail or encounter uncharted territory (not matching the runbook), they raise to a human.
+- An agent can only do as much as its tools let it. The organization gives the agent access to its systems (dashboards, metrics, logs, traces) through MCP servers or APIs. Mayday does not replace this access.
+- Mayday has a built-in agent and supports bring-your-own-agent (BYOA). A configuration parameter turns off the built-in agent. An external agent connects through the Mayday MCP server, and the organization decides how much power that agent gets.
+- Agents name a root cause only when the evidence shows it. When the evidence is not sufficient, the agent says that the cause is not known and tells which instrumentation is necessary to find it.
 
 ## Design and UX directions
 
