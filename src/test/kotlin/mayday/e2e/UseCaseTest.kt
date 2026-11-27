@@ -353,6 +353,25 @@ class UseCaseTest : BrowserContract() {
         assertEquals(Instant.parse("2026-04-01T04:00:00Z"), Instant.ofEpochSecond(r.to.seconds), "local midnight after the last day; the end is exclusive")
     }
 
+    @Test
+    fun `18 a run link in the agent settings opens the alert inside the app`() {
+        val title = unique("Memory leak on api")
+        val alert = runBlocking {
+            val a = app.alerts.ingest(principal("admin"), mayday.alerting.AlertSignal(title, mayday.shared.Severity.SEV4, "checkout")).alert
+            app.ports.runs.save(mayday.agents.AgentRun(mayday.shared.Ids.new(), "mayday", "Mayday agent", mayday.agents.AgentAction.ANALYZE, mayday.agents.SubjectKind.ALERT,
+                a.id, a.title, mayday.agents.RunStatus.SUCCEEDED, mayday.agents.RunTrigger.AUTO, mayday.shared.Actor.system, createdAt = Instant.now(), alertId = a.id), null)
+            a
+        }
+        signIn()
+        page.navigate("/settings/agents")
+        page.evaluate("() => { window.sameApp = true }")
+        card("Recent runs").getByRole(AriaRole.LINK, Locator.GetByRoleOptions().setName(title)).click()
+
+        assertThat(page.getByRole(AriaRole.HEADING, Page.GetByRoleOptions().setName(title))).isVisible()
+        assertEquals("/alerts/${alert.id}", java.net.URI(page.url()).path)
+        assertEquals(true, page.evaluate("() => window.sameApp === true"), "the app did not load again")
+    }
+
     private fun createTeam(name: String) {
         page.navigate("/settings/directory")
         page.getByPlaceholder("New team name").fill(name)

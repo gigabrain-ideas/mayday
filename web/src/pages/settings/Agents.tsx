@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { Bot, Plug, Plus, RotateCw, Trash2, TriangleAlert } from "lucide-react";
 import {
   ACTION_LABEL, AGENT_ACTIONS, items, rpc, SEVERITIES, type AgentAction, type AgentConfig, type AgentCredentials, type AgentRun, type AgentTrigger,
@@ -83,7 +84,7 @@ export function AgentsPage() {
               {runs.data.map((r) => (
                 <tr key={r.id}>
                   <Td>{r.agentName}</Td><Td>{ACTION_LABEL[r.action]}</Td>
-                  <Td><a className="hover:underline" href={r.subjectKind === "INCIDENT" ? `/incidents/${r.subjectLabel}` : `/alerts/${r.subjectId}`}>{r.subjectLabel}</a></Td>
+                  <Td><Link className="hover:underline" to={r.subjectKind === "INCIDENT" ? `/incidents/${r.subjectLabel}` : `/alerts/${r.subjectId}`}>{r.subjectLabel}</Link></Td>
                   <Td><RunStatusBadge status={r.status} /></Td><Td className="text-muted-foreground">{r.trigger.toLowerCase()}</Td><Td className="text-muted-foreground">{ago(r.createdAt)}</Td><Td><RunTrace traceId={r.traceId} /></Td>
                 </tr>
               ))}
