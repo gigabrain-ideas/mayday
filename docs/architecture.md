@@ -127,7 +127,7 @@ flowchart TB
 |---|---|---|
 | `*Repository` (18 ports) | each context | `MemoryStore`, `PostgresStore` |
 | `EventBus` | `shared` | `InProcessEventBus`, `PgEventBus` |
-| `LlmProvider`, `LlmProviderFactory` | `agents` | `LlmProviders` → `AnthropicProvider` (official SDK) or `OpenAiProvider` (Chat Completions); tests use `FakeLlm` |
+| `LlmProvider`, `LlmProviderFactory` | `agents` | `LlmProviders` → `AnthropicProvider` (Messages API) or `OpenAiProvider` (Chat Completions), both on `java.net.http`; tests use `FakeLlm` |
 | `CredentialProvider`, `CredentialProviderFactory` | `agents` | `Credentials` (static key, OAuth 2.0 / workload identity, token file); see [gateway-identity.md](domains/gateway-identity.md) |
 | `Telemetry` | `shared` | `OtelTelemetry` (OpenTelemetry); default `Telemetry.noop`; see [observability.md](observability.md) |
 | `AgentDispatcher` | `agents` | `WebhookDispatcher`; tests use `RecordingDispatcher` |

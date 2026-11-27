@@ -44,10 +44,10 @@ Agents are an add-on. Without an agent, Mayday is a complete incident management
 
 ## LLM providers
 
-Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider`: `anthropic` (official Anthropic Java SDK) or `openai` (Chat Completions with `java.net.http`). `baseUrl` can have a path prefix, for example `https://gw.example.com/ai/openai/v1`. Defaults: `https://api.anthropic.com` and `https://api.openai.com/v1`.
+Package `mayday.adapters.llm`. `LlmProviders` selects the adapter from `provider`: `anthropic` (Messages API) or `openai` (Chat Completions). Both use `java.net.http` and one shared client. `baseUrl` can have a path prefix, for example `https://gw.example.com/ai/openai/v1`. Defaults: `https://api.anthropic.com` and `https://api.openai.com/v1`.
 
 - Each request carries the `GatewayAuth` headers (read again per request, so a rotated token is used at once) and the W3C `traceparent`/`tracestate`. Only one auth header goes out. Without a credential, no auth header goes out.
-- One SDK client per base URL. SDK retries and SDK tracing are off. A custom SDK backend adds no credential of its own.
+- The Anthropic adapter sends `anthropic-version`, `output_config.effort`, and for models with server-side fallbacks the `anthropic-beta` header and `fallbacks`. It sends the assistant content of a response back unchanged, so thinking blocks and their signatures stay in the tool loop.
 - `GatewayCaller` is the only retry policy: 401 → new token, one retry; 429 → `BudgetExhausted`, no retry; 502, 503, 504 or a connection error → at most two retries with random back-off (no retry when `Retry-After` is longer than 8 s); other status → `GatewayError` with the token masked.
 - The OpenAI adapter sends no reasoning parameters (some gateways and models reject them). A failed tool result starts with "Error: ", because the protocol has no error flag.
 

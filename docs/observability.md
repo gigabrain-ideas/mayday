@@ -90,7 +90,7 @@ Spring Boot reads the standard `OTEL_*` variables too (for example `OTEL_EXPORTE
 
 Resource attributes: `service.name=mayday` (from `spring.application.name`), `service.version`, `deployment.environment` when set.
 
-Mayday registers its SDK as `GlobalOpenTelemetry`, so libraries that use the global instance (for example the Anthropic Java SDK) share the exporter and the context.
+Mayday registers its SDK as `GlobalOpenTelemetry`, so libraries that use the global instance share the exporter and the context.
 
 ## Sampling at scale
 

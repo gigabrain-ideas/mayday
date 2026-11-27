@@ -1,5 +1,15 @@
 package mayday.contract
 
+import kotlinx.serialization.json.add
+
+import kotlinx.serialization.json.putJsonArray
+
+import kotlinx.serialization.json.putJsonObject
+
+import kotlinx.serialization.json.put
+
+import kotlinx.serialization.json.buildJsonObject
+
 import com.sun.net.httpserver.HttpServer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -303,6 +313,73 @@ class AnthropicProviderContractTest : LlmProviderContract() {
     }
 
     override fun toolNames(body: JsonObject) = body["tools"]!!.jsonArray.map { it.jsonObject["name"]!!.jsonPrimitive.content }
+
+    private fun anthropic(model: String) = LlmProviders.withTelemetry(Telemetry.noop, RetryPolicy(0, Duration.ofMillis(1), Duration.ofMillis(1))).create(
+        LlmConfig(provider = api.id, model = model, baseUrl = gateway.base + prefix), GatewayAuth(AuthStyle.API_KEY, credential, emptyMap()))
+
+    @Test
+    fun `the request follows the Messages API with effort and tool schemas`() = suspendTest {
+        gateway.reply(FakeGateway.Reply(200, text("Hi")))
+        val tool = mayday.agents.ToolSpec("get_incident", "Read an incident", buildJsonObject {
+            put("type", "object"); putJsonObject("properties") { putJsonObject("key") { put("type", "string") } }; putJsonArray("required") { add("key") }
+        })
+        provider().complete(ask.copy(tools = listOf(tool)))
+        val r = gateway.requests.single()
+        assertEquals(listOf("2026-10-21"), r.header("anthropic-version"))
+        assertEquals(emptyList(), r.header("anthropic-beta"))
+        val body = r.json
+        assertEquals("test-model", body["model"]!!.jsonPrimitive.content)
+        assertEquals(16000, body["max_tokens"]!!.jsonPrimitive.content.toInt())
+        assertEquals("You help.", body["system"]!!.jsonPrimitive.content)
+        assertEquals("high", body["output_config"]!!.jsonObject["effort"]!!.jsonPrimitive.content)
+        assertNull(body["fallbacks"])
+        val schema = body["tools"]!!.jsonArray.single().jsonObject["input_schema"]!!.jsonObject
+        assertEquals("object", schema["type"]!!.jsonPrimitive.content)
+        assertEquals(listOf("key"), schema["required"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals("string", schema["properties"]!!.jsonObject["key"]!!.jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals(listOf(buildJsonObject { put("type", "text"); put("text", "Hello") }), body["messages"]!!.jsonArray.single().jsonObject["content"]!!.jsonArray.toList())
+    }
+
+    @Test
+    fun `models with server-side fallbacks ask for them`() = suspendTest {
+        gateway.reply(FakeGateway.Reply(200, text("Hi")))
+        anthropic("claude-opus-5-5").complete(ask)
+        val r = gateway.requests.single()
+        assertEquals(listOf("server-side-fallback-2026-07-01"), r.header("anthropic-beta"))
+        assertEquals("default", r.json["fallbacks"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `the assistant content is replayed exactly, with blocks the adapter does not know`() = suspendTest {
+        val content = """[{"type":"thinking","thinking":"check the deploy","signature":"sig=="},{"type":"tool_use","id":"t1","name":"get_incident","input":{"key":"INC-1"}}]"""
+        gateway.reply(
+            FakeGateway.Reply(200, """{"id":"m","type":"message","role":"assistant","model":"m-1","content":$content,"stop_reason":"tool_use","usage":{"input_tokens":3,"output_tokens":2}}"""),
+            FakeGateway.Reply(200, text("done")),
+        )
+        val p = provider()
+        val first = p.complete(ask)
+        p.complete(ask.copy(messages = ask.messages + first.message + LlmMessage(LlmRole.USER, listOf(LlmBlock.ToolResult("t1", "ok", true)))))
+        val messages = gateway.requests[1].json["messages"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(Json.parseToJsonElement(content), messages[1]["content"])
+        val result = messages[2]["content"]!!.jsonArray.single().jsonObject
+        assertEquals("t1", result["tool_use_id"]!!.jsonPrimitive.content)
+        assertEquals(true, result["is_error"]!!.jsonPrimitive.content.toBoolean())
+    }
+
+    @Test
+    fun `usage counts cached input and stop reasons map`() = suspendTest {
+        gateway.reply(
+            FakeGateway.Reply(200, """{"id":"m","type":"message","role":"assistant","model":"m-1","content":[{"type":"text","text":"x"}],"stop_reason":"max_tokens","usage":{"input_tokens":3,"output_tokens":2,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}"""),
+            FakeGateway.Reply(200, text("x").replace("end_turn", "refusal")),
+        )
+        val p = provider()
+        val r = p.complete(ask)
+        assertEquals(StopReason.MAX_TOKENS, r.stopReason)
+        assertEquals(18, r.usage.inputTokens)
+        assertEquals(2, r.usage.outputTokens)
+        assertEquals("m-1", r.model)
+        assertEquals(StopReason.REFUSAL, p.complete(ask).stopReason)
+    }
 }
 
 class OpenAiProviderContractTest : LlmProviderContract() {

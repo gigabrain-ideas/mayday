@@ -1,6 +1,5 @@
 package mayday.adapters.llm
 
-import kotlinx.coroutines.future.await
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -9,9 +8,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import mayday.agents.GatewayAuth
@@ -25,17 +22,11 @@ import mayday.agents.LlmResponse
 import mayday.agents.LlmRole
 import mayday.agents.LlmUsage
 import mayday.agents.StopReason
-import mayday.agents.statedCooldown
 import mayday.shared.Telemetry
-import java.io.IOException
 import java.net.URI
 import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 
 private const val OPENAI_URL = "https://api.openai.com/v1"
-private val RESTRICTED = setOf("connection", "content-length", "expect", "host", "upgrade")
 private val ROUND_TRIP_KEYS = setOf("role", "content", "tool_calls", "refusal")
 
 /** OpenAI-compatible Chat Completions adapter on java.net.http. No reasoning parameters: gateways and non-reasoning models reject them. */
@@ -51,23 +42,7 @@ class OpenAiProvider internal constructor(
 
     override suspend fun complete(request: LlmRequest): LlmResponse {
         val body = Json.encodeToString(JsonObject.serializer(), body(request))
-        val resp = caller.call { headers ->
-            val b = HttpRequest.newBuilder(endpoint)
-                .timeout(Duration.ofMinutes(10))
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-            headers.forEach { (k, v) -> if (k.lowercase() !in RESTRICTED) b.setHeader(k, v) }
-            val r = try {
-                client.sendAsync(b.build(), HttpResponse.BodyHandlers.ofString()).await()
-            } catch (e: IOException) {
-                throw ioFailure(e)
-            }
-            if (r.statusCode() !in 200..299) {
-                throw HttpFailure(r.statusCode(), statedCooldown(r.headers()::allValues, r.body()), errorDetail(r.body()))
-            }
-            r.body()
-        }
+        val resp = caller.call { headers -> postJson(client, endpoint, body, headers) }
         val json = runCatching { Json.parseToJsonElement(resp).jsonObject }.getOrElse { throw GatewayError(200, "AI gateway answered with invalid JSON") }
         return toResponse(json)
     }
@@ -165,11 +140,4 @@ class OpenAiProvider internal constructor(
             json.string("model").orEmpty(),
         )
     }
-
-    companion object {
-        internal val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
-    }
 }
-
-private fun JsonObject.string(key: String) = (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
-private fun JsonObject.long(key: String) = (this[key] as? JsonPrimitive)?.longOrNull

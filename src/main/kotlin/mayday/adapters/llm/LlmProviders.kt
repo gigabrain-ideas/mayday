@@ -14,7 +14,7 @@ object LlmProviders : LlmProviderFactory by TracedLlmProviders(Telemetry.noop, R
 
 private class TracedLlmProviders(private val telemetry: Telemetry, private val retry: RetryPolicy) : LlmProviderFactory {
     override fun create(config: LlmConfig, auth: GatewayAuth): LlmProvider = when (config.api) {
-        LlmApi.ANTHROPIC -> AnthropicProvider(AnthropicClients.forBaseUrl(config.baseUrl), config, auth, telemetry, retry)
-        LlmApi.OPENAI -> OpenAiProvider(OpenAiProvider.http, config, auth, telemetry, retry)
+        LlmApi.ANTHROPIC -> AnthropicProvider(gatewayHttp, config, auth, telemetry, retry)
+        LlmApi.OPENAI -> OpenAiProvider(gatewayHttp, config, auth, telemetry, retry)
     }
 }

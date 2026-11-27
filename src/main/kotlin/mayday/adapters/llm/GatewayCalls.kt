@@ -1,6 +1,16 @@
 package mayday.adapters.llm
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.future.await
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
+import mayday.agents.statedCooldown
+import java.io.IOException
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -13,6 +23,31 @@ import java.net.http.HttpConnectTimeoutException
 import java.net.http.HttpTimeoutException
 import java.time.Duration
 import java.util.concurrent.ThreadLocalRandom
+
+private val RESTRICTED = setOf("connection", "content-length", "expect", "host", "upgrade")
+
+/** One HTTP client for every gateway call. A 10-minute request timeout leaves room for long model turns. */
+internal val gatewayHttp: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+
+/** POSTs a JSON body with the gateway headers. Returns the body of a 2xx answer, else throws [HttpFailure]. */
+internal suspend fun postJson(client: HttpClient, uri: URI, body: String, headers: Map<String, String>): String {
+    val b = HttpRequest.newBuilder(uri)
+        .timeout(Duration.ofMinutes(10))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(body))
+    headers.forEach { (k, v) -> if (k.lowercase() !in RESTRICTED) b.setHeader(k, v) }
+    val r = try {
+        client.sendAsync(b.build(), HttpResponse.BodyHandlers.ofString()).await()
+    } catch (e: IOException) {
+        throw ioFailure(e)
+    }
+    if (r.statusCode() !in 200..299) throw HttpFailure(r.statusCode(), statedCooldown(r.headers()::allValues, r.body()), errorDetail(r.body()))
+    return r.body()
+}
+
+internal fun JsonObject.string(key: String) = (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
+internal fun JsonObject.long(key: String) = (this[key] as? JsonPrimitive)?.longOrNull
 
 /** Bounded retries for connection errors and HTTP 502/503/504. HTTP 429 and other statuses are never retried. */
 data class RetryPolicy(
