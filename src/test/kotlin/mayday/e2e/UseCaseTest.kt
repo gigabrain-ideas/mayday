@@ -303,6 +303,21 @@ class UseCaseTest : BrowserContract() {
         assertThat(text).hasValue("Restarted cache-2. Misses drop.")
     }
 
+    @Test
+    fun `15 a failed load of more incidents shows the error`() {
+        val prefix = unique("Batch job late").replace(' ', '-')
+        runBlocking { repeat(51) { app.incidents.declare(principal("admin"), mayday.incidents.NewIncident("$prefix $it", severity = mayday.shared.Severity.SEV4, teamIds = listOf(team.id))) } }
+        signIn()
+        page.navigate("/incidents?q=$prefix")
+        val more = button("Load more")
+        assertThat(more).isVisible()
+        page.route("**/mayday.v1.IncidentService/ListIncidents") { it.fulfill(com.microsoft.playwright.Route.FulfillOptions().setStatus(503)) }
+        more.click()
+
+        assertThat(page.locator("[aria-live=polite] svg.text-destructive")).isVisible()
+        assertThat(more).isVisible()
+    }
+
     private fun createTeam(name: String) {
         page.navigate("/settings/directory")
         page.getByPlaceholder("New team name").fill(name)

@@ -13,6 +13,7 @@ export function IncidentsPage() {
   const [params, setParams] = useSearchParams();
   const { teams, teamName, userName, canWrite } = useSession();
   const nav = useNavigate();
+  const toast = useToast();
   const scope = params.get("scope") ?? "open";
   const severity = (params.get("severity")?.split(",").filter(Boolean) ?? []) as Severity[];
   const team = params.get("team")?.split(",").filter(Boolean) ?? [];
@@ -35,9 +36,11 @@ export function IncidentsPage() {
   const items = [...(data?.items ?? []), ...extra];
   const next = extra.length ? cursor : data?.nextCursor;
   const more = async () => {
-    const p = await list(next);
-    setExtra((e) => [...e, ...p.items]);
-    setCursor(p.nextCursor);
+    try {
+      const p = await list(next);
+      setExtra((e) => [...e, ...p.items]);
+      setCursor(p.nextCursor);
+    } catch (e) { toast.error(e); }
   };
 
   return (
