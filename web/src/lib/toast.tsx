@@ -5,11 +5,26 @@ interface Toast { id: number; text: string; tone: "info" | "error" | "success"; 
 interface ToastApi {
   show(text: string, tone?: Toast["tone"]): void;
   error(e: unknown): void;
-  /** Run [action] after 5 s unless the person presses Undo. Replaces "are you sure?" dialogs. */
+  /**
+   * Run [action] after 5 s unless the person presses Undo. Replaces "are you sure?" dialogs. While an action waits, the browser asks
+   * before it closes or leaves the tab, because the action runs in this tab.
+   */
   undoable(text: string, action: () => Promise<unknown> | unknown): void;
 }
 
 const Ctx = createContext<ToastApi | null>(null);
+
+let waiting = 0;
+const askBeforeLeave = (e: BeforeUnloadEvent) => {
+  e.preventDefault();
+  e.returnValue = true;
+};
+function hold() {
+  if (waiting++ === 0) window.addEventListener("beforeunload", askBeforeLeave);
+}
+function release() {
+  if (--waiting === 0) window.removeEventListener("beforeunload", askBeforeLeave);
+}
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -26,10 +41,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     error: (e) => push({ text: e instanceof Error ? e.message : String(e), tone: "error" }, 7000),
     undoable: (text, action) => {
       let cancelled = false;
-      const id = push({ text, tone: "info", undo: () => { cancelled = true; remove(id); } }, 5000);
+      hold();
+      const id = push({ text, tone: "info", undo: () => { if (!cancelled) release(); cancelled = true; remove(id); } }, 5000);
       window.setTimeout(async () => {
         if (cancelled) return;
-        try { await action(); } catch (e) { push({ text: e instanceof Error ? e.message : String(e), tone: "error" }, 7000); }
+        cancelled = true;
+        try { await action(); } catch (e) { push({ text: e instanceof Error ? e.message : String(e), tone: "error" }, 7000); } finally { release(); }
       }, 5000);
     },
   };

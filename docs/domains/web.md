@@ -18,7 +18,7 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 - One monospace font (JetBrains Mono, bundled), tabular numbers, no ligatures. Labels and buttons in uppercase with wide tracking.
 - Dotted halftone background. Floating translucent sidebar and cards. Radii: full for actions, 2xl for panels, lg for inputs.
 - One primary button per screen. Secondary actions are outline or ghost.
-- No "are you sure?" dialogs. Deletes and revocations show an Undo toast for 5 seconds before they run.
+- No "are you sure?" dialogs. Deletes and revocations show an Undo toast for 5 seconds before they run. The action runs in the tab, so while one waits the browser asks before it closes or leaves the tab.
 - Ease-out motion, 150 to 300 ms. Reduced motion is respected. Light and dark themes.
 - Charts: severity is ordinal, so charts use one gray ramp (darkest = SEV1) with a legend and a hover tooltip.
 - Professional and friendly text in ASD-STE100 style.

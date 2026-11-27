@@ -318,6 +318,24 @@ class UseCaseTest : BrowserContract() {
         assertThat(more).isVisible()
     }
 
+    @Test
+    fun `16 the browser asks before it closes a tab with a revoke that waits for undo`() {
+        signIn()
+        page.navigate("/settings/tokens")
+        val name = unique("leaked-ci")
+        page.getByPlaceholder("Prometheus Alertmanager").fill(name)
+        button("Create token").click()
+        val row = page.locator("div.px-4").filter(Locator.FilterOptions().setHasText(name))
+        row.getByRole(AriaRole.BUTTON, Locator.GetByRoleOptions().setName("Revoke")).click()
+        assertThat(button("Undo")).isVisible()
+        val dialogs = java.util.concurrent.CopyOnWriteArrayList<String>()
+        page.onDialog { dialogs += it.type(); it.dismiss() }
+
+        page.close(Page.CloseOptions().setRunBeforeUnload(true))
+        runCatching { page.waitForTimeout(500.0) } // Playwright delivers the dialog event while it waits; without a dialog the page is gone
+        assertEquals(listOf("beforeunload"), dialogs.toList())
+    }
+
     private fun createTeam(name: String) {
         page.navigate("/settings/directory")
         page.getByPlaceholder("New team name").fill(name)
