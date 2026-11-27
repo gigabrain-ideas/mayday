@@ -129,7 +129,7 @@ export function UsersPage() {
       </div>
       <p className="text-[12px] text-muted-foreground">Users from single sign-on are created at their first login. Viewers can read. Members can manage incidents and start agents. Admins configure everything and enforce settings.</p>
       <Card>
-        {!search ? <Empty icon={<Users />} title="Find a person">Type at least 2 characters of a name or email.</Empty> : !data ? <div className="flex justify-center p-10"><Spinner /></div> : (
+        {!search ? <Empty icon={<Users />} title="Find a person">Start typing a name or email.</Empty> : !data ? <div className="flex justify-center p-10"><Spinner /></div> : (
           <Table>
             <thead><tr><Th>Name</Th><Th>Email</Th><Th>Role</Th><Th>Teams</Th><Th /></tr></thead>
             <tbody>

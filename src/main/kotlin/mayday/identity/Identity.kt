@@ -244,7 +244,7 @@ class IdentityService(
     /** Administrators browse the directory. Everyone else finds a person with [query] of at least 2 characters. */
     suspend fun list(by: Principal, query: String?, cursor: String?, limit: Int): Page<User> {
         val q = query?.trim()?.ifEmpty { null }
-        if (!Access.isAdmin(by) && (q?.length ?: 0) < 2) throw Invalid("Type at least 2 characters of a name or email")
+        if (!Access.isAdmin(by) && (q?.length ?: 0) < 2) throw Invalid("Continue typing a name or email")
         return users.list(q, cursor, limit.coerceIn(1, 500))
     }
     suspend fun byIds(ids: Collection<String>): List<User> {
