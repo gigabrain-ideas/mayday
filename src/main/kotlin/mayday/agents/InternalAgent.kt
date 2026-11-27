@@ -76,13 +76,13 @@ class InternalAgent(
             SubjectKind.ALERT -> "the alert in the subject data"
         }
         val goal = when (run.action) {
-            AgentAction.ANALYZE -> "Analyze $ref. Find the probable cause, the impact and the next steps. Use the available tools to collect evidence. Give your result as a short report with the headings Summary, Evidence, Probable cause, Next steps."
+            AgentAction.ANALYZE -> "Analyze $ref. Find the impact, the probable cause and the next steps. Use the available tools to collect evidence. Give your result as a short report with the headings Summary, Evidence, Probable cause, Next steps. When the evidence does not show a cause, write \"Not known\" under Probable cause and add the instrumentation that is necessary to find it to Next steps."
             AgentAction.REMEDIATE -> "Try to mitigate $ref with the available tools. Do only safe and reversible actions. Record each action on the timeline with add_timeline_entry. Finish with a report of what you did and what is still necessary."
-            AgentAction.PATCH -> "Prepare a patch or bugfix for the cause of $ref with the available tools (for example a pull request). Do not merge or deploy it." +
+            AgentAction.PATCH -> "Prepare a patch or bugfix for the cause of $ref with the available tools (for example a pull request). Do not merge or deploy it. Make a patch only for a cause that the evidence shows. When the evidence does not show the cause, make no patch: give the instrumentation that is necessary to find the cause instead." +
                 (if (run.requiresApproval) " A person must approve the patch in Mayday before anyone applies it." else "") +
                 " Finish with a link to the patch and a short description of the change and its risks."
             AgentAction.TIMELINE -> "Make the timeline of $ref complete. Compare the alerts and updates with the timeline. Add each missing important event with add_timeline_entry and its real time in 'at'. Do not add duplicates. Finish with a one-line summary."
-            AgentAction.POSTMORTEM -> "Write the postmortem of $ref from all available data. Call set_postmortem once with summary, impact, rootCause, detection, resolution, lessons and actionItems. Keep it blameless and factual. Finish with a one-line summary."
+            AgentAction.POSTMORTEM -> "Write the postmortem of $ref from all available data. Call set_postmortem once with summary, impact, rootCause, detection, resolution, lessons and actionItems. Keep it blameless and factual. When the evidence does not show the root cause, write that it is not known in rootCause and add the instrumentation that is necessary to find it to actionItems. Finish with a one-line summary."
             AgentAction.RUNBOOK -> "Write a runbook from the resolution notes and timeline of $ref. Use ASD-STE100 Simplified Technical English: short sentences, active voice, one instruction per step, imperative verbs. Use numbered steps in Markdown with sections Symptoms, Checks, Procedure, Verification, Escalation. Call save_runbook with the title and body. Finish with a one-line summary."
         }
         val human = if (run.prompt.isNotBlank()) "\n\nInstructions from the person who started this run:\n${run.prompt}" else ""
@@ -108,6 +108,7 @@ class InternalAgent(
             Rules:
             - Use the tools to read data before you make a statement. Do not invent facts, times, systems or people.
             - When data is missing, say so and tell which data is necessary.
+            - Name a root cause only when the evidence shows it. Do not assume a root cause. When the evidence is not sufficient, say that the cause is not known and tell which instrumentation (logs, metrics, traces, events) is necessary to find it.
             - Every change you make is recorded with your identity. When you act on behalf of a person, their permissions apply.
             - If a tool returns a permission error, stop that action and report it.
             - Write in a professional and friendly tone. Use short sentences. Prefer lists.
