@@ -27,7 +27,7 @@ Local preview:
 python3 -m http.server 4173 --directory site
 ```
 
-"Request an evaluation" and "Contact sales" link to `#` (no target yet). Set the target when the sales channel is decided.
+"Request an evaluation" and "Contact sales" link to `#` and show "(coming soon)" (no target yet). Set the target when the sales channel is decided.
 
 ## Internal names are forbidden
 
@@ -72,7 +72,7 @@ CISOs, directors of engineering and CTOs at companies whose revenue runs on soft
 | 9 | Guided evaluation in an afternoon: four steps, what we need from you, what you have at the end | [deployment.md](deployment.md), [identity](domains/identity.md), [audit](domains/audit.md) `audit-verify` |
 | 10 | Due diligence (documents in the evaluation, no links) and "Tested at every boundary" | [testing.md](testing.md), docs index |
 | 11 | FAQ (`details`) | The sources above, [api.md](api.md) |
-| 12 | Contact: "Request an evaluation" and "Contact sales" (link to `#` until the sales channel is decided) | Sales |
+| 12 | Contact: "Request an evaluation" and "Contact sales" (link to `#` and show "(coming soon)" until the sales channel is decided) | Sales |
 
 Rules for claims: scale numbers are a "design target". The page sells a guided evaluation and does not invite visitors to install Mayday alone. It claims no open source license, customers, certifications, prices or SLAs.
 
