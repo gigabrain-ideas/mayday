@@ -21,7 +21,7 @@ Mayday is one process: a Spring Boot jar (`build/libs/mayday.jar`). It needs Jav
 | `MAYDAY_HOST` | `0.0.0.0` | HTTP bind address |
 | `MAYDAY_GRPC_PORT` | 9090 | Native gRPC port |
 | `MAYDAY_PUBLIC_URL` | `http://localhost:<port>` | External URL (OIDC callback, links for agents). With `https`, cookies are `Secure`. |
-| `MAYDAY_SECRET_KEY` | development key | Signs sessions and delegated tokens, encrypts stored secrets. Use 32+ random characters. Keep it stable. |
+| `MAYDAY_SECRET_KEY` | development key (single machine only) | Signs sessions and delegated tokens, encrypts stored secrets. Use 32+ random characters. Keep it stable. Required with `MAYDAY_DATABASE_URL` or `MAYDAY_OIDC_ISSUER`: without it Mayday does not start, because the development key is public. |
 | `MAYDAY_DATA_DIR` | `./data` | Journal directory. `none` = memory only. |
 | `MAYDAY_DATABASE_URL` | – | `postgresql://host:5432/db` or a JDBC URL |
 | `MAYDAY_DATABASE_USER`, `MAYDAY_DATABASE_PASSWORD`, `MAYDAY_DATABASE_POOL` | –, –, 20 | Database access |

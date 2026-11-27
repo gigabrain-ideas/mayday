@@ -41,6 +41,9 @@ import java.nio.file.Path
 import java.time.Duration
 import java.util.logging.Logger
 
+/** A shared deployment (a database or single sign-on) has no MAYDAY_SECRET_KEY. The development key is in the source code. */
+class MissingSecretKey : IllegalStateException("Set MAYDAY_SECRET_KEY (32+ random characters). A deployment with a database or single sign-on does not start with the development key.")
+
 /** Bound from application.yaml, which maps the MAYDAY_* environment variables. */
 @ConfigurationProperties("mayday")
 data class MaydayProperties(
@@ -235,6 +238,7 @@ class Wiring {
 
     @Bean(destroyMethod = "")
     fun ports(props: MaydayProperties, telemetry: Telemetry): Ports {
+        if (props.secretKey.isEmpty() && (props.database.jdbcUrl != null || props.oidc.issuer.isNotBlank())) throw MissingSecretKey()
         val credentials = Credentials(telemetry = telemetry)
         return (props.database.jdbcUrl?.let { url ->
             val pool = Pool.of(url, props.database.user.ifBlank { null }, props.database.password.ifBlank { null }, props.database.pool)
@@ -251,7 +255,7 @@ class Wiring {
 
     @Bean(destroyMethod = "stop")
     fun app(props: MaydayProperties, ports: Ports): App {
-        if (props.secretKey.isEmpty()) log.warning("MAYDAY_SECRET_KEY is not set. Sessions and stored secrets use a development key.")
+        if (props.secretKey.isEmpty()) log.warning("MAYDAY_SECRET_KEY is not set. Sessions and stored secrets use a development key. Only for a single machine.")
         return App(props.appSettings(), ports).also { runBlocking { it.start() } }
     }
 
