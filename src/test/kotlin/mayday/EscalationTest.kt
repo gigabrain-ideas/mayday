@@ -327,4 +327,19 @@ class EscalationTest {
         assertEquals(listOf(1, 2), f.pager.pages.map { it.level })
         assertEquals(2, esc.escalation(f.viewer, alert.id).pages.size)
     }
+
+    @Test
+    fun `a page that the pager cannot deliver is marked failed and announced`() = suspendTest {
+        twoLevels()
+        val events = java.util.concurrent.CopyOnWriteArrayList<mayday.shared.DomainEvent>()
+        f.events.subscribe { events += it }
+        f.pager.fail = true
+        val a = fire()
+        assertEquals(listOf(true), esc.escalation(f.viewer, a.id).pages.map { it.failed })
+        assertTrue(events.any { it.type == "alert.page_failed" && it.subjectId == a.id && it.data["level"] == "1" })
+        f.pager.fail = false
+        clock.advance(Duration.ofMinutes(6))
+        esc.tick()
+        assertEquals(listOf(true, false), esc.escalation(f.viewer, a.id).pages.map { it.failed }, "the next level is paged on time")
+    }
 }

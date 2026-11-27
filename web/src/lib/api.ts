@@ -69,7 +69,7 @@ export interface EscalationPolicy {
   createdAt: string; updatedAt: string; version: number;
 }
 export type EscalationStatus = "ACTIVE" | "ACKNOWLEDGED" | "RESOLVED" | "EXHAUSTED" | "CANCELLED";
-export interface EscalationPage { at: string; level: number; cycle: number; userIds: string[]; manual: boolean }
+export interface EscalationPage { at: string; level: number; cycle: number; userIds: string[]; manual: boolean; failed?: boolean }
 export interface Escalation {
   id: string; teamId: string; policyId: string; status: EscalationStatus; level: number; cycle: number; nextAt?: string;
   pages: EscalationPage[]; startedAt: string; updatedAt: string; version: number;

@@ -99,7 +99,11 @@ class TestClock(@Volatile var at: Instant = Instant.now().truncatedTo(java.time.
 /** Records every page that the escalation context sends. */
 class RecordingPager : mayday.escalation.Pager {
     val pages = CopyOnWriteArrayList<mayday.escalation.PageNotice>()
-    override suspend fun page(notice: mayday.escalation.PageNotice) { pages += notice }
+    @Volatile var fail = false
+    override suspend fun page(notice: mayday.escalation.PageNotice) {
+        if (fail) throw IllegalStateException("Pager endpoint answered HTTP 503")
+        pages += notice
+    }
 }
 
 class Fixture(

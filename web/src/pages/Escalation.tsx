@@ -194,6 +194,7 @@ export function AlertEscalation({ alert }: { alert: Alert }) {
                 <div className="flex gap-2">
                   <span className="eyebrow">Level {p.level}{p.cycle > 0 && ` · cycle ${p.cycle + 1}`}</span>
                   {p.manual && <Badge tone="outline">Manual</Badge>}
+                  {p.failed && <Badge tone="critical">Not delivered</Badge>}
                   <span className="ml-auto text-muted-foreground">{ago(p.at)}</span>
                 </div>
                 <div>{p.userIds.length ? p.userIds.map(userName).join(", ") : <Badge tone="critical">Nobody reached</Badge>}</div>

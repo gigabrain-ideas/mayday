@@ -25,6 +25,8 @@ import mayday.shared.NotFound
 import mayday.shared.Severity
 import mayday.shared.Ts
 import java.time.Duration
+import java.util.logging.Level
+import java.util.logging.Logger
 import java.time.Instant
 
 @Serializable
@@ -66,7 +68,7 @@ enum class EscalationStatus { ACTIVE, ACKNOWLEDGED, RESOLVED, EXHAUSTED, CANCELL
 
 /** [level] is 1-based. [userIds] is empty when the level reached nobody. */
 @Serializable
-data class EscalationPage(val at: Ts, val level: Int, val cycle: Int, val userIds: List<String> = emptyList(), val manual: Boolean = false)
+data class EscalationPage(val at: Ts, val level: Int, val cycle: Int, val userIds: List<String> = emptyList(), val manual: Boolean = false, val failed: Boolean = false)
 
 /** The escalation of one alert. [id] is the alert id. [level] is the 0-based index of the level paged last. */
 @Serializable
@@ -132,6 +134,7 @@ private const val MAX_LEVELS = 10
 private const val MAX_TARGETS = 10
 private const val MAX_REPEAT = 9
 private const val TICK_BATCH = 500
+private val log = Logger.getLogger("mayday.escalation")
 
 class EscalationService(
     private val policies: EscalationPolicyRepository,
@@ -281,13 +284,31 @@ class EscalationService(
         if (!trySave(saved, expectedVersion)) return null
         events.publish(DomainEvent("alert.paged", alert.id, now, listOf(alert.teamId),
             mapOf("level" to page.level.toString(), "cycle" to page.cycle.toString(), "userIds" to page.userIds.joinToString(","))))
-        if (recipients.isNotEmpty()) {
-            runCatching {
-                pager.page(PageNotice(alert.id, alert.title, "${publicUrl.trimEnd('/')}/alerts/${alert.id}", alert.severity, alert.teamId, policy.id, policy.name,
-                    page.level, page.cycle, manual, recipients))
-            }
+        if (recipients.isEmpty()) return saved
+        try {
+            pager.page(PageNotice(alert.id, alert.title, "${publicUrl.trimEnd('/')}/alerts/${alert.id}", alert.severity, alert.teamId, policy.id, policy.name,
+                page.level, page.cycle, manual, recipients))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.log(Level.WARNING, "Page of alert ${alert.id} (level ${page.level}) was not delivered", e)
+            events.publish(DomainEvent("alert.page_failed", alert.id, clock.now(), listOf(alert.teamId),
+                mapOf("level" to page.level.toString(), "cycle" to page.cycle.toString(), "reason" to e.javaClass.simpleName)))
+            return markFailed(alert.id, page) ?: saved
         }
         return saved
+    }
+
+    /** A page is sent at most once. A failed delivery stays on the escalation, so nobody reads "paged" for a page that never arrived. */
+    private suspend fun markFailed(alertId: String, page: EscalationPage): Escalation? {
+        repeat(3) {
+            val cur = escalations.get(alertId) ?: return null
+            val pages = cur.pages.map { if (it == page) it.copy(failed = true) else it }
+            if (pages == cur.pages) return cur
+            val next = cur.copy(pages = pages, version = cur.version + 1)
+            if (trySave(next, cur.version)) return next
+        }
+        return null
     }
 
     private suspend fun resolve(targets: List<EscalationTarget>, at: Instant): List<PageRecipient> {

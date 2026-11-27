@@ -83,6 +83,8 @@ message EscalationPage {
   int32 cycle = 3;
   repeated string user_ids = 4;
   bool manual = 5;
+  // The pager did not deliver the page. Mayday does not send it again; the next level follows on time.
+  bool failed = 6;
 }
 
 // The escalation of one alert. id is the alert id. level is the 0-based index of the level paged last.

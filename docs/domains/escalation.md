@@ -27,6 +27,7 @@ An escalation policy tells who Mayday pages when an alert fires, and who is next
 - "Escalate now" pages the next level at once. It works on an alert that waits for a person: firing, acknowledged only by an automated agent, or resolved by an automated agent with no runbook. On such an alert without an active escalation it starts the team default policy at level 1, at any severity.
 - An agent raises an alert to a person ([runbooks.md](runbooks.md)): with no active escalation, the default policy starts at level 1 at once, at any severity. An active escalation keeps its normal timing: the next level is paged when it is due.
 - Each page publishes `alert.paged` (team ids, level, user ids) and calls the `Pager` port. The state is saved before the page is sent, so two instances never send the same page.
+- A page is sent at most once. When the `Pager` fails, Mayday logs it, marks the page `failed` (the alert shows "Not delivered") and publishes `alert.page_failed` (level, cycle, reason). The next level is paged on time.
 - A schedule that was deleted, or a user that does not exist, reaches nobody.
 
 ```mermaid
@@ -86,6 +87,7 @@ Alerting calls the `AlertLifecycle` port (`opened`, `closed`); escalation implem
 
 ## Negative use cases
 
+- The paging bridge answers HTTP 503. The page shows "Not delivered", `alert.page_failed` is published, and level 2 is paged after its delay.
 - A team member creates or changes a policy: `forbidden`.
 - A policy with no levels, a level with no targets, more than 10 levels, a delay of 0, a repeat of 10: `invalid`.
 - A level with a delay above the effective `escalation.max_ack_minutes`: `invalid`.
