@@ -322,10 +322,11 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
             return page(seq, limit) { alertKey(it) }
         }
 
-        override suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit) =
-            alertOrder.values.asSequence().mapNotNull { alertsC.map[it] }.filter { matches(it, filter) }.forEach(consumer)
-
         override suspend fun count(filter: AlertFilter) = alertsC.map.values.count { matches(it, filter) }.toLong()
+
+        override suspend fun counts(filter: AlertFilter) = alertsC.map.values.filter { matches(it, filter) }
+            .groupBy { it.teamId to it.firstSeenAt.atOffset(java.time.ZoneOffset.UTC).toLocalDate() }
+            .map { (k, v) -> mayday.alerting.AlertCount(k.first, k.second, v.size, v.count { it.incidentId != null }) }
 
         private fun matches(a: Alert, f: AlertFilter): Boolean {
             if (f.statuses.isNotEmpty() && a.status !in f.statuses) return false

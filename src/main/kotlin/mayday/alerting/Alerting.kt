@@ -105,9 +105,13 @@ interface AlertRepository {
     suspend fun latestByFingerprint(teamId: String, fingerprint: String): Alert?
     suspend fun save(alert: Alert, expectedVersion: Long?)
     suspend fun list(filter: AlertFilter, cursor: String?, limit: Int): Page<Alert>
-    suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit)
     suspend fun count(filter: AlertFilter): Long
+
+    /** Alerts per team and UTC day of firstSeenAt, and how many of them have an incident. One row per team and day with alerts. */
+    suspend fun counts(filter: AlertFilter): List<AlertCount>
 }
+
+data class AlertCount(val teamId: String, val day: java.time.LocalDate, val alerts: Int, val withIncident: Int)
 
 /** Port that the agents context implements to react to new alerts. */
 interface AlertAutomation {

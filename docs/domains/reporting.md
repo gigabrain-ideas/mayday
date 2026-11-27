@@ -27,7 +27,7 @@ Reports show how a team or an organization handles incidents over a period: coun
 ## Rules
 
 - A multi-team incident counts once in totals and once for each selected team in the team table.
-- Reports stream rows (`scan`). They do not load all incidents into memory.
+- Reports stream incident rows (`IncidentRepository.scan`), so they keep only the counters in memory. Alerts come as counts per team and UTC day (`AlertRepository.counts`), one grouped query: a two-year report reads at most one row per team and day.
 
 ## Positive use cases
 

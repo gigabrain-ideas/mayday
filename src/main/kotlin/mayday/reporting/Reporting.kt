@@ -109,11 +109,11 @@ class ReportService(
         }
 
         var alertCount = 0; var alertsLinked = 0
-        alerts.scan(AlertFilter(severities = sevs, teamIds = teamIds, from = q.from, to = q.to)) { a ->
-            alertCount++
-            if (a.incidentId != null) alertsLinked++
-            teamAlerts.merge(a.teamId, 1, Int::plus)
-            dayAlerts.merge(a.firstSeenAt.atOffset(ZoneOffset.UTC).toLocalDate().toString(), 1, Int::plus)
+        for (c in alerts.counts(AlertFilter(severities = sevs, teamIds = teamIds, from = q.from, to = q.to))) {
+            alertCount += c.alerts
+            alertsLinked += c.withIncident
+            teamAlerts.merge(c.teamId, c.alerts, Int::plus)
+            dayAlerts.merge(c.day.toString(), c.alerts, Int::plus)
         }
 
         val teamRows = (teamCount.keys + teamAlerts.keys + teamIds).distinct().map { t ->

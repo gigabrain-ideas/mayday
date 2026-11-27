@@ -24,7 +24,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 
 ## Ports
 
-- `AlertRepository`: `get`, `latestByFingerprint(teamId, fingerprint)`, `save(expectedVersion)` (`conflict` for a second open alert of a team and fingerprint), keyset `list`, `scan`.
+- `AlertRepository`: `get`, `latestByFingerprint(teamId, fingerprint)`, `save(expectedVersion)` (`conflict` for a second open alert of a team and fingerprint), keyset `list`, exact `count`, `counts` (alerts and alerts with an incident per team and UTC day, for reports).
 - `AlertAutomation`: called after a new alert. The agents context implements it.
 - `RunbookCoverage`: the approved runbook that an automated agent follows on an alert. The agents context implements it.
 - `AlertLifecycle`: `opened` after a new alert and after a reopened alert, `closed` after a person acknowledges and after a resolve that waits for no person, `needsHuman` after an agent raised the alert to a person. The escalation context implements it ([escalation.md](escalation.md)). A failure there never blocks the alert.

@@ -175,6 +175,24 @@ abstract class StoreContract {
     }
 
     @Test
+    fun `alert counts group by team and UTC day with the same filter as the list`() = suspendTest {
+        val day = Instant.parse("2026-03-10T12:00:00Z")
+        listOf(
+            alert("s1", day, team = "a"), alert("s2", day.plusSeconds(3600), team = "a").copy(incidentId = "i1"),
+            alert("s3", day.plusSeconds(13 * 3600), team = "a"), alert("s4", day, team = "b", sev = Severity.SEV1),
+            alert("s5", day.minusSeconds(86_400 * 30), team = "a"),
+        ).forEach { p.alerts.save(it, null) }
+        val counts = p.alerts.counts(AlertFilter(from = day.minusSeconds(86_400), to = day.plusSeconds(86_400)))
+        assertEquals(setOf(
+            mayday.alerting.AlertCount("a", java.time.LocalDate.parse("2026-03-10"), 2, 1),
+            mayday.alerting.AlertCount("a", java.time.LocalDate.parse("2026-03-11"), 1, 0),
+            mayday.alerting.AlertCount("b", java.time.LocalDate.parse("2026-03-10"), 1, 0),
+        ), counts.toSet())
+        assertEquals(listOf(mayday.alerting.AlertCount("b", java.time.LocalDate.parse("2026-03-10"), 1, 0)),
+            p.alerts.counts(AlertFilter(severities = setOf(Severity.SEV1), teamIds = setOf("b"))))
+    }
+
+    @Test
     fun `alerts by fingerprint are found per team`() = suspendTest {
         val a = alert("fp", team = "a"); val b = alert("fp", now.minusSeconds(60), team = "b")
         p.alerts.save(a, null); p.alerts.save(b, null)

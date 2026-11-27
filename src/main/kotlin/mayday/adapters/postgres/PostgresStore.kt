@@ -375,15 +375,19 @@ class PostgresStore(val pool: Pool) {
             return if (rows.size > limit) Page(rows.take(limit), "${rows[limit - 1].firstSeenAt}|${rows[limit - 1].id}") else Page(rows)
         }
 
-        override suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit) {
-            val args = mutableListOf<Any?>()
-            stream("select doc from alerts where ${alertWhere(filter, args)}", args, ser, consumer)
-        }
-
         override suspend fun count(filter: AlertFilter): Long {
             val args = mutableListOf<Any?>()
             val where = alertWhere(filter, args)
             return query("select count(*) from alerts where $where", *args.toTypedArray()) { it.getLong(1) }.first()
+        }
+
+        override suspend fun counts(filter: AlertFilter): List<mayday.alerting.AlertCount> {
+            val args = mutableListOf<Any?>()
+            val where = alertWhere(filter, args)
+            return query("""select team_id, (first_seen_at at time zone 'UTC')::date as day, count(*), count(*) filter (where doc->>'incidentId' is not null)
+                from alerts where $where group by 1, 2""", *args.toTypedArray()) {
+                mayday.alerting.AlertCount(it.getString(1), it.getObject(2, java.time.LocalDate::class.java), it.getInt(3), it.getInt(4))
+            }
         }
     }
 
