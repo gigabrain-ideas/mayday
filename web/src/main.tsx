@@ -1,4 +1,4 @@
-import { StrictMode, useCallback, useEffect, useState } from "react";
+import { lazy, StrictMode, Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import "./index.css";
@@ -12,9 +12,11 @@ import { IncidentsPage } from "@/pages/Incidents";
 import { IncidentPage } from "@/pages/Incident";
 import { AlertsPage } from "@/pages/Alerts";
 import { AlertPage } from "@/pages/Alert";
-import { ReportsPage } from "@/pages/Reports";
 import { OnCallPage } from "@/pages/OnCall";
-import { SettingsPage } from "@/pages/settings/Settings";
+
+/** Reports and settings load on first use, so the first visit downloads only what responders need. */
+const ReportsPage = lazy(() => import("@/pages/Reports").then((m) => ({ default: m.ReportsPage })));
+const SettingsPage = lazy(() => import("@/pages/settings/Settings").then((m) => ({ default: m.SettingsPage })));
 
 try {
   const t = localStorage.getItem("mayday.theme");
@@ -36,6 +38,7 @@ function Root() {
   return (
     <SessionProvider me={me} onLogout={() => setMe(null)} onReloadMe={loadMe}>
       <Layout>
+        <Suspense fallback={<div className="flex justify-center p-16"><Spinner /></div>}>
         <Routes>
           <Route path="/" element={<Navigate to="/incidents" replace />} />
           <Route path="/incidents" element={<IncidentsPage />} />
@@ -47,6 +50,7 @@ function Root() {
           <Route path="/settings/*" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/incidents" replace />} />
         </Routes>
+        </Suspense>
       </Layout>
     </SessionProvider>
   );

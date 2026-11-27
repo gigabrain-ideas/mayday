@@ -45,6 +45,7 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 - Voice: a microphone button on each long text field uses the Web Speech API. Stylus input (for example Apple Pencil Scribble) works in all text fields.
 - Keyboard: `g i`, `g a`, `g o`, `g r`, `g s` go to incidents, alerts, on-call, reports, settings. `Ctrl/⌘ + Enter` posts a timeline update.
 - Viewers see no write controls.
+- Reports and settings are separate chunks that load on first use. Hashed assets are cached for one year.
 
 ## Positive use cases
 
