@@ -20,6 +20,7 @@ import mayday.agents.RunStatus
 import mayday.alerting.Alert
 import mayday.alerting.AlertFilter
 import mayday.alerting.AlertRepository
+import mayday.alerting.AlertStatus
 import mayday.directory.Project
 import mayday.directory.ProjectRepository
 import mayday.directory.Team
@@ -307,6 +308,10 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
             val cur = alertsC.map[alert.id]
             if (expectedVersion == null && cur != null) throw Conflict("Alert exists")
             if (expectedVersion != null && cur?.version != expectedVersion) throw Conflict("The alert changed. Reload and try again.")
+            if (alert.status != AlertStatus.RESOLVED) {
+                val latest = alertByFingerprint["${alert.teamId}|${alert.fingerprint}"]?.let { alertsC.map[it] }
+                if (latest != null && latest.id != alert.id && latest.status != AlertStatus.RESOLVED) throw Conflict("Another alert with this fingerprint is open")
+            }
             alertsC.put(alert.id, alert)
             indexAlert(alert)
         }

@@ -104,6 +104,7 @@ class PostgresStore(val pool: Pool) {
                 first_seen_at timestamptz not null, search text not null, version bigint not null, doc jsonb not null)""")
             s.execute("drop index if exists alerts_fp")
             s.execute("create index if not exists alerts_team_fp on alerts (team_id, fingerprint, first_seen_at desc)")
+            openAlertsUnique(s)
             s.execute("create index if not exists alerts_order on alerts (first_seen_at desc, id desc)")
             s.execute("create index if not exists alerts_team on alerts (team_id, first_seen_at desc)")
             s.execute("create index if not exists alerts_status on alerts (status, team_id)")
@@ -132,6 +133,17 @@ class PostgresStore(val pool: Pool) {
                 id text primary key, policy_id text not null, status text not null, next_at timestamptz, version bigint not null, doc jsonb not null)""")
             s.execute("create index if not exists escalations_due on escalations (next_at) where status = 'ACTIVE'")
             s.execute("create index if not exists escalations_policy on escalations (policy_id) where status = 'ACTIVE'")
+        }
+    }
+
+    /** At most one open alert per team and fingerprint, so concurrent signals cannot open two. Older data with duplicates keeps working without it. */
+    private fun openAlertsUnique(s: java.sql.Statement) {
+        try {
+            s.execute("create unique index if not exists alerts_open_fp on alerts (team_id, fingerprint) where status <> 'RESOLVED'")
+        } catch (e: java.sql.SQLException) {
+            if (e.sqlState != "23505") throw e
+            java.util.logging.Logger.getLogger("mayday.store").severe("Open alerts share a fingerprint, so concurrent signals can open duplicates. " +
+                "Resolve the duplicates (select team_id, fingerprint from alerts where status <> 'RESOLVED' group by 1, 2 having count(*) > 1) and restart.")
         }
     }
 
@@ -341,8 +353,12 @@ class PostgresStore(val pool: Pool) {
                     if (e.sqlState == "23505") throw Conflict("Alert exists") else throw e
                 }
             } else {
-                val n = exec("update alerts set status = ?, severity = ?, version = ?, doc = ? where id = ? and version = ?",
-                    alert.status.name, alert.severity.name, alert.version, doc, alert.id, expectedVersion)
+                val n = try {
+                    exec("update alerts set status = ?, severity = ?, version = ?, doc = ? where id = ? and version = ?",
+                        alert.status.name, alert.severity.name, alert.version, doc, alert.id, expectedVersion)
+                } catch (e: java.sql.SQLException) {
+                    if (e.sqlState == "23505") throw Conflict("Another alert with this fingerprint is open") else throw e
+                }
                 if (n == 0) throw Conflict("The alert changed. Reload and try again.")
             }
         }

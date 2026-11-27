@@ -30,7 +30,9 @@ import mayday.shared.Severity
 import mayday.shared.SpanScope
 import mayday.shared.Telemetry
 import mayday.shared.Ts
+import kotlinx.coroutines.delay
 import java.time.Duration
+import kotlin.random.Random
 import java.time.Instant
 
 @Serializable
@@ -180,15 +182,30 @@ class AlertService(
         throw Forbidden("This token can send alerts only for the teams of its owner")
     }
 
+    /**
+     * Concurrent signals with one fingerprint (retries, many replicas) race on the first write of an attempt. The loser reads again
+     * and deduplicates, so the signal is never lost and makes no second alert. Every write before an attempt's first one is a read.
+     */
     private suspend fun ingest(by: Principal, signal: AlertSignal, span: SpanScope): IngestResult {
         if (!by.has(TokenScope.ALERTS_INGEST) && !by.has(TokenScope.WRITE)) throw Forbidden("The token cannot send alerts")
         if (signal.title.isBlank()) throw Invalid("Alert title is required")
         val team = directory.team(signal.team)
         if (!by.has(TokenScope.WRITE)) requireIngestTeam(by, team.id, team.projectId)
+        for (attempt in 1 until INGEST_ATTEMPTS) {
+            try {
+                return attempt(signal, team.id, span)
+            } catch (_: Conflict) {
+                delay(Random.nextLong(1, 5L * attempt + 2))
+            }
+        }
+        return attempt(signal, team.id, span)
+    }
+
+    private suspend fun attempt(signal: AlertSignal, teamId: String, span: SpanScope): IngestResult {
         val now = clock.now()
-        val fp = signal.fingerprint?.takeIf { it.isNotBlank() } ?: fingerprint(signal.source, signal.title, team.id, signal.labels)
-        val window = Duration.ofMinutes(policy.int(Keys.ALERT_DEDUP_MINUTES, listOf(team.id)).toLong())
-        val latest = alerts.latestByFingerprint(team.id, fp)
+        val fp = signal.fingerprint?.takeIf { it.isNotBlank() } ?: fingerprint(signal.source, signal.title, teamId, signal.labels)
+        val window = Duration.ofMinutes(policy.int(Keys.ALERT_DEDUP_MINUTES, listOf(teamId)).toLong())
+        val latest = alerts.latestByFingerprint(teamId, fp)
         val active = latest?.takeIf { it.status != AlertStatus.RESOLVED }
         val sourceActor = Actor(ActorKind.SYSTEM, signal.source, signal.source)
 
@@ -196,7 +213,7 @@ class AlertService(
             span.set(OUTCOME, "resolved")
             if (active != null) return IngestResult(resolveInternal(active, sourceActor, "Resolved by ${signal.source}."), false)
             if (latest != null && latest.waitsForHuman) return IngestResult(confirmResolve(latest, sourceActor, "${signal.source} confirms the resolve."), false)
-            return IngestResult(latest ?: resolveInternal(createAlert(signal, fp, team.id, now), sourceActor, "Resolved by ${signal.source}."), latest == null)
+            return IngestResult(latest ?: resolveInternal(createAlert(signal, fp, teamId, now), sourceActor, "Resolved by ${signal.source}."), latest == null)
         }
 
         val flapping = latest?.takeIf { it.status == AlertStatus.RESOLVED && it.resolvedAt?.plus(window)?.isAfter(now) == true }
@@ -223,26 +240,25 @@ class AlertService(
             return IngestResult(next, false)
         }
 
-        val created = createAlert(signal, fp, team.id, now)
+        val created = createAlert(signal, fp, teamId, now)
         span.set(OUTCOME, "created")
         var result = created
         var incidentKey: String? = null
-        val threshold = policy.severity(Keys.ALERT_AUTO_INCIDENT_SEVERITY, listOf(team.id))
+        val threshold = policy.severity(Keys.ALERT_AUTO_INCIDENT_SEVERITY, listOf(teamId))
         if (threshold != null && created.severity.atLeast(threshold)) {
             val inc = incidents.declareFromAlert(
                 NewIncident(
                     title = created.title,
                     description = created.description,
                     severity = created.severity,
-                    teamIds = listOf(team.id),
+                    teamIds = listOf(teamId),
                     discoveredAt = created.firstSeenAt,
                     impactStartedAt = created.firstSeenAt,
                     labels = created.labels,
                     alertIds = listOf(created.id),
                 ),
             )
-            result = created.copy(incidentId = inc.id, version = created.version + 1)
-            alerts.save(result, created.version)
+            result = linkNew(created.id, inc.id)
             incidentKey = inc.key
             incidents.systemEntry(inc.id, EntryKind.ALERT, Actor.system, "Alert from ${created.source}: ${created.title}", mapOf("alertId" to created.id))
         }
@@ -250,6 +266,21 @@ class AlertService(
         runCatching { lifecycle.opened(result) }
         runCatching { automation.onAlertCreated(result) }
         return IngestResult(result, true, incidentKey)
+    }
+
+    /** A concurrent signal may count a new alert before its incident is linked, so the link reads the alert again on a conflict. */
+    private suspend fun linkNew(id: String, incidentId: String): Alert {
+        repeat(INGEST_ATTEMPTS) {
+            val cur = alerts.get(id) ?: throw NotFound("Alert")
+            val next = cur.copy(incidentId = incidentId, version = cur.version + 1)
+            try {
+                alerts.save(next, cur.version)
+                return next
+            } catch (_: Conflict) {
+                delay(Random.nextLong(1, 10))
+            }
+        }
+        throw Conflict("The alert changed. Reload and try again.")
     }
 
     /** One alert for each responder team, linked to the incident. Escalation pages as for any new alert. No agent automation: the incident already starts agent work. */
@@ -476,6 +507,7 @@ class AlertService(
 
     companion object {
         private const val OUTCOME = "mayday.alert.outcome"
+        private const val INGEST_ATTEMPTS = 10
         private const val INCIDENT_SOURCE = "mayday"
 
         fun fingerprint(source: String, title: String, teamId: String, labels: Map<String, String>): String {

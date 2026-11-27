@@ -1,6 +1,8 @@
 package mayday.contract
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import mayday.Ports
@@ -138,12 +140,38 @@ abstract class StoreContract {
 
     @Test
     fun `alerts by fingerprint return the latest`() = suspendTest {
-        val old = alert("fp", now.minusSeconds(3600)); val new = alert("fp", now)
+        val old = alert("fp", now.minusSeconds(3600)).copy(status = AlertStatus.RESOLVED); val new = alert("fp", now)
         p.alerts.save(old, null); p.alerts.save(new, null)
         assertEquals(new.id, p.alerts.latestByFingerprint("t1", "fp")!!.id)
         assertNull(p.alerts.latestByFingerprint("t1", "none"))
-        p.alerts.save(old.copy(status = AlertStatus.RESOLVED, version = 2), 1)
+        p.alerts.save(old.copy(count = 2, version = 2), 1)
         assertEquals(new.id, p.alerts.latestByFingerprint("t1", "fp")!!.id, "an update of an older alert keeps the latest")
+    }
+
+    /** Alertmanager retries and many replicas send one signal several times at once. */
+    @Test
+    fun `concurrent signals with one fingerprint make one alert and one incident`() = suspendTest {
+        val app = mayday.App(mayday.AppSettings(secretKey = "store-contract"), p)
+        val team = app.directory.createTeam("Ops", "ops-${Ids.new().take(6)}", null)
+        val signal = mayday.alerting.AlertSignal("Disk full", Severity.SEV1, team.id, fingerprint = "race")
+        val results = (1..8).map { async(Dispatchers.IO) { runCatching { app.alerts.ingest(mayday.identity.Principal.system, signal) } } }.awaitAll()
+        results.forEach { it.getOrThrow() }
+        assertEquals(1, results.count { it.getOrThrow().created })
+        val alerts = p.alerts.list(AlertFilter(teamIds = setOf(team.id)), null, 50).items
+        assertEquals(1, alerts.size)
+        assertEquals(8L, alerts.single().count)
+        assertEquals(1, p.incidents.list(IncidentFilter(teamIds = setOf(team.id)), null, 50).items.size)
+    }
+
+    @Test
+    fun `a team has at most one open alert for a fingerprint`() = suspendTest {
+        val open = alert("one", team = "a")
+        p.alerts.save(open, null)
+        assertFailsWith<Conflict> { p.alerts.save(alert("one", now.plusSeconds(1), team = "a"), null) }
+        p.alerts.save(alert("one", team = "b"), null)
+        p.alerts.save(alert("one", now.minusSeconds(60), team = "a").copy(status = AlertStatus.RESOLVED), null)
+        p.alerts.save(open.copy(status = AlertStatus.RESOLVED, version = 2), 1)
+        p.alerts.save(alert("one", now.plusSeconds(2), team = "a"), null)
     }
 
     @Test
