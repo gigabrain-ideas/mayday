@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { Check, CheckCheck, ExternalLink, Link2, Send, Siren } from "lucide-react";
 import { rpc, waitsForHuman, type Alert, type Incident } from "@/lib/api";
@@ -21,7 +21,9 @@ export function AlertPage() {
   const incident = useQuery(a?.incidentId ? () => rpc.incidents.getIncident<Incident>({ ref: a.incidentId! }) : null, [a?.incidentId]);
   useLive((t, sid) => t === "alert.updated" && sid === id, reload);
 
-  if (error) return <Empty title="Alert not found">{error.message}</Empty>;
+  useEffect(() => { if (error && a) toast.error(error); }, [error]);
+
+  if (error && !a) return <Empty title="Alert not found">{error.message}</Empty>;
   if (!a) return <div className="flex justify-center p-16"><Spinner /></div>;
   const act = async (call: Promise<Alert>) => {
     try { setData(await call); } catch (e) { toast.error(e); }

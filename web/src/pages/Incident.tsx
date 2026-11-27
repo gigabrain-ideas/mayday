@@ -22,8 +22,9 @@ export function IncidentPage() {
   const [tab, setTab] = useState("timeline");
   useLive((t, id) => t.startsWith("incident.") && id === inc?.id, () => { reload(); timeline.reload(); });
   const toast = useToast();
+  useEffect(() => { if (error && inc) toast.error(error); }, [error]);
 
-  if (error) return <Empty title="Incident not found">{error.message}</Empty>;
+  if (error && !inc) return <Empty title="Incident not found">{error.message}</Empty>;
   if (!inc) return <div className="flex justify-center p-16"><Spinner /></div>;
 
   const patch = async (body: Partial<Incident> & Record<string, unknown>) => {

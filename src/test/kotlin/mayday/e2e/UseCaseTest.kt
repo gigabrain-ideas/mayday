@@ -273,6 +273,22 @@ class UseCaseTest : BrowserContract() {
         }
     }
 
+    @Test
+    fun `13 an incident page keeps the incident when a live reload fails`() {
+        signIn()
+        val title = unique("Orders are slow")
+        declareIncident(title, "Checkout")
+        page.route("**/mayday.v1.IncidentService/GetIncident") { it.fulfill(com.microsoft.playwright.Route.FulfillOptions().setStatus(503)) }
+        runBlocking {
+            val inc = app.incidents.list(principal("admin"), mayday.incidents.IncidentFilter(query = title), null, 1).items.single()
+            app.incidents.addEntry(principal("admin"), inc.key, "Orders queue grows.")
+        }
+
+        assertThat(page.getByText("Orders queue grows.")).isVisible()
+        assertThat(page.getByRole(AriaRole.HEADING, Page.GetByRoleOptions().setName(title))).isVisible()
+        assertThat(page.getByText("Incident not found")).hasCount(0)
+    }
+
     private fun createTeam(name: String) {
         page.navigate("/settings/directory")
         page.getByPlaceholder("New team name").fill(name)
