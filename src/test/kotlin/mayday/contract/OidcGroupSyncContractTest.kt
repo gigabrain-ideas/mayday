@@ -108,4 +108,18 @@ class OidcGroupSyncContractTest : ServerContract() {
         authn.getMe(Empty.getDefaultInstance(), bearer(accessToken("ben", "ben-password")))
         assertNull(app.ports.users.byEmail("ben@example.com")!!.teams[team.id])
     }
+
+    @Test
+    fun `an unverified email cannot take over an account that Mayday already has`() = suspendTest {
+        assertStatus(io.grpc.Status.Code.PERMISSION_DENIED, "forbidden") { authn.getMe(Empty.getDefaultInstance(), bearer(accessToken("eve", "eve-password"))) }
+        assertNull(app.ports.users.byEmail("member@example.com")!!.externalId, "the account stays unlinked")
+    }
+
+    @Test
+    fun `a verified email links an account that was created before the first sign-in`() = suspendTest {
+        assertNull(userOf("lead").externalId)
+        val me = authn.getMe(Empty.getDefaultInstance(), bearer(accessToken("lead", "lead-password")))
+        assertEquals(userOf("lead").id, me.user.id)
+        assertEquals(TeamRole.ADMIN, app.ports.users.byEmail("lead@example.com")!!.teams[team.id], "the linked account keeps its teams")
+    }
 }

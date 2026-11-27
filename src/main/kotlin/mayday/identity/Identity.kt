@@ -242,10 +242,15 @@ class IdentityService(
     suspend fun user(id: String) = users.get(id) ?: throw NotFound("User")
     suspend fun list(query: String?, cursor: String?, limit: Int) = users.list(query, cursor, limit.coerceIn(1, 500))
 
-    /** Find or create the user for a verified SSO login. */
-    suspend fun upsertSso(externalId: String, email: String, name: String, groups: Set<String>? = null): User {
+    /**
+     * Find or create the user for a verified SSO login. An account found only by email is linked when it never signed in and the
+     * identity provider verified the email ([emailVerified]). Otherwise anybody who can put an email in a token would sign in as that person.
+     */
+    suspend fun upsertSso(externalId: String, email: String, name: String, groups: Set<String>? = null, emailVerified: Boolean = false): User {
         val normalized = email.trim().lowercase()
-        val existing = users.byExternalId(externalId) ?: users.byEmail(normalized)
+        val existing = users.byExternalId(externalId) ?: users.byEmail(normalized)?.also {
+            if (it.externalId != null || !emailVerified) throw Forbidden("An account with this email exists. Sign in with the identity that it uses, or ask an administrator.")
+        }
         val user = if (existing != null) {
             existing.copy(externalId = externalId, email = normalized, name = name.ifBlank { existing.name })
         } else {

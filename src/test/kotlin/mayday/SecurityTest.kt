@@ -187,3 +187,29 @@ class AgentAdminOptInResetTest {
         assertTrue(optedIn())
     }
 }
+
+/** SSO sign-in finds an account by its identity; an email alone links only an account that never signed in, and only when verified. */
+class SsoAccountLinkTest {
+    private val f = Fixture()
+
+    @Test
+    fun `a verified email links an account that never signed in`() = suspendTest {
+        val u = f.app.identity.upsertSso("idp|member", "member@example.com", "Member", emailVerified = true)
+        kotlin.test.assertEquals(f.memberUser.id, u.id)
+        kotlin.test.assertEquals("idp|member", u.externalId)
+    }
+
+    @Test
+    fun `an unverified email does not link an existing account`() = suspendTest {
+        assertFailsWith<Forbidden> { f.app.identity.upsertSso("idp|eve", "admin@example.com", "Eve") }
+        kotlin.test.assertNull(f.store.users.get(f.adminUser.id)!!.externalId)
+    }
+
+    @Test
+    fun `another identity with the same verified email cannot take over a linked account`() = suspendTest {
+        f.app.identity.upsertSso("idp|admin", "admin@example.com", "Admin", emailVerified = true)
+        assertFailsWith<Forbidden> { f.app.identity.upsertSso("other-idp|admin", "admin@example.com", "Admin", emailVerified = true) }
+        kotlin.test.assertEquals("idp|admin", f.store.users.get(f.adminUser.id)!!.externalId)
+        kotlin.test.assertEquals(f.adminUser.id, f.app.identity.upsertSso("idp|admin", "admin@example.com", "Admin").id, "the linked identity signs in")
+    }
+}

@@ -16,6 +16,14 @@
       "username": "ben", "email": "ben@example.com", "emailVerified": true, "firstName": "Ben", "lastName": "Oncall", "enabled": true,
       "credentials": [{ "type": "password", "value": "ben-password", "temporary": false }],
       "groups": ["/oncall-payments"]
+    },
+    {
+      "username": "eve", "email": "member@example.com", "emailVerified": false, "firstName": "Eve", "lastName": "Unverified", "enabled": true,
+      "credentials": [{ "type": "password", "value": "eve-password", "temporary": false }]
+    },
+    {
+      "username": "lead", "email": "lead@example.com", "emailVerified": true, "firstName": "Lead", "lastName": "Owner", "enabled": true,
+      "credentials": [{ "type": "password", "value": "lead-password", "temporary": false }]
     }
   ],
   "clients": [

@@ -43,8 +43,9 @@ data class OidcSettings(
 /**
  * [groups] is null when group sync is off or the token moved the claim to a distributed source (group overage): then the groups are unknown.
  * A missing claim means no groups, because Entra ID and Keycloak leave the claim out for a user without groups.
+ * [emailVerified] is true only for an `email` claim that the provider marks verified (`email_verified`, Entra ID `xms_edov`).
  */
-data class OidcIdentity(val subject: String, val email: String, val name: String, val groups: Set<String>? = null)
+data class OidcIdentity(val subject: String, val email: String, val name: String, val groups: Set<String>? = null, val emailVerified: Boolean = false)
 
 /** OpenID Connect relying party: authorization code flow with PKCE, ID token and access token validation. */
 class OidcClient(private val s: OidcSettings) {
@@ -106,10 +107,11 @@ class OidcClient(private val s: OidcSettings) {
 
     private fun identity(c: JsonObject): OidcIdentity {
         val sub = c["sub"]?.jsonPrimitive?.content ?: throw Unauthenticated("Token has no subject")
-        val email = (c["email"] ?: c["preferred_username"] ?: c["upn"])?.jsonPrimitive?.content
-            ?: throw Unauthenticated("Token has no email claim")
+        val claimed = c["email"]?.jsonPrimitive?.content
+        val email = claimed ?: (c["preferred_username"] ?: c["upn"])?.jsonPrimitive?.content ?: throw Unauthenticated("Token has no email claim")
         val name = c["name"]?.jsonPrimitive?.content ?: email
-        return OidcIdentity("${s.issuer}|$sub", email, name, groups(c, s.groupsClaim))
+        val verified = claimed != null && (flag(c["email_verified"]) || flag(c["xms_edov"]))
+        return OidcIdentity("${s.issuer}|$sub", email, name, groups(c, s.groupsClaim), verified)
     }
 
     private fun verify(jwt: String, audiences: Set<String>): JsonObject {
@@ -188,6 +190,7 @@ class OidcClient(private val s: OidcSettings) {
         }
     }
 
+    private fun flag(e: kotlinx.serialization.json.JsonElement?) = (e as? JsonPrimitive)?.content == "true"
     private fun big(o: JsonObject, k: String) = BigInteger(1, Base64.getUrlDecoder().decode(o[k]!!.jsonPrimitive.content))
     private fun enc(v: String) = URLEncoder.encode(v, Charsets.UTF_8)
 }

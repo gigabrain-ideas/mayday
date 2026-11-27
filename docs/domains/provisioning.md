@@ -82,7 +82,7 @@ Errors use the SCIM error schema with `status`, `scimType` (`invalidFilter`, `un
 
 ## Set up Microsoft Entra ID (example)
 
-1. Enterprise application → Single sign-on: OIDC app registration with redirect URI `<public URL>/auth/callback`. Token configuration → add groups claim (Security groups or "Groups assigned to the application", ID and access tokens).
+1. Enterprise application → Single sign-on: OIDC app registration with redirect URI `<public URL>/auth/callback`. Token configuration → add groups claim (Security groups or "Groups assigned to the application", ID and access tokens). Add the optional claims `email` and `xms_edov` (ID and access tokens): Mayday links a SCIM account to its first sign-in only with a verified email (see [identity.md](identity.md#linking-a-sign-in-to-an-account)).
 2. Provisioning → Automatic. Tenant URL `<public URL>/scim/v2`, secret token = a Mayday token with the SCIM scope. Map Users (`userPrincipalName` → `userName`) and Groups. Assign the groups.
 3. In Mayday: either `MAYDAY_GROUPS_AUTO_CREATE=true` with a filter such as `^oncall-`, or link groups to existing teams.
 

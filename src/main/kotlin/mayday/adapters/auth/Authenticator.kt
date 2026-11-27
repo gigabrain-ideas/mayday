@@ -60,20 +60,20 @@ class Authenticator(
         ctx?.caller = AuditActor.anonymous.copy(credential = credential)
         val p = if (sso) {
             val id = withContext(Dispatchers.IO) { oidc!!.verifyAccessToken(token) }
-            identity.principalForUser(identity.upsertSso(id.subject, id.email, id.name, id.groups))
+            identity.principalForUser(identity.upsertSso(id.subject, id.email, id.name, id.groups, id.emailVerified))
         } else identity.authenticate(token)
         ctx?.caller = p.audit(credential)
         return p
     }
 
-    suspend fun ssoUser(subject: String, email: String, name: String, groups: Set<String>? = null): User =
-        identity.upsertSso(subject, email, name, groups).also { signedIn(it, "sso") }
+    suspend fun ssoUser(id: OidcIdentity): User =
+        identity.upsertSso(id.subject, id.email, id.name, id.groups, id.emailVerified).also { signedIn(it, "sso") }
 
     suspend fun exchange(subject: Principal, actor: Principal, ttl: java.time.Duration): String = identity.exchange(subject, actor, ttl)
 
     suspend fun devUser(email: String, name: String): User {
         if (!devLogin) throw Forbidden("Development login is turned off")
-        return identity.upsertSso("dev|${email.lowercase()}", email, name).also { signedIn(it, "dev_login") }
+        return identity.upsertSso("dev|${email.lowercase()}", email, name, emailVerified = true).also { signedIn(it, "dev_login") }
     }
 
     private suspend fun signedIn(user: User, method: String) {

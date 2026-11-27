@@ -27,6 +27,13 @@ Identity knows who makes a request and what that identity can do. It supports si
 
 The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrator.
 
+## Linking a sign-in to an account
+
+- A sign-in (paths 1 and 4) finds the account by its external id: `<issuer>|<sub>`.
+- When no account has that id, Mayday looks for an account with the email. It links that account only when the account never signed in (no external id) and the provider verified the email: claim `email` with `email_verified=true`, or Entra ID `xms_edov=true` (add it as an optional claim). An email from `preferred_username` or `upn` is never verified.
+- Otherwise the sign-in gets `forbidden`. Nobody who can put an email in a token signs in as another person.
+- An account created by an administrator or by SCIM links on the first verified sign-in. Development login (path 6) trusts the email.
+
 ## Admin rights through token exchange
 
 - The organization setting `agents.exchange_admin` (organization level only, administrators only) allows it. Default: false.
@@ -61,6 +68,8 @@ The first user, and every email in `MAYDAY_ADMIN_EMAILS`, becomes an administrat
 
 ## Negative use cases
 
+- A Keycloak realm with open sign-up lets Eve register `admin@corp.com` with no email check. Eve signs in: `forbidden`, and the administrator account stays as it was.
+- Another identity with the same verified email signs in after the account was linked: `forbidden`.
 - A revoked or expired token: `unauthenticated`.
 - A token with the wrong signature or from another issuer: `unauthenticated`.
 - A disabled user: `forbidden`.
