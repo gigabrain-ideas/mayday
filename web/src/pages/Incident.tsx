@@ -12,7 +12,7 @@ import { Markdown } from "@/lib/markdown";
 import {
   Badge, Button, Card, CardHeader, Empty, Field, Input, MultiSelect, NativeSelect, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea,
 } from "@/components/ui";
-import { ActorIcon, ActorName, AlertStatusBadge, DictateButton, IncidentStatusBadge, SeverityBadge } from "@/components/common";
+import { ActorIcon, ActorName, AlertStatusBadge, DictateButton, IncidentStatusBadge, PersonSelect, SeverityBadge } from "@/components/common";
 import { AgentActions, AgentRuns, useAgentTrigger } from "@/components/AgentPanel";
 
 export function IncidentPage() {
@@ -276,7 +276,7 @@ function RunbookTab({ inc }: { inc: Incident }) {
 }
 
 function Details({ inc, patch }: { inc: Incident; patch: (b: Record<string, unknown>) => void }) {
-  const { users, userName, canWrite } = useSession();
+  const { userName, canWrite } = useSession();
   const row = (label: string, value: React.ReactNode) => (
     <div className="flex items-center justify-between gap-3 py-1.5"><span className="eyebrow">{label}</span><span className="text-right">{value}</span></div>
   );
@@ -290,10 +290,8 @@ function Details({ inc, patch }: { inc: Incident; patch: (b: Record<string, unkn
       <CardHeader title="Details" />
       <div className="space-y-3 p-4">
         <Field label="Commander">
-          <NativeSelect value={inc.commanderId ?? ""} disabled={!canWrite} onChange={(e) => e.target.value && patch({ commanderId: e.target.value })}>
-            <option value="">{inc.commanderId ? userName(inc.commanderId) : "Not assigned"}</option>
-            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </NativeSelect>
+          <PersonSelect label="Commander" placeholder={inc.commanderId ? userName(inc.commanderId) : "Not assigned"} value={inc.commanderId} disabled={!canWrite}
+            onPick={(id) => patch({ commanderId: id })} />
         </Field>
         {timeField("Impact started", "impactStartedAt")}
         {timeField("Discovered", "discoveredAt")}

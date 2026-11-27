@@ -7,7 +7,7 @@ import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { ago, between, cn, fromLocalInput } from "@/lib/utils";
 import { Button, Card, Dialog, DialogContent, Empty, Field, Input, MultiSelect, NativeSelect, Spinner, Table, Td, Textarea, Th } from "@/components/ui";
-import { DictateButton, IncidentStatusBadge, LoadFailed, PageHeader, SeverityBadge } from "@/components/common";
+import { DictateButton, IncidentStatusBadge, LoadFailed, PageHeader, PersonSelect, SeverityBadge } from "@/components/common";
 
 export function IncidentsPage() {
   const [params, setParams] = useSearchParams();
@@ -94,7 +94,7 @@ export function IncidentsPage() {
 }
 
 function DeclareIncident() {
-  const { teams, users } = useSession();
+  const { teams } = useSession();
   const nav = useNavigate();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -144,10 +144,7 @@ function DeclareIncident() {
             <MultiSelect label="Teams" allLabel="Select" value={form.teamIds} onChange={(v) => setForm({ ...form, teamIds: v })} options={teams.map((t) => ({ value: t.id, label: t.name }))} />
           </Field>
           <Field label="Incident commander">
-            <NativeSelect value={form.commanderId} onChange={(e) => setForm({ ...form, commanderId: e.target.value })}>
-              <option value="">Not assigned</option>
-              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </NativeSelect>
+            <PersonSelect label="Incident commander" placeholder="Not assigned" value={form.commanderId} onPick={(id) => setForm({ ...form, commanderId: id })} />
           </Field>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>

@@ -1,6 +1,8 @@
 import { Bot, CircleAlert, CircleCheck, CircleDot, Cog, Copy, ExternalLink, Mic, MicOff, TriangleAlert, User as UserIcon } from "lucide-react";
-import { traceUrl, type Actor, type AlertStatus, type IncidentStatus, type RunStatus, type Severity } from "@/lib/api";
-import { Badge, Button, Tip } from "@/components/ui";
+import { useState } from "react";
+import { traceUrl, type Actor, type AlertStatus, type IncidentStatus, type RunStatus, type Severity, type User } from "@/lib/api";
+import { Badge, Button, Input, NativeSelect, Tip } from "@/components/ui";
+import { person, usePeopleSearch } from "@/lib/people";
 import { useDictation } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -108,5 +110,24 @@ export function RunTrace({ traceId }: { traceId?: string }) {
         <Copy className="size-3.5" /> {traceId}
       </button>
     </Tip>
+  );
+}
+
+/** Picks a person found on the server by name or email. [value] stays in the list while the search changes. */
+export function PersonSelect({ label, placeholder, value = "", onPick, exclude, disabled }: {
+  label: string; placeholder: string; value?: string; onPick: (id: string) => void; exclude?: (u: User) => boolean; disabled?: boolean;
+}) {
+  const [q, setQ] = useState("");
+  const found = usePeopleSearch(q).filter((u) => !exclude?.(u));
+  const picked = value ? person(value) : undefined;
+  const options = picked && !found.some((u) => u.id === picked.id) ? [picked, ...found] : found;
+  return (
+    <div className="space-y-2">
+      <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a person" aria-label="Find a person" disabled={disabled} />
+      <NativeSelect value={value} aria-label={label} disabled={disabled} onChange={(e) => e.target.value && onPick(e.target.value)}>
+        <option value="">{placeholder}</option>
+        {options.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.email}</option>)}
+      </NativeSelect>
+    </div>
   );
 }

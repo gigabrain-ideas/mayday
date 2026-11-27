@@ -84,6 +84,7 @@ interface UserRepository {
     suspend fun byEmail(email: String): User?
     suspend fun byExternalId(externalId: String): User?
     suspend fun list(query: String?, cursor: String?, limit: Int): Page<User>
+    suspend fun byIds(ids: Collection<String>): List<User>
     suspend fun count(): Long
     suspend fun save(user: User)
     suspend fun withAgentAdmin(): List<User>
@@ -241,6 +242,10 @@ class IdentityService(
 
     suspend fun user(id: String) = users.get(id) ?: throw NotFound("User")
     suspend fun list(query: String?, cursor: String?, limit: Int) = users.list(query, cursor, limit.coerceIn(1, 500))
+    suspend fun byIds(ids: Collection<String>): List<User> {
+        if (ids.size > 500) throw Invalid("At most 500 user ids")
+        return users.byIds(ids.toSet())
+    }
 
     /**
      * Find or create the user for a verified SSO login. An account found only by email is linked when it never signed in and the

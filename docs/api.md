@@ -14,7 +14,7 @@ gRPC reflection and the standard gRPC health service (`grpc.health.v1.Health`) a
 | Proto file | Service | Methods |
 |---|---|---|
 | `identity.proto` | `AuthService` | `GetAuthConfig`, `GetMe`, `WhoAmI` |
-| `identity.proto` | `UserService` | `ListUsers`, `CreateUser`, `UpdateUser`, `ListTokens`, `IssueToken` (the secret is in this response only), `RevokeToken`, `SetAgentAdmin` (the caller's own `allow_agent_admin`; agents get `PERMISSION_DENIED`) |
+| `identity.proto` | `UserService` | `ListUsers` (search `q` by name or email, keyset `cursor`; `ids` returns those users, at most 500, and ignores the other fields), `CreateUser`, `UpdateUser`, `ListTokens`, `IssueToken` (the secret is in this response only), `RevokeToken`, `SetAgentAdmin` (the caller's own `allow_agent_admin`; agents get `PERMISSION_DENIED`) |
 | `directory.proto` | `DirectoryService` | `ListProjects`, `CreateProject`, `UpdateProject`, `DeleteProject`, `ListTeams`, `CreateTeam`, `UpdateTeam` (`replace_groups` sets `member_groups` and `owner_groups`, administrators), `DeleteTeam`, `ListTeamMembers`, `SetTeamMember` (team owners; role unspecified removes; `conflict` when identity provider groups manage the team) |
 | `oncall.proto` | `OnCallService` | `ListSchedules`, `GetSchedule`, `CreateSchedule`, `UpdateSchedule` (with `version`), `DeleteSchedule`, `ListOverrides`, `CreateOverride`, `DeleteOverride`, `ListShifts` (rotation with overrides, window at most 93 days), `GetOnCall`. See [oncall.md](domains/oncall.md) |
 | `escalation.proto` | `EscalationService` | `ListPolicies`, `GetPolicy`, `CreatePolicy`, `UpdatePolicy` (with `version`), `DeletePolicy` (team owners), `GetEscalation` (by alert id), `EscalateNow` (WRITE). See [escalation.md](domains/escalation.md) |

@@ -8,7 +8,7 @@ import { EscalationPolicies } from "@/pages/Escalation";
 import { TeamRunbooks } from "@/pages/Runbooks";
 import { useToast } from "@/lib/toast";
 import { cn, dateTime, duration, fromLocalInput, toLocalInput } from "@/lib/utils";
-import { PageHeader } from "@/components/common";
+import { PageHeader, PersonSelect } from "@/components/common";
 import { Badge, Button, Card, CardHeader, Dialog, DialogContent, Empty, Field, Input, NativeSelect, Spinner } from "@/components/ui";
 
 const DAY = 86_400_000;
@@ -297,15 +297,13 @@ function OverrideForm({ schedule, members, isOwner, onDone }: { schedule: Schedu
 }
 
 function Members({ team }: { team: Team }) {
-  const { users, reloadDirectory } = useSession();
   const isOwner = useTeamOwner()(team);
   const toast = useToast();
   const list = useQuery(() => items(rpc.directory.listTeamMembers<{ items: TeamMember[] }>({ id: team.id })), [team.id]);
   const set = (userId: string, role?: TeamRole) =>
-    rpc.directory.setTeamMember({ teamId: team.id, userId, role }).then(() => { list.reload(); reloadDirectory(); }).catch(toast.error);
+    rpc.directory.setTeamMember({ teamId: team.id, userId, role }).then(() => list.reload()).catch(toast.error);
   const membersLocked = team.memberGroups.length > 0;
   const ownersLocked = team.ownerGroups.length > 0;
-  const outside = users.filter((u) => !u.disabled && !list.data?.some((m) => m.userId === u.id));
   return (
     <Card className="self-start">
       <CardHeader title={<span className="flex items-center gap-2"><Users className="size-4" /> Members</span>} />
@@ -333,10 +331,7 @@ function Members({ team }: { team: Team }) {
       )}
       {isOwner && !membersLocked && (
         <div className="border-t p-4">
-          <NativeSelect value="" aria-label="Add member" onChange={(e) => e.target.value && set(e.target.value, "MEMBER")}>
-            <option value="">Add a member…</option>
-            {outside.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.email}</option>)}
-          </NativeSelect>
+          <PersonSelect label="Add member" placeholder="Add a member…" onPick={(id) => set(id, "MEMBER")} exclude={(u) => !!list.data?.some((m) => m.userId === u.id)} />
         </div>
       )}
     </Card>

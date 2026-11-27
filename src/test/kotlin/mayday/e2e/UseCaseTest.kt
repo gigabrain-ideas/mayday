@@ -45,6 +45,7 @@ class UseCaseTest : BrowserContract() {
         openOnCall(name)
         val members = card("Members")
         for (email in people) {
+            members.getByRole(AriaRole.SEARCHBOX, Locator.GetByRoleOptions().setName("Find a person")).fill(email)
             members.getByRole(AriaRole.COMBOBOX, Locator.GetByRoleOptions().setName("Add member"))
                 .selectOption(SelectOption().setLabel("${email.substringBefore('@')} · $email"))
             assertThat(members.getByText(email, Locator.GetByTextOptions().setExact(true))).isVisible()
@@ -191,6 +192,27 @@ class UseCaseTest : BrowserContract() {
         } finally {
             runBlocking { app.policy.clear(principal("admin"), mayday.policy.Scope.TEAM, team.id, mayday.policy.Keys.AGENT_AUTO_REMEDIATION) }
         }
+    }
+
+    @Test
+    fun `9 a person past the first 500 users shows by name and can join a team`() {
+        val late = unique("zzz-late").replace(' ', '-') + "@example.com"
+        val title = unique("Payments time out")
+        runBlocking {
+            repeat(501) { app.ports.users.save(mayday.identity.User(mayday.shared.Ids.new(), "zz-bulk-${unique("$it").replace(' ', '-')}@example.com", "Bulk $it", createdAt = Instant.now())) }
+            val person = mayday.identity.User(mayday.shared.Ids.new(), late, "Zed Late", createdAt = Instant.now())
+            app.ports.users.save(person)
+            app.incidents.declare(principal("admin"), mayday.incidents.NewIncident(title, severity = mayday.shared.Severity.SEV3, teamIds = listOf(team.id), commanderId = person.id))
+        }
+        signIn()
+        page.navigate("/incidents")
+        assertThat(page.getByRole(AriaRole.ROW).filter(Locator.FilterOptions().setHasText(title))).containsText("Zed Late")
+
+        openOnCall("Checkout")
+        val members = card("Members")
+        members.getByRole(AriaRole.SEARCHBOX, Locator.GetByRoleOptions().setName("Find a person")).fill("zzz-late")
+        members.getByRole(AriaRole.COMBOBOX, Locator.GetByRoleOptions().setName("Add member")).selectOption(SelectOption().setLabel("Zed Late · $late"))
+        assertThat(members.getByText(late, Locator.GetByTextOptions().setExact(true))).isVisible()
     }
 
     private fun createTeam(name: String) {

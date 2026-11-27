@@ -213,6 +213,7 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
         override suspend fun count() = usersC.map.size.toLong()
         override suspend fun withAgentAdmin() = usersC.map.values.filter { it.allowAgentAdmin }
         override suspend fun byTeam(teamId: String) = usersC.map.values.filter { teamId in it.teams }
+        override suspend fun byIds(ids: Collection<String>) = ids.mapNotNull { usersC.map[it] }
         override suspend fun withGroups(keys: Set<String>) = usersC.map.values.filter { u -> u.idpGroups.any { it in keys } || u.scimGroups.any { it in keys } }
         override suspend fun byScimExternalId(externalId: String) = usersC.map.values.firstOrNull { it.scimExternalId == externalId }
         override suspend fun list(query: String?, cursor: String?, limit: Int): Page<User> {

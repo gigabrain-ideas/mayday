@@ -508,6 +508,8 @@ class GrpcContractTest : ServerContract() {
         }
         val page = users.listUsers(ListUsersRequest.newBuilder().setQ(email).build(), auth("viewer"))
         assertEquals(listOf(u.id), page.itemsList.map { it.id })
+        val byId = users.listUsers(ListUsersRequest.newBuilder().addIds(u.id).addIds(userOf("admin").id).addIds("missing").setLimit(1).build(), auth("viewer"))
+        assertEquals(setOf(u.id, userOf("admin").id), byId.itemsList.map { it.id }.toSet(), "ids ignore the page limit")
     }
 
     @Test

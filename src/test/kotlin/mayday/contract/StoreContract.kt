@@ -260,6 +260,14 @@ abstract class StoreContract {
     }
 
     @Test
+    fun `users by ids returns the known users in any page`() = suspendTest {
+        val saved = listOf("e", "f", "g").map { User(Ids.new(), "$it@example.com", it.uppercase(), createdAt = now).also { u -> p.users.save(u) } }
+        val found = p.users.byIds(listOf(saved[2].id, saved[0].id, "missing"))
+        assertEquals(setOf(saved[0].id, saved[2].id), found.map { it.id }.toSet())
+        assertTrue(p.users.byIds(emptyList()).isEmpty())
+    }
+
+    @Test
     fun `tokens are found by hash and owner and can be deleted`() = suspendTest {
         val t = ApiToken(Ids.new(), "n", OwnerKind.AGENT, "agent1", "hash1", "mdy_", setOf(TokenScope.READ), now)
         p.tokens.save(t)

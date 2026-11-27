@@ -107,6 +107,8 @@ message ListUsersRequest {
   optional string q = 1;
   optional string cursor = 2;
   int32 limit = 3;
+  // The users with these ids (at most 500), in no order. Then q, cursor and limit do not apply.
+  repeated string ids = 4;
 }
 
 message CreateUserRequest {

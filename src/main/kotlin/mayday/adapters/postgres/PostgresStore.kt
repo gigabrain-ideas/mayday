@@ -222,6 +222,8 @@ class PostgresStore(val pool: Pool) {
         override suspend fun count() = query("select count(*) from users") { it.getLong(1) }.first()
         override suspend fun withAgentAdmin() = query("select doc from users where doc->>'allowAgentAdmin' = 'true'") { dec(ser, it) }
         override suspend fun byTeam(teamId: String) = query("select doc from users where doc->'teams' ?? ?", teamId) { dec(ser, it) }
+        override suspend fun byIds(ids: Collection<String>) =
+            if (ids.isEmpty()) emptyList() else query("select doc from users where id = any(?)", ids.toTypedArray()) { dec(ser, it) }
         override suspend fun withGroups(keys: Set<String>) = if (keys.isEmpty()) emptyList() else {
             val arr = keys.toTypedArray()
             query("select doc from users where doc->'idpGroups' ??| ? or doc->'scimGroups' ??| ?", arr, arr) { dec(ser, it) }

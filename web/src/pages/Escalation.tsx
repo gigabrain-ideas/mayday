@@ -4,6 +4,7 @@ import {
   items, rpc, waitsForHuman, type Alert, type Escalation, type EscalationLevel, type EscalationPolicy, type EscalationStatus, type EscalationTarget, type Schedule, type Team, type TeamMember,
 } from "@/lib/api";
 import { useLive, useQuery } from "@/lib/hooks";
+import { usePeopleSearch } from "@/lib/people";
 import { useSession, useTeamOwner } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { ago, dateTime } from "@/lib/utils";
@@ -78,7 +79,9 @@ function PolicyForm({ team, members, schedules, policy, first, onDone }: {
   team: Team; members: TeamMember[]; schedules: Schedule[]; policy?: EscalationPolicy; first: boolean; onDone: () => void;
 }) {
   const toast = useToast();
-  const { users, teamName } = useSession();
+  const { userName, teamName } = useSession();
+  const [q, setQ] = useState("");
+  const found = usePeopleSearch(q);
   const [f, setF] = useState(() => ({
     name: policy?.name ?? "Default",
     description: policy?.description ?? "",
@@ -95,9 +98,9 @@ function PolicyForm({ team, members, schedules, policy, first, onDone }: {
   const own = schedules.filter((s) => s.teamId === team.id);
   const others = schedules.filter((s) => s.teamId !== team.id);
   const memberIds = new Set(members.map((m) => m.userId));
-  const people = [...users.filter((u) => !u.disabled)].sort((a, b) => Number(memberIds.has(b.id)) - Number(memberIds.has(a.id)) || a.name.localeCompare(b.name));
+  const people = [...found].sort((a, b) => Number(memberIds.has(b.id)) - Number(memberIds.has(a.id)) || a.name.localeCompare(b.name));
   const label = (t: EscalationTarget) => t.kind === "USER"
-    ? users.find((u) => u.id === t.id)?.name ?? "Unknown person"
+    ? userName(t.id)
     : (() => { const s = schedules.find((x) => x.id === t.id); return s ? `${teamName(s.teamId)} · ${s.name} (on call)` : "Deleted schedule"; })();
   const save = async () => {
     const body = { teamId: team.id, name: f.name, description: f.description, repeat: Number(f.repeat), teamDefault: f.teamDefault,
@@ -114,6 +117,9 @@ function PolicyForm({ team, members, schedules, policy, first, onDone }: {
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save(); }}>
         <Field label="Name"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></Field>
         <Field label="Description"><Input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Business hours and nights" /></Field>
+        <Field label="People to page" hint="Search by name or email. The results show in the list of each level.">
+          <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a person" aria-label="Find a person" />
+        </Field>
         <div className="space-y-3">
           {f.levels.map((l, i) => (
             <div key={i} className="space-y-2 rounded-xl border p-3">

@@ -37,6 +37,7 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 ## Behavior
 
 - Live updates: one `EventService.Subscribe` stream per browser tab. It reconnects when the stream ends. Pages reload only the data an event concerns. `ping` events keep the connection open. The client adds two signals: `live.connected` (first ping of each stream; events sent while it was down are lost, so lists and counts reload) and `live.disconnected`.
+- People: the interface never loads all users. A name (commander, on call, "for" a person) asks the server for the ids of the screen in one `ListUsers` call with `ids` and keeps the answer. Until the answer is there, the name shows "…"; an id the server does not know shows "Unknown". Person pickers (incident commander, team member, escalation target) search the server by name or email ("Find a person") and show the first 50 matches.
 - The Alerts badge in the sidebar is the exact number of firing alerts (`CountAlerts`), not the length of a page. When the server does not answer or the live stream is down, the badge shows no number: an unknown count is never shown as a stale one.
 - A list that fails to load shows "Mayday could not load the …" with the reason and "Try again". It never shows the empty state ("No alerts") in place of an error.
 - Voice: a microphone button on each long text field uses the Web Speech API. Stylus input (for example Apple Pencil Scribble) works in all text fields.
@@ -52,6 +53,8 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 
 - A team owner opens On-call, creates the policy "Default" with Primary (5 minutes), Secondary (10 minutes) and themselves, and marks it as the team default.
 - A responder opens a firing alert, sees that level 1 was paged 4 minutes ago and presses "Escalate now".
+
+- An org has 40,000 people. A team owner types "ana" in "Find a person" on the Members card and adds Ana, whose email sorts far after the first page of users.
 
 ## Negative use cases
 
