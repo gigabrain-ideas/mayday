@@ -176,7 +176,10 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
     override fun close() { journal.close() }
 
     private fun alertKey(a: Alert) = "${a.firstSeenAt}|${a.id}"
-    private fun indexAlert(a: Alert) { alertOrder[alertKey(a)] = a.id; alertByFingerprint[a.fingerprint] = a.id }
+    private fun indexAlert(a: Alert) {
+        alertOrder[alertKey(a)] = a.id
+        alertByFingerprint.merge("${a.teamId}|${a.fingerprint}", a.id) { cur, new -> if ((alertsC.map[cur]?.firstSeenAt ?: Instant.MIN) > a.firstSeenAt) cur else new }
+    }
     private fun indexUser(u: User) { usersByEmail[u.email] = u.id; u.externalId?.let { usersByExternal[it] = u.id } }
 
     private fun <T> page(items: Sequence<T>, limit: Int, cursorOf: (T) -> String): Page<T> {
@@ -298,7 +301,7 @@ class MemoryStore(dataDir: Path?) : AutoCloseable {
 
     val alerts = object : AlertRepository {
         override suspend fun get(id: String) = alertsC.map[id]
-        override suspend fun latestByFingerprint(fingerprint: String) = alertByFingerprint[fingerprint]?.let { alertsC.map[it] }
+        override suspend fun latestByFingerprint(teamId: String, fingerprint: String) = alertByFingerprint["$teamId|$fingerprint"]?.let { alertsC.map[it] }
 
         override suspend fun save(alert: Alert, expectedVersion: Long?) = synchronized(this) {
             val cur = alertsC.map[alert.id]

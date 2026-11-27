@@ -99,7 +99,8 @@ data class AlertFilter(
 
 interface AlertRepository {
     suspend fun get(id: String): Alert?
-    suspend fun latestByFingerprint(fingerprint: String): Alert?
+    /** The latest alert of [teamId] with [fingerprint]. A fingerprint is unique only within a team. */
+    suspend fun latestByFingerprint(teamId: String, fingerprint: String): Alert?
     suspend fun save(alert: Alert, expectedVersion: Long?)
     suspend fun list(filter: AlertFilter, cursor: String?, limit: Int): Page<Alert>
     suspend fun scan(filter: AlertFilter, consumer: (Alert) -> Unit)
@@ -187,7 +188,7 @@ class AlertService(
         val now = clock.now()
         val fp = signal.fingerprint?.takeIf { it.isNotBlank() } ?: fingerprint(signal.source, signal.title, team.id, signal.labels)
         val window = Duration.ofMinutes(policy.int(Keys.ALERT_DEDUP_MINUTES, listOf(team.id)).toLong())
-        val latest = alerts.latestByFingerprint(fp)
+        val latest = alerts.latestByFingerprint(team.id, fp)
         val active = latest?.takeIf { it.status != AlertStatus.RESOLVED }
         val sourceActor = Actor(ActorKind.SYSTEM, signal.source, signal.source)
 

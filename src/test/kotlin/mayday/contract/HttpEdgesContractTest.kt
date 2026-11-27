@@ -290,12 +290,35 @@ class HttpEdgesContractTest : ServerContract() {
         assertEquals(Severity.SEV3, slow.severity)
         assertEquals("Slow", slow.title)
 
-        val resolved = send("POST", "/api/v1/integrations/alertmanager", firing.replace("\"firing\"", "\"resolved\"").substringBefore(",\n") + "]}", h)
+        val resolved = send("POST", "/api/v1/integrations/alertmanager?team=sre", firing.replace("\"firing\"", "\"resolved\"").substringBefore(",\n") + "]}", h)
         assertEquals(mapOf("created" to 0, "updated" to 1), json(resolved).jsonObject.mapValues { it.value.jsonPrimitive.int })
         assertEquals(AlertStatus.RESOLVED, app.alerts.get(principal("viewer"), high.id).status)
 
         assertError(send("POST", "/api/v1/integrations/alertmanager", """{"alerts":[{"labels":{"alertname":"NoTeam"}}]}""", h), 400, "invalid")
         assertError(send("POST", "/api/v1/integrations/alertmanager", "[]", h), 400, "invalid")
+    }
+
+    @Test
+    fun `one source fingerprint sent for two teams makes one alert for each team`() = suspendTest {
+        val h = bearerHeader(scoped("admin", TokenScope.ALERTS_INGEST))
+        val fp = "am-${unique()}"
+        val body = """{"alerts":[{"status":"firing","fingerprint":"$fp","labels":{"alertname":"Shared","severity":"critical"}}]}"""
+        assertEquals(200, send("POST", "/api/v1/integrations/alertmanager?team=checkout", body, h).statusCode())
+        val r = send("POST", "/api/v1/integrations/alertmanager?team=sre", body, h)
+        assertEquals(mapOf("created" to 1, "updated" to 0), json(r).jsonObject.filterKeys { it in setOf("created", "updated") }.mapValues { it.value.jsonPrimitive.int })
+        val alerts = app.alerts.list(principal("viewer"), AlertFilter(), null, 200).items.filter { it.fingerprint == fp }
+        assertEquals(setOf(team.id, other.id), alerts.map { it.teamId }.toSet())
+    }
+
+    @Test
+    fun `an ingest token for one team cannot resolve the alert of another team by its fingerprint`() = suspendTest {
+        val fp = "fp-${unique()}"
+        val sre = send("POST", "/api/v1/alerts", """{"title":"Disk full","team":"sre","fingerprint":"$fp"}""", bearerHeader(token("admin")))
+        assertEquals(201, sre.statusCode(), sre.body())
+        val id = json(sre).jsonObject["alert"]!!.jsonObject["id"]!!.jsonPrimitive.content
+        val ingest = bearerHeader(scoped("member", TokenScope.ALERTS_INGEST))
+        send("POST", "/api/v1/alerts", """{"title":"Disk full","team":"checkout","fingerprint":"$fp","status":"RESOLVED"}""", ingest)
+        assertEquals(AlertStatus.FIRING, app.alerts.get(principal("viewer"), id).status)
     }
 
     // ---- static files and operations ----

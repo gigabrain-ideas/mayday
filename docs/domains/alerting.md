@@ -15,7 +15,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 | Resolve by an automated agent | Alerting asks the `RunbookCoverage` port for the approved runbook that the agent follows on this alert ([runbooks.md](runbooks.md)). With one, `resolvedUnderRunbook` is set and the escalation stops. With none, the alert is RESOLVED and waits for a person: the update says that paging goes on. This holds for `resolve_alert`, gRPC `ResolveAlert`, and incident closes through `update_incident`. |
 | Confirm a resolve | A person who acknowledges or resolves an alert that waits for a person confirms the resolve: the alert stays RESOLVED, `resolvedBy` or `acknowledgedBy` is the person, and the escalation stops. A resolve signal from the monitoring source confirms it too (`resolvedBy` = the source, kind SYSTEM). An automated agent cannot confirm its own resolve. |
 | Raise to a person | `raiseToHuman(alert, agent, reason)` (agents context): adds the reason as an update, clears `resolvedUnderRunbook` and calls `AlertLifecycle.needsHuman`. |
-| Fingerprint | Given by the source, or SHA-256 of source, title, team and sorted labels. |
+| Fingerprint | Given by the source, or SHA-256 of source, title, team and sorted labels. A fingerprint is unique within a team: Mayday matches a signal only to alerts of the team of the signal. |
 | Deduplication | A firing signal with the fingerprint of an open alert increments `count` and keeps the worst severity. A resolved alert that fires again inside `alerts.dedup_window_minutes` reopens. Otherwise Mayday creates a new alert. |
 | Resolve signal | Resolves the open alert. With no open alert, it confirms a resolve that waits for a person, else it does nothing (or records a resolved alert when the fingerprint is new). A firing signal inside the window reopens the alert and clears `resolvedBy` and `resolvedUnderRunbook`. |
 | Automatic incident | A new alert at or worse than `alerts.auto_incident_min_severity` opens an incident for its team and links both. |
@@ -23,7 +23,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 
 ## Ports
 
-- `AlertRepository`: `get`, `latestByFingerprint`, `save(expectedVersion)`, keyset `list`, `scan`.
+- `AlertRepository`: `get`, `latestByFingerprint(teamId, fingerprint)`, `save(expectedVersion)`, keyset `list`, `scan`.
 - `AlertAutomation`: called after a new alert. The agents context implements it.
 - `RunbookCoverage`: the approved runbook that an automated agent follows on an alert. The agents context implements it.
 - `AlertLifecycle`: `opened` after a new alert and after a reopened alert, `closed` after a person acknowledges and after a resolve that waits for no person, `needsHuman` after an agent raised the alert to a person. The escalation context implements it ([escalation.md](escalation.md)). A failure there never blocks the alert.
@@ -39,6 +39,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 ## Positive use cases
 
 - Alertmanager sends the same alert every minute. Mayday keeps one alert and counts the repeats.
+- Alertmanager sends one alert to two receivers, `?team=checkout` and `?team=sre`. Each team gets its own alert and its own page.
 - A critical alert fires. Mayday opens an incident, adds an ALERT entry to its timeline and starts the analysis agent.
 - A member declares an incident for Checkout and SRE. Both teams get a firing alert linked to the incident, and the timeline shows two ALERT entries.
 - The commander sets the incident to IDENTIFIED. The raised alerts are acknowledged and nobody is paged again. At RESOLVED they are resolved.
@@ -52,6 +53,7 @@ Alerting takes signals from monitoring tools, removes duplicates, opens incident
 - A token with only `read` scope sends an alert: `forbidden`.
 - A token with only `alerts_ingest` sends an alert for a team that its owner is not in (not a team member, not admin of the team's project, not an administrator): `forbidden`. A leaked ingest token cannot open incidents for other teams. Agent tokens and tokens with `write` are not limited. For one Alertmanager that serves many teams, an administrator creates the token.
 - A signal for an unknown team: `not_found`.
+- An `alerts_ingest` token of Checkout sends a resolve signal with the fingerprint of an SRE alert: the SRE alert stays firing, because the signal matches only Checkout alerts.
 - A flapping alert inside the window does not create a new incident each time.
 - A critical alert opens an incident. The incident does not raise a second alert.
 - A viewer tries to declare an incident: `forbidden`, and no alert is raised.

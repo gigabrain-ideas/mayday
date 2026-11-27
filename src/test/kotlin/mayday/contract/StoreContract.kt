@@ -140,8 +140,19 @@ abstract class StoreContract {
     fun `alerts by fingerprint return the latest`() = suspendTest {
         val old = alert("fp", now.minusSeconds(3600)); val new = alert("fp", now)
         p.alerts.save(old, null); p.alerts.save(new, null)
-        assertEquals(new.id, p.alerts.latestByFingerprint("fp")!!.id)
-        assertNull(p.alerts.latestByFingerprint("none"))
+        assertEquals(new.id, p.alerts.latestByFingerprint("t1", "fp")!!.id)
+        assertNull(p.alerts.latestByFingerprint("t1", "none"))
+        p.alerts.save(old.copy(status = AlertStatus.RESOLVED, version = 2), 1)
+        assertEquals(new.id, p.alerts.latestByFingerprint("t1", "fp")!!.id, "an update of an older alert keeps the latest")
+    }
+
+    @Test
+    fun `alerts by fingerprint are found per team`() = suspendTest {
+        val a = alert("fp", team = "a"); val b = alert("fp", now.minusSeconds(60), team = "b")
+        p.alerts.save(a, null); p.alerts.save(b, null)
+        assertEquals(a.id, p.alerts.latestByFingerprint("a", "fp")!!.id)
+        assertEquals(b.id, p.alerts.latestByFingerprint("b", "fp")!!.id)
+        assertNull(p.alerts.latestByFingerprint("c", "fp"))
     }
 
     @Test

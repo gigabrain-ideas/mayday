@@ -102,7 +102,8 @@ class PostgresStore(val pool: Pool) {
             s.execute("""create table if not exists alerts (
                 id text primary key, fingerprint text not null, status text not null, severity text not null, team_id text not null,
                 first_seen_at timestamptz not null, search text not null, version bigint not null, doc jsonb not null)""")
-            s.execute("create index if not exists alerts_fp on alerts (fingerprint, first_seen_at desc)")
+            s.execute("drop index if exists alerts_fp")
+            s.execute("create index if not exists alerts_team_fp on alerts (team_id, fingerprint, first_seen_at desc)")
             s.execute("create index if not exists alerts_order on alerts (first_seen_at desc, id desc)")
             s.execute("create index if not exists alerts_team on alerts (team_id, first_seen_at desc)")
             s.execute("create index if not exists alerts_status on alerts (status, team_id)")
@@ -327,8 +328,8 @@ class PostgresStore(val pool: Pool) {
     val alerts = object : AlertRepository {
         private val ser = Alert.serializer()
         override suspend fun get(id: String) = query("select doc from alerts where id = ?", id) { dec(ser, it) }.firstOrNull()
-        override suspend fun latestByFingerprint(fingerprint: String) =
-            query("select doc from alerts where fingerprint = ? order by first_seen_at desc limit 1", fingerprint) { dec(ser, it) }.firstOrNull()
+        override suspend fun latestByFingerprint(teamId: String, fingerprint: String) =
+            query("select doc from alerts where team_id = ? and fingerprint = ? order by first_seen_at desc limit 1", teamId, fingerprint) { dec(ser, it) }.firstOrNull()
 
         override suspend fun save(alert: Alert, expectedVersion: Long?) {
             val doc = JsonDoc(enc(ser, alert))
