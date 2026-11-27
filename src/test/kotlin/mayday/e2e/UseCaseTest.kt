@@ -289,6 +289,20 @@ class UseCaseTest : BrowserContract() {
         assertThat(page.getByText("Incident not found")).hasCount(0)
     }
 
+    @Test
+    fun `14 a responder keeps the typed update when posting it fails`() {
+        val alert = runBlocking { app.alerts.ingest(principal("admin"), mayday.alerting.AlertSignal(unique("Cache misses"), mayday.shared.Severity.SEV4, "checkout")).alert }
+        signIn()
+        page.navigate("/alerts/${alert.id}")
+        page.route("**/mayday.v1.AlertService/AddAlertUpdate") { it.fulfill(com.microsoft.playwright.Route.FulfillOptions().setStatus(503)) }
+        val text = page.getByPlaceholder("Add an update")
+        text.fill("Restarted cache-2. Misses drop.")
+        button("Post").click()
+
+        assertThat(page.locator("[aria-live=polite] svg.text-destructive")).isVisible()
+        assertThat(text).hasValue("Restarted cache-2. Misses drop.")
+    }
+
     private fun createTeam(name: String) {
         page.navigate("/settings/directory")
         page.getByPlaceholder("New team name").fill(name)

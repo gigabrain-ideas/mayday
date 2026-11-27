@@ -25,8 +25,9 @@ export function AlertPage() {
 
   if (error && !a) return <Empty title="Alert not found">{error.message}</Empty>;
   if (!a) return <div className="flex justify-center p-16"><Spinner /></div>;
+  /** True when the call succeeded. */
   const act = async (call: Promise<Alert>) => {
-    try { setData(await call); } catch (e) { toast.error(e); }
+    try { setData(await call); return true; } catch (e) { toast.error(e); return false; }
   };
 
   return (
@@ -57,7 +58,7 @@ export function AlertPage() {
             <CardHeader title="Updates" />
             {a.description && <p className="whitespace-pre-wrap border-b px-5 py-4 text-muted-foreground">{a.description}</p>}
             {canWrite && (
-              <form className="flex gap-2 border-b p-4" onSubmit={(e) => { e.preventDefault(); if (text.trim()) act(rpc.alerts.addAlertUpdate({ id: a.id, text })).then(() => setText("")); }}>
+              <form className="flex gap-2 border-b p-4" onSubmit={(e) => { e.preventDefault(); if (text.trim()) act(rpc.alerts.addAlertUpdate({ id: a.id, text })).then((ok) => ok && setText("")); }}>
                 <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Add an update" className="min-h-14" />
                 <DictateButton onText={(t) => setText((p) => (p ? p + " " : "") + t)} />
                 <Button type="submit" size="icon" aria-label="Post"><Send /></Button>
