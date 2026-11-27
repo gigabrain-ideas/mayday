@@ -28,8 +28,12 @@ export function closeLive() {
   live = null;
 }
 
+/** Signals that events were lost (a reconnect, or the server says so): every listener reloads. */
+const RESYNC = new Set(["live.connected", "events.resync"]);
+
 /**
- * Subscribe to live domain events. The filter decides which events are relevant. Events that arrive while a call is due join that
+ * Subscribe to live domain events. The filter decides which events are relevant; "live.connected" and "events.resync" always pass,
+ * with at least [RELOAD_SPREAD], because each page must reload after events were lost. Events that arrive while a call is due join that
  * call, which gets the last of them. [spreadMs] adds a random delay up to that value: one event reaches every open tab at the same
  * moment, and the spread keeps their reloads from reaching the server at the same moment.
  */
@@ -41,12 +45,13 @@ export function useLive(filter: (type: string, subjectId: string, data: Record<s
     let timer: number | undefined;
     let last: LiveEvent | undefined;
     const l: Listener = (e) => {
-      if (!ref.current.filter(e.type, e.subjectId, e.data)) return;
+      const resync = RESYNC.has(e.type);
+      if (!resync && !ref.current.filter(e.type, e.subjectId, e.data)) return;
       last = e;
       timer ??= window.setTimeout(() => {
         timer = undefined;
         ref.current.onEvent(last!);
-      }, 150 + Math.random() * ref.current.spreadMs);
+      }, 150 + Math.random() * (resync ? Math.max(ref.current.spreadMs, RELOAD_SPREAD) : ref.current.spreadMs));
     };
     listeners.add(l);
     return () => {

@@ -22,7 +22,7 @@ export function IncidentsPage() {
   const filter = { open: scope === "open", severity, team, q: params.get("q") || undefined, limit: 50 };
   const list = (cursor?: string) => rpc.incidents.listIncidents<Page<Incident>>({ ...filter, cursor });
   const { data, error, loading, reload } = useQuery(() => list(), [JSON.stringify(filter)]);
-  useLive((t) => t.startsWith("incident.") || t === "live.connected", () => { setExtra([]); reload(); }, RELOAD_SPREAD);
+  useLive((t) => t.startsWith("incident."), () => { setExtra([]); reload(); }, RELOAD_SPREAD);
 
   const set = (k: string, v: string | string[]) => {
     const n = new URLSearchParams(params);

@@ -36,7 +36,7 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 
 ## Behavior
 
-- Live updates: one `EventService.Subscribe` stream per browser tab. It reconnects when the stream ends. Pages reload only the data an event concerns. `ping` events keep the connection open. The client adds two signals: `live.connected` (first ping of each stream; events sent while it was down are lost, so lists and counts reload) and `live.disconnected`.
+- Live updates: one `EventService.Subscribe` stream per browser tab. It reconnects when the stream ends. Pages reload only the data an event concerns. `ping` events keep the connection open. The client adds two signals: `live.connected` (first ping of each stream) and `live.disconnected`. Events sent while the stream was down are lost, so `live.connected` and the server's `events.resync` reach every listener, whatever its filter: every open page (lists, counts, incident, alert, on-call, settings) reloads.
 - People: the interface never loads all users. A name (commander, on call, "for" a person) asks the server for the ids of the screen in one `ListUsers` call with `ids` and keeps the answer. Until the answer is there, the name shows "…"; an id the server does not know shows "Unknown". Person pickers (incident commander, team member, escalation target) search the server by name or email ("Find a person") and show the first 50 matches.
 - The Alerts badge in the sidebar is the exact number of firing alerts, not the length of a page. It takes the number from `firing` in each `alert.created` and `alert.updated` event, so no tab asks the server for it per alert. It calls `CountAlerts` at sign-in and on `live.connected`. When the server does not answer or the live stream is down, the badge shows no number: an unknown count is never shown as a stale one.
 - Load: one event reaches every open tab at the same moment. A page that reloads for an event any tab can get (lists, on-call, settings) waits a random time up to 3 seconds first, and events that arrive in that time join the same reload. A reconnect waits 3 to 10 seconds. So 100,000 open tabs do not send their reloads in the same second after an alert storm or a server restart.
@@ -59,6 +59,7 @@ From [PRODUCT.md](../../PRODUCT.md), then [Ztyle](https://izzardry.github.io/zty
 
 ## Negative use cases
 
+- The network drops for a minute while the commander has an incident open, and a teammate resolves it. When the stream reconnects, the incident page reloads and shows "Resolved".
 - The server stops while a tab is open. The Alerts page shows "Mayday could not load the alerts" and the badge shows no number. When the server is back, the stream reconnects and both reload.
 
 - A session expires: the next call returns `UNAUTHENTICATED` and the login page appears.

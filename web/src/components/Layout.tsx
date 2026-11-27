@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router";
 import { BarChart3, Bell, CalendarClock, LifeBuoy, LogOut, Menu, Moon, Settings, Siren, Sun, X } from "lucide-react";
 import { useSession } from "@/lib/session";
-import { RELOAD_SPREAD, useLive } from "@/lib/hooks";
+import { useLive } from "@/lib/hooks";
 import { rpc } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -30,9 +30,8 @@ export function Layout({ children }: { children: ReactNode }) {
   const [firing, setFiring] = useState<number | null>(null);
   const loadFiring = () => rpc.alerts.countAlerts<{ count: number | string }>({ status: ["FIRING"] }).then((r) => setFiring(Number(r.count)), () => setFiring(null));
   useEffect(() => { loadFiring(); }, []);
-  useLive((t, _, d) => t.startsWith("alert.") && d.firing !== undefined, (e) => setFiring(Number(e.data.firing)));
-  useLive((t) => t === "live.connected", loadFiring, RELOAD_SPREAD);
-  useLive((t) => t === "live.disconnected", () => setFiring(null));
+  useLive((t, _, d) => t.startsWith("alert.") && d.firing !== undefined, (e) => (e.data.firing !== undefined ? setFiring(Number(e.data.firing)) : loadFiring()));
+  useLive((t) => t === "live.disconnected", (e) => e.type === "live.disconnected" && setFiring(null));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

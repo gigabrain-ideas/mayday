@@ -296,9 +296,10 @@ class EscalationService(
             throw e
         } catch (e: Exception) {
             log.log(Level.WARNING, "Page of alert ${alert.id} (level ${page.level}) was not delivered", e)
+            val failed = markFailed(alert.id, page) ?: saved
             events.publish(DomainEvent("alert.page_failed", alert.id, clock.now(), listOf(alert.teamId),
                 mapOf("level" to page.level.toString(), "cycle" to page.cycle.toString(), "reason" to e.javaClass.simpleName)))
-            return markFailed(alert.id, page) ?: saved
+            return failed
         }
         return saved
     }

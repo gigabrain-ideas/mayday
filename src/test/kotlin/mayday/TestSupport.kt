@@ -100,7 +100,10 @@ class TestClock(@Volatile var at: Instant = Instant.now().truncatedTo(java.time.
 class RecordingPager : mayday.escalation.Pager {
     val pages = CopyOnWriteArrayList<mayday.escalation.PageNotice>()
     @Volatile var fail = false
+    /** Time before the pager answers, like a webhook that times out. */
+    @Volatile var delayMs = 0L
     override suspend fun page(notice: mayday.escalation.PageNotice) {
+        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
         if (fail) throw IllegalStateException("Pager endpoint answered HTTP 503")
         pages += notice
     }

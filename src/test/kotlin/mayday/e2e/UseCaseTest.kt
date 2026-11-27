@@ -18,6 +18,7 @@ import kotlin.test.assertEquals
 /** The main flows of work, as a user does them in the web interface. See docs/testing.md#use-case-tests. */
 @TestPropertySource(properties = ["spring.grpc.server.inprocess.name=e2e-use-cases"])
 class UseCaseTest : BrowserContract() {
+    @org.springframework.beans.factory.annotation.Autowired private lateinit var pager: mayday.RecordingPager
 
     @Test
     fun `1 an administrator creates a team with no people`() {
@@ -230,6 +231,46 @@ class UseCaseTest : BrowserContract() {
 
         assertThat(badge).hasAttribute("aria-label", "${before + 1} firing")
         assertEquals(0, counts.get(), "the count comes with the event")
+    }
+
+    @Test
+    fun `11 an open incident page shows a change that its live stream missed`() {
+        signIn()
+        val title = unique("Search is down")
+        declareIncident(title, "Checkout")
+        val renamed = unique("Search index is down")
+        runBlocking {
+            val inc = app.incidents.list(principal("admin"), mayday.incidents.IncidentFilter(query = title), null, 1).items.single()
+            app.ports.incidents.save(inc.copy(title = renamed, version = inc.version + 1), inc.version)
+            app.ports.events.publish(mayday.shared.DomainEvent(mayday.shared.EventBus.RESYNC, "", Instant.now()))
+        }
+
+        assertThat(page.getByRole(AriaRole.HEADING, Page.GetByRoleOptions().setName(renamed))).isVisible()
+    }
+
+    @Test
+    fun `12 an open alert page marks a page that the pager did not deliver`() {
+        val esc = app.escalation
+        val policy = runBlocking {
+            esc.create(principal("admin"), mayday.escalation.EscalationPolicyInput(team.id, unique("E2E paging"), teamDefault = true,
+                levels = List(2) { mayday.escalation.EscalationLevel(5, listOf(mayday.escalation.EscalationTarget(mayday.escalation.TargetKind.USER, userOf("lead").id))) }))
+        }
+        try {
+            val alert = runBlocking { app.alerts.ingest(principal("admin"), mayday.alerting.AlertSignal(unique("Payments 500s"), mayday.shared.Severity.SEV2, "checkout")).alert }
+            signIn()
+            page.navigate("/alerts/${alert.id}")
+            val escalation = card("Escalation")
+            assertThat(escalation.getByText("Level 1", Locator.GetByTextOptions().setExact(true))).isVisible()
+            pager.fail = true
+            pager.delayMs = 1500
+            runBlocking { esc.escalateNow(principal("admin"), alert.id) }
+
+            assertThat(escalation.getByText("Not delivered")).isVisible()
+        } finally {
+            pager.fail = false
+            pager.delayMs = 0
+            runBlocking { esc.delete(principal("admin"), policy.id) }
+        }
     }
 
     private fun createTeam(name: String) {

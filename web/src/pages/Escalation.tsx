@@ -175,7 +175,7 @@ export function AlertEscalation({ alert }: { alert: Alert }) {
   const { userName, canWrite } = useSession();
   const toast = useToast();
   const esc = useQuery(() => rpc.escalation.getEscalation<Escalation>({ id: alert.id }), [alert.id]);
-  useLive((t, sid) => (t === "alert.paged" || t === "alert.escalation_exhausted" || t === "alert.updated") && sid === alert.id, esc.reload);
+  useLive((t, sid) => t.startsWith("alert.") && sid === alert.id, esc.reload);
   const policy = useQuery(esc.data ? () => rpc.escalation.getPolicy<EscalationPolicy>({ id: esc.data!.policyId }) : null, [esc.data?.policyId]);
   const e = esc.data;
   const escalate = async () => {

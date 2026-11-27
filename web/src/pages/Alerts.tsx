@@ -15,7 +15,7 @@ export function AlertsPage() {
   const severity = (params.get("severity")?.split(",").filter(Boolean) ?? []) as Severity[];
   const team = params.get("team")?.split(",").filter(Boolean) ?? [];
   const { data, error, loading, reload } = useQuery(() => rpc.alerts.listAlerts<Page<Alert>>({ status, severity, team, limit: 100 }), [status.join(), severity.join(), team.join()]);
-  useLive((t) => t.startsWith("alert.") || t === "live.connected", reload, RELOAD_SPREAD);
+  useLive((t) => t.startsWith("alert."), reload, RELOAD_SPREAD);
   const set = (k: string, v: string[]) => {
     const n = new URLSearchParams(params);
     n.set(k, v.join(","));
