@@ -336,6 +336,23 @@ class UseCaseTest : BrowserContract() {
         assertEquals(listOf("beforeunload"), dialogs.toList())
     }
 
+    @Test
+    fun `17 a custom report covers whole days in the time zone of the browser`() {
+        useTimeZone("America/New_York")
+        signIn()
+        val requests = java.util.concurrent.CopyOnWriteArrayList<mayday.api.v1.ReportRequest>()
+        page.onRequest { r ->
+            if (r.url().endsWith("/GetReport")) r.postDataBuffer()?.let { requests += mayday.api.v1.ReportRequest.parseFrom(it.copyOfRange(5, it.size)) }
+        }
+        page.navigate("/reports?period=custom&from=2026-03-01&to=2026-03-31")
+        assertThat(page.getByRole(AriaRole.HEADING, Page.GetByRoleOptions().setName("Reports"))).isVisible()
+        page.waitForTimeout(500.0)
+
+        val r = requests.last()
+        assertEquals(Instant.parse("2026-03-01T05:00:00Z"), Instant.ofEpochSecond(r.from.seconds), "local midnight of the first day")
+        assertEquals(Instant.parse("2026-04-01T04:00:00Z"), Instant.ofEpochSecond(r.to.seconds), "local midnight after the last day; the end is exclusive")
+    }
+
     private fun createTeam(name: String) {
         page.navigate("/settings/directory")
         page.getByPlaceholder("New team name").fill(name)

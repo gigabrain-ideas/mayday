@@ -69,7 +69,19 @@ abstract class BrowserContract : ServerContract() {
     @BeforeEach
     fun openPage() {
         failed = false
-        context = browser.newContext(Browser.NewContextOptions().setBaseURL(base).setViewportSize(1440, 900))
+        open(null)
+    }
+
+    /** Opens a new page whose browser runs in [timeZone] (an IANA id). The page so far is closed. */
+    protected fun useTimeZone(timeZone: String) {
+        context.tracing().stop()
+        context.close()
+        open(timeZone)
+    }
+
+    private fun open(timeZone: String?) {
+        val options = Browser.NewContextOptions().setBaseURL(base).setViewportSize(1440, 900)
+        context = browser.newContext(if (timeZone == null) options else options.setTimezoneId(timeZone))
         context.tracing().start(Tracing.StartOptions().setScreenshots(true).setSnapshots(true))
         page = context.newPage()
     }

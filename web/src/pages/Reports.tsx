@@ -5,7 +5,7 @@ import { useQuery } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import { cn, duration } from "@/lib/utils";
 import { Card, CardHeader, Input, MultiSelect, Spinner, Table, Td, Th } from "@/components/ui";
-import { PageHeader, SeverityBadge } from "@/components/common";
+import { LoadFailed, PageHeader, SeverityBadge } from "@/components/common";
 
 const PERIODS = [
   { id: "7", label: "7 days" },
@@ -17,6 +17,12 @@ const PERIODS = [
 /** Severity is ordinal: one gray ramp, darkest = most severe. Red stays reserved for status. */
 const SEV_FILL: Record<Severity, string> = { SEV1: "var(--chart-1)", SEV2: "var(--chart-2)", SEV3: "var(--chart-3)", SEV4: "var(--chart-4)", SEV5: "var(--chart-5)" };
 
+/** Local midnight at the start of the day [iso] (YYYY-MM-DD) plus [plusDays]. */
+function localDay(iso: string, plusDays = 0) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d + plusDays);
+}
+
 export function ReportsPage() {
   const [params, setParams] = useSearchParams();
   const { teams } = useSession();
@@ -26,12 +32,12 @@ export function ReportsPage() {
   const [from, setFrom] = useState(params.get("from") ?? "");
   const [to, setTo] = useState(params.get("to") ?? "");
   const range = useMemo(() => {
-    if (period === "custom" && from && to) return { from: new Date(from).toISOString(), to: new Date(to + "T23:59:59").toISOString() };
+    if (period === "custom" && from && to) return { from: localDay(from).toISOString(), to: localDay(to, 1).toISOString() };
     const days = Number(period === "custom" ? 30 : period);
     const end = new Date();
     return { from: new Date(end.getTime() - days * 86400000).toISOString(), to: end.toISOString() };
   }, [period, from, to]);
-  const { data: r, loading } = useQuery(() => rpc.reports.getReport<Report>({ team, severity, from: range.from, to: range.to }), [team.join(), severity.join(), range.from, range.to]);
+  const { data: r, loading, error, reload } = useQuery(() => rpc.reports.getReport<Report>({ team, severity, from: range.from, to: range.to }), [team.join(), severity.join(), range.from, range.to]);
 
   const set = (k: string, v: string | string[]) => {
     const n = new URLSearchParams(params);
@@ -61,7 +67,7 @@ export function ReportsPage() {
         <MultiSelect label="Teams" value={team} onChange={(v) => set("team", v)} options={teams.map((t) => ({ value: t.slug, label: t.name }))} />
         <MultiSelect label="Severity" value={severity} onChange={(v) => set("severity", v)} options={SEVERITIES.map((s) => ({ value: s, label: s }))} />
       </div>
-      {!r ? <div className="flex justify-center p-16"><Spinner /></div> : (
+      {error && !r ? <Card><LoadFailed what="report" error={error} onRetry={reload} /></Card> : !r ? <div className="flex justify-center p-16"><Spinner /></div> : (
         <div className={cn("space-y-5 transition-opacity duration-150", loading && "opacity-60")}>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
             <Stat label="Incidents" value={r.incidents} sub={`${r.open} open`} />
