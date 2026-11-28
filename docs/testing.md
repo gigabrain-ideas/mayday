@@ -76,6 +76,8 @@ make test
 
 Without Docker and without `MAYDAY_TEST_DATABASE_URL`, `PostgresStoreContractTest` fails. The contract is not optional.
 
+GitHub Actions runs `./gradlew test` on Temurin 25 for each push to `main` (`.github/workflows/test.yml`). The runner has Docker, so the PostgreSQL and Keycloak containers start there too. When a test fails, the HTML report is attached to the run as `test-reports`. Start a run by hand from the Actions tab with "Run workflow".
+
 ## Use-case tests
 
 `UseCaseTest` drives the built web interface (`web/dist`) in Chromium with [Playwright for Java](https://playwright.dev/java/). `BrowserContract` starts the real server like `ServerContract` does and serves `web/dist`. The tests have the JUnit tag `e2e`. `make test` does not run them.
