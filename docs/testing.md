@@ -76,7 +76,7 @@ make test
 
 Without Docker and without `MAYDAY_TEST_DATABASE_URL`, `PostgresStoreContractTest` fails. The contract is not optional.
 
-GitHub Actions runs `./gradlew test` on Temurin 25 for each push to `main` (`.github/workflows/test.yml`). The runner has Docker, so the PostgreSQL and Keycloak containers start there too. When a test fails, the HTML report is attached to the run as `test-reports`. Start a run by hand from the Actions tab with "Run workflow".
+GitHub Actions runs `./gradlew test` on Temurin 25 for each pull request to `main` and each push to `main` (`.github/workflows/test.yml`). A push with many commits gives one run on the last commit. A new commit on a pull request stops the older run of that pull request. The runner has Docker, so the PostgreSQL and Keycloak containers start there too. When a test fails, the HTML report is attached to the run as `test-reports`. Start a run by hand from the Actions tab with "Run workflow".
 
 ## Use-case tests
 
